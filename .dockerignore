@@ -1,0 +1,49 @@
+# ── Build context exclusions for verfix-server image ─────────────────────────
+# Without this, Docker sends node_modules, .next, artifacts, traces (~1GB+)
+# to the build daemon on every build. This cuts context to <5MB.
+
+# Dependencies (installed fresh in each builder stage)
+**/node_modules
+
+# TypeScript compiled output (builders compile from source)
+**/dist
+
+# Next.js build cache and output (dashboard-builder runs next build)
+**/.next
+
+# Worker runtime artifacts — screenshots, HAR, Playwright traces
+# Only exclude the runtime dump folder (workers/artifacts), NOT workers/src/artifacts
+# which contains TypeScript source files (collector.ts, event-tracker.ts)
+workers/artifacts
+
+# Logs
+**/npm-debug.log*
+**/yarn-debug.log*
+**/yarn-error.log*
+
+# Environment files — never bake secrets into the image
+**/.env
+**/.env.local
+**/.env.production
+
+# Version control
+.git
+.gitignore
+
+# Editor / OS noise
+.vscode
+.idea
+**/.DS_Store
+**/Thumbs.db
+
+# SDK (not part of the server image)
+sdk/
+
+# CLI (not part of the server image)
+cli/
+
+# Top-level docs only (don't exclude package READMEs in subdirs)
+PHASES.md
+REPLAY_UI.md
+README.md
+REPLAY_UI.md

@@ -1,0 +1,80 @@
+import { AssertionDefinition, AssertionType, FailureType } from './types';
+
+export type FailureContext = {
+  assertion_type: AssertionType;
+  selector?: string;
+  value?: string;
+  expected?: string;
+  actual?: string;
+  error?: string;
+};
+
+const TIMEOUT_REGEX = /timeout|timed out|waiting for/i;
+
+function isTimeoutError(error?: string): boolean {
+  if (!error) return false;
+  return TIMEOUT_REGEX.test(error);
+}
+
+export function inferFailureType(
+  assertion: AssertionDefinition,
+  result: { passed: boolean; error?: string; details?: Record<string, unknown> },
+): FailureType {
+  if (result.passed) return 'assertion_failed';
+
+  const errorText = result.error || '';
+  if (isTimeoutError(errorText)) return 'timeout';
+
+  switch (assertion.type) {
+    case 'selector_visible':
+      if (/not found|no node|no element/i.test(errorText)) return 'selector_not_found';
+      if (!result.error) return 'selector_not_visible';
+      return 'selector_not_found';
+    case 'text_visible':
+      return 'text_mismatch';
+    case 'url_contains':
+      return 'url_mismatch';
+    case 'title_contains':
+      return 'text_mismatch';
+    case 'no_console_errors':
+      return 'console_error';
+    case 'network_request_success':
+      return 'network_failure';
+    case 'page_loaded':
+      return 'assertion_failed';
+    case 'exploration_result':
+      return 'assertion_failed';
+    default:
+      return 'assertion_failed';
+  }
+}
+
+export function renderFixHint(type: FailureType, context: FailureContext): string {
+  switch (type) {
+    case 'selector_not_found':
+      return context.selector
+        ? `Selector "${context.selector}" not found in DOM. Add a stable data-testid or update the selector.`
+        : 'Selector not found in DOM. Add a stable data-testid or update the selector.';
+    case 'selector_not_visible':
+      return context.selector
+        ? `Selector "${context.selector}" exists but is not visible. Check CSS/conditional rendering or wait for state to settle.`
+        : 'Element exists but is not visible. Check CSS/conditional rendering or wait for state to settle.';
+    case 'text_mismatch':
+      return context.expected && context.actual
+        ? `Expected text "${context.expected}" but saw "${context.actual}". Verify content or wait for data to render.`
+        : 'Expected text did not match. Verify content or wait for data to render.';
+    case 'url_mismatch':
+      return context.expected && context.actual
+        ? `Expected URL to contain "${context.expected}" but got "${context.actual}". Check routing/redirects and wait for navigation.`
+        : 'Navigation did not reach the expected URL. Check routing/redirects and wait for navigation.';
+    case 'console_error':
+      return 'Console errors detected. Fix JS errors or mock failing dependencies.';
+    case 'network_failure':
+      return 'Network request failed or returned non-2xx. Check backend availability or mock API responses.';
+    case 'timeout':
+      return 'Operation timed out. Increase timeout or wait for network/DOM to settle before asserting.';
+    case 'assertion_failed':
+    default:
+      return 'Assertion failed. Verify assertion inputs and app state before retrying.';
+  }
+}

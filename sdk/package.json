@@ -1,0 +1,25 @@
+{
+  "name": "@verifyruntime/sdk",
+  "version": "0.1.0",
+  "description": "VerifyRuntime SDK",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "files": [
+    "dist"
+  ],
+  "keywords": [],
+  "author": "",
+  "license": "MIT",
+  "type": "commonjs",
+  "dependencies": {
+    "ajv": "^8.17.1",
+    "axios": "^1.16.1"
+  },
+  "devDependencies": {
+    "@types/node": "^25.8.0",
+    "typescript": "^6.0.3"
+  }
+}
