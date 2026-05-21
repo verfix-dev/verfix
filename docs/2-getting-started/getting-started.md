@@ -4,37 +4,37 @@ Verfix is a local-first AI verification runtime. This guide will walk you throug
 
 ## 1. Installation
 
-The easiest way to get started is using the Verfix CLI.
+The easiest way to get started is using the Verfix CLI to initialize your project:
 
 ```bash
 npx verfix init
 ```
 
 This command will:
-1. Create a `.verfix/` directory in your project.
-2. Generate a `.env` file for your configuration.
+1. Create a `verify.config.json` file for your configuration.
+2. Generate an `AGENTS.md` file as a single source of truth for humans and AI agents.
 
 ## 2. Starting the Runtime
 
 Verfix runs entirely locally via Docker. Ensure Docker is running, then start the infrastructure:
 
 ```bash
-npx verfix start
+docker run -d --name verfix -p 3001:3001 -p 3000:3000 -e AI_API_KEY=your_key -e AI_MODEL=gpt-4o-mini ghcr.io/verfix-dev/verfix-server:latest
 ```
 
 This spins up the Go API, Next.js Dashboard, Redis, PostgreSQL, and Playwright Workers within a single orchestrated container.
 
 ## 3. Your First Verification
 
-Create a simple verification JSON file (`verify-login.json`):
+Open the `verify.config.json` file generated in step 1 and add a simple configuration:
 
 ```json
 {
-  "url": "https://example.com",
-  "task": "Check that the header contains example domain",
+  "baseUrl": "https://example.com",
   "mode": "strict",
+  "task": "Verify the domain is example.com",
   "assertions": [
-    { "type": "url_contains", "value": "example" }
+    { "type": "text_visible", "value": "Example Domain" }
   ]
 }
 ```
@@ -42,7 +42,12 @@ Create a simple verification JSON file (`verify-login.json`):
 Run it using the CLI:
 
 ```bash
-npx verfix run verify-login.json
+npx verfix run
+```
+
+Alternatively, you can specify the config explicitly:
+```bash
+npx verfix run -c verify.config.json
 ```
 
 ## 4. Access the Dashboard

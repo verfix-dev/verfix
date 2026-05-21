@@ -22,13 +22,24 @@ Clone the repository and install dependencies across the monorepo:
 ```bash
 git clone https://github.com/verfix-dev/verfix.git
 cd verfix
-make install
+npm ci --prefix api
+npm ci --prefix workers
+npm ci --prefix dashboard
+npm ci --prefix cli
+npm ci --prefix sdk
 ```
 
 Start the local development stack:
 
 ```bash
-make dev
+# 1. Start Postgres & Redis
+make up
+
+# 2. In separate terminals, start the services:
+make api
+make worker
+make ui
+make cli
 ```
 
 This will spin up:
@@ -47,7 +58,7 @@ This will spin up:
 
 1. Fork the repository and create a branch (`feat/your-feature` or `fix/issue-description`).
 2. Write tests for your changes.
-3. Ensure all CI checks pass locally (`make test`).
+3. Ensure all CI checks pass locally (if applicable).
 4. Submit a Pull Request with a clear description of the problem solved and the architectural approach.
 5. Require at least one approving review from a core maintainer before merging.
 
