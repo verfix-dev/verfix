@@ -23,7 +23,7 @@ FROM node:20-alpine AS dashboard-builder
 
 WORKDIR /build/dashboard
 COPY dashboard/package*.json ./
-RUN npm ci --ignore-scripts
+RUN npm ci --ignore-scripts || npm ci --ignore-scripts || npm ci --ignore-scripts
 
 COPY dashboard/ ./
 
@@ -44,7 +44,7 @@ FROM node:20-alpine AS workers-builder
 
 WORKDIR /build/workers
 COPY workers/package*.json ./
-RUN npm ci --ignore-scripts
+RUN npm ci --ignore-scripts || npm ci --ignore-scripts || npm ci --ignore-scripts
 
 COPY workers/ ./
 
@@ -96,7 +96,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # ── Workers: production node_modules ─────────────────────────────────────────
 WORKDIR /app/workers
 COPY workers/package*.json ./
-RUN npm ci --ignore-scripts --omit=dev
+RUN npm ci --ignore-scripts --omit=dev || npm ci --ignore-scripts --omit=dev || npm ci --ignore-scripts --omit=dev
 
 # ── Playwright Chromium + all required OS-level browser deps ──────────────────
 # PLAYWRIGHT_BROWSERS_PATH controls where Chromium is stored inside the image.
