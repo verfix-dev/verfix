@@ -50,7 +50,7 @@ COPY workers/ ./
 
 # Patch tsconfig: add outDir + rootDir so tsc compiles src/index.ts → dist/src/index.js.
 # Single-line RUN avoids Docker misreading JS keywords (const, let) as Dockerfile instructions.
-RUN node -e "var fs=require('fs');var c=JSON.parse(fs.readFileSync('tsconfig.json','utf8'));c.compilerOptions=c.compilerOptions||{};c.compilerOptions.outDir='./dist';c.compilerOptions.rootDir='.';c.include=['src/**/*','index.ts'];fs.writeFileSync('tsconfig.json',JSON.stringify(c,null,2));console.log('tsconfig.json: outDir=dist rootDir=. applied');"
+RUN node -e "var fs=require('fs');var c=JSON.parse(fs.readFileSync('tsconfig.json','utf8'));c.compilerOptions=c.compilerOptions||{};c.compilerOptions.outDir='./dist';c.compilerOptions.rootDir='.';c.include=['src/**/*'];fs.writeFileSync('tsconfig.json',JSON.stringify(c,null,2));console.log('tsconfig.json: outDir=dist rootDir=. applied');"
 RUN npx tsc --skipLibCheck
 
 

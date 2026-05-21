@@ -19,6 +19,7 @@ env:
   REGISTRY: ghcr.io
   # Must match your GitHub org: github.com/verfix-dev
   IMAGE_NAME: verfix-dev/verfix-server
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   build-and-push:
