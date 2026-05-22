@@ -566,7 +566,7 @@ export async function runInitWizard(): Promise<void> {
     const modelChoice = await select({
       message: 'AI model to use',
       choices: AI_MODELS,
-      default: 'gpt-5.4',
+      default: 'gpt-5.5',
     });
 
     if (modelChoice === '__custom__') {
