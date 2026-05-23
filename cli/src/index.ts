@@ -39,10 +39,24 @@ if (fs.existsSync(envPath)) {
 
 const program = new Command();
 
+// Load version dynamically from package.json
+let version = '0.1.0';
+try {
+  const pkgPath = path.join(__dirname, '..', 'package.json');
+  if (fs.existsSync(pkgPath)) {
+    const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
+    if (pkg && pkg.version) {
+      version = pkg.version;
+    }
+  }
+} catch (e) {
+  // Fallback to default
+}
+
 program
   .name('verfix')
   .description('AI Verification Runtime CLI — reliable browser verification for AI-generated software')
-  .version('0.1.0');
+  .version(version);
 
 // ─── start command ───────────────────────────────────────────────────────────
 
