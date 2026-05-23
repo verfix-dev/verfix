@@ -9,6 +9,28 @@ PG_DATA=/var/lib/postgresql/15/main
 PG_CTL=/usr/lib/postgresql/15/bin/pg_ctl
 PG_LOG=/tmp/pg.log        # /var/log is root-only; postgres user can write /tmp
 
+# ── Inject host.docker.internal on Linux (bridge mode only) ──────────────────
+# When VERFIX_HOST_NETWORK=1 the container uses --network=host.
+# In that mode localhost IS the host — no injection needed.
+# In bridge mode (Mac/Windows or manual docker run without --network=host):
+#   Docker Desktop injects host.docker.internal automatically.
+#   On plain Linux bridge we inject it ourselves from the routing table.
+if [ "${VERFIX_HOST_NETWORK}" != "1" ]; then
+  if ! grep -q "host.docker.internal" /etc/hosts 2>/dev/null; then
+    HOST_GW=$(ip route show default 2>/dev/null | awk '{print $3}' | head -1)
+    if [ -n "$HOST_GW" ]; then
+      echo "${HOST_GW}  host.docker.internal" >> /etc/hosts
+      echo "✅ host.docker.internal → ${HOST_GW} (injected into /etc/hosts)"
+    else
+      echo "⚠  Could not detect host gateway — host.docker.internal will not resolve" >&2
+    fi
+  else
+    echo "✅ host.docker.internal already present in /etc/hosts"
+  fi
+else
+  echo "✅ Network mode: host — localhost resolves directly to the host (IPv4 + IPv6)"
+fi
+
 # ── Env defaults (all overridable via docker run -e / docker-compose env) ─────
 POSTGRES_USER="${POSTGRES_USER:-verfix}"
 POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-verfix}"
