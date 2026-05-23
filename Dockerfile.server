@@ -88,6 +88,7 @@ LABEL org.opencontainers.image.revision="${BUILD_SHA}" \
 RUN apt-get update && apt-get install -y --no-install-recommends \
         curl \
         tini \
+        iproute2 \
         redis-server \
         postgresql-15 \
         postgresql-client-15 \

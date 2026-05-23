@@ -16,6 +16,38 @@ import { pool } from './browser/pool';
 import { generateFailureSummary } from './ai/summarizer';
 import { runExploration } from './ai/exploration';
 
+// ─── Host URL resolution ──────────────────────────────────────────────────────
+//
+// Two modes depending on how the container was started:
+//
+// ── VERFIX_HOST_NETWORK=1 (Linux, --network=host) ───────────────────────
+// The container shares the host network namespace. 'localhost' inside the
+// container IS the host's localhost — both IPv4 (127.0.0.1) and IPv6 (::1).
+// No URL rewriting needed; apps bound to any loopback interface are reachable.
+//
+// ── Bridge mode (Mac / Windows Docker Desktop) ────────────────────────
+// Docker runs in a VM. 'localhost' resolves to the container itself.
+// We rewrite job URLs to 'host.docker.internal' which points to the host.
+
+const IS_HOST_NETWORK = process.env.VERFIX_HOST_NETWORK === '1';
+const IS_DOCKER =
+  !IS_HOST_NETWORK && (
+    process.env.IN_DOCKER === '1' ||
+    fs.existsSync('/.dockerenv')
+  );
+
+function resolveTargetUrl(rawUrl: string): string {
+  // Host network mode: localhost IS the host, no rewrite needed.
+  if (IS_HOST_NETWORK) return rawUrl;
+  // Not in Docker: running locally, no rewrite needed.
+  if (!IS_DOCKER) return rawUrl;
+  // Bridge mode: rewrite localhost → host.docker.internal.
+  return rawUrl.replace(
+    /\/\/(localhost|127\.0\.0\.1)(:\d+)?/g,
+    '//host.docker.internal$2',
+  );
+}
+
 // ─── Redis ────────────────────────────────────────────────────────────────────
 
 const connection = new Redis({
@@ -138,12 +170,16 @@ const worker = new Worker(
       page.on('crash', () => console.error(`💥 Page crashed in job ${data.id}`));
 
       const timeout = data.timeout || 15000;
+      const targetUrl = resolveTargetUrl(data.url);
+      if (targetUrl !== data.url) {
+        console.log(`   ℹ️  URL rewritten for Docker: ${data.url} → ${targetUrl}`);
+      }
 
-      console.log(`\n🌐 Navigating to ${data.url}...`);
-      await page.goto(data.url, { waitUntil: 'domcontentloaded', timeout });
+      console.log(`\n🌐 Navigating to ${targetUrl}...`);
+      await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout });
       await waitForStableDOM(page, 400, 8000);
-      tracker.pushEvent('navigation', `navigate ${data.url}`, { url: data.url }, { category: 'info' });
-      tracker.pushEvent('dom_change', 'DOM stabilized after navigation', { url: data.url }, { category: 'info' });
+      tracker.pushEvent('navigation', `navigate ${targetUrl}`, { url: targetUrl }, { category: 'info' });
+      tracker.pushEvent('dom_change', 'DOM stabilized after navigation', { url: targetUrl }, { category: 'info' });
 
       let passed = false;
       let assertionResults: any[] = [];

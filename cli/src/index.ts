@@ -14,7 +14,7 @@ import {
 import {
   isDockerInstalled, isDockerRunning, getContainerState,
   startContainer, stopContainer, pullImage, pullImageIfMissing,
-  tailLogs, formatUptime,
+  tailLogs, formatUptime, isHostNetworkMode,
 } from './docker';
 import { waitForHealth, isApiHealthy, isDashboardReachable } from './health';
 
@@ -413,10 +413,13 @@ program
     const assertions = selectedFlow?.assertions ? undefined : config.assertions;
 
     const baseUrl = opts.url || config.baseUrl || config.url;
+    // Rewrite localhost → host.docker.internal so Playwright inside the
+    // container can reach the user's app running on the host machine.
+    const targetUrl = resolveJobUrl(baseUrl);
 
     const payload: any = {
-      url: baseUrl,
-      task: opts.task || config.task || (opts.flow ? `Verify flow ${opts.flow}` : `Verify ${baseUrl}`),
+      url: targetUrl,
+      task: opts.task || config.task || (opts.flow ? `Verify flow ${opts.flow}` : `Verify ${targetUrl}`),
       mode: opts.mode || selectedFlow?.mode || config.mode || 'strict',
       assertions,
       flows: flows.length > 0 ? flows : undefined,
@@ -577,6 +580,31 @@ program
 
 function sleep(ms: number) {
   return new Promise(r => setTimeout(r, ms));
+}
+
+/**
+ * Rewrite localhost / 127.0.0.1 → host.docker.internal in job target URLs.
+ *
+ * On Linux, the CLI starts the container with --network=host, so the
+ * container's localhost IS the host's localhost (IPv4 + IPv6). No rewrite.
+ *
+ * On Mac/Windows, Docker runs in a VM and --network=host doesn't reach the
+ * real host. We rewrite to host.docker.internal which is injected by
+ * Docker Desktop and by our --add-host flag.
+ */
+function resolveJobUrl(url: string): string {
+  if (!url) return url;
+  // Host network mode (Linux): localhost resolves correctly inside container.
+  if (isHostNetworkMode()) return url;
+  // Bridge mode (Mac/Windows): must point Playwright at host.docker.internal.
+  const rewritten = url.replace(
+    /\/\/(localhost|127\.0\.0\.1)(:\d+)?/g,
+    '//host.docker.internal$2',
+  );
+  if (rewritten !== url) {
+    console.log(chalk.gray(`  ℹ  Target URL: ${url} → ${rewritten} (host.docker.internal)`));
+  }
+  return rewritten;
 }
 
 function buildTimelineUrl(base: string, executionId: string): string {

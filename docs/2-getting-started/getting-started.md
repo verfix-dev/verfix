@@ -16,13 +16,27 @@ This command will:
 
 ## 2. Starting the Runtime
 
-Verfix runs entirely locally via Docker. Ensure Docker is running, then start the infrastructure:
+Verfix runs entirely locally via Docker. The easiest way to start it is with
+the CLI — it automatically configures network settings for your platform:
 
 ```bash
-docker run -d --name verfix -p 3001:3001 -p 3000:3000 -e AI_API_KEY=your_key -e AI_MODEL=gpt-4o-mini ghcr.io/verfix-dev/verfix-server:latest
+npx verfix start
 ```
 
-This spins up the Go API, Next.js Dashboard, Redis, PostgreSQL, and Playwright Workers within a single orchestrated container.
+Or run the interactive setup wizard which pulls the image, starts the runtime,
+and walks you through config:
+
+```bash
+npx verfix init
+```
+
+This spins up the Go API, Next.js Dashboard, Redis, PostgreSQL, and Playwright
+Workers within a single orchestrated container.
+
+> **Note:** The runtime needs to reach your app's dev server (e.g.
+> `localhost:3002`). The CLI handles this automatically — you don't need to
+> change how your app starts. See [Docker Networking](../4-guides/docker-networking.md)
+> for the technical details.
 
 ## 3. Your First Verification
 

@@ -3,6 +3,7 @@
 // error handling. No silent error swallowing.
 
 import { execSync, spawnSync } from 'child_process';
+import os from 'os';
 import {
   DOCKER_IMAGE,
   CONTAINER_NAME,
@@ -10,6 +11,19 @@ import {
   DASHBOARD_PORT,
   VOLUMES,
 } from './constants';
+
+/**
+ * On Linux, Docker containers can use --network=host to share the host's
+ * network namespace. This means localhost inside the container resolves to
+ * the same loopback as the host — including IPv6 (::1) bound services.
+ *
+ * Docker Desktop on Mac/Windows runs containers in a Linux VM, so
+ * --network=host only reaches the VM's network, not the actual host.
+ * We use host.docker.internal (bridge mode) there instead.
+ */
+export function isHostNetworkMode(): boolean {
+  return os.platform() === 'linux';
+}
 
 export interface DockerRunOptions {
   aiApiKey?: string;
@@ -99,16 +113,11 @@ export function startContainer(opts?: DockerRunOptions): 'already_running' | 'st
       dockerExec(`stop ${CONTAINER_NAME}`);
       dockerExec(`rm ${CONTAINER_NAME}`);
     } else {
-      // Exists but stopped
-      if (!opts?.aiApiKey && !opts?.aiModel) {
-        // No env vars to inject — just start it
-        const result = dockerExec(`start ${CONTAINER_NAME}`);
-        if (result.status !== 0) {
-          throw new Error(`Failed to start existing container: ${result.stderr?.toString()}`);
-        }
-        return 'started';
-      }
-      // Env vars provided — remove and recreate so they are injected properly
+      // Exists but stopped — always remove and recreate.
+      // Reusing a stopped container with `docker start` would keep whatever
+      // network args it was created with (possibly wrong platform, old network
+      // mode, or missing VERFIX_HOST_NETWORK). Recreating is always safe and
+      // ensures --network=host (Linux) vs bridge (Mac/Windows) is correct.
       dockerExec(`rm ${CONTAINER_NAME}`);
     }
   }
@@ -123,11 +132,34 @@ export function startContainer(opts?: DockerRunOptions): 'already_running' | 'st
   if (aiKey) envArgs.push('-e', `AI_API_KEY=${aiKey}`);
   if (aiModel) envArgs.push('-e', `AI_MODEL=${aiModel}`);
 
+  const hostNetwork = isHostNetworkMode();
+
+  // Signal to workers inside the container whether they are on host network.
+  // On host network: localhost == host's localhost, no URL rewriting needed.
+  // On bridge network: must rewrite localhost → host.docker.internal.
+  envArgs.push('-e', `VERFIX_HOST_NETWORK=${hostNetwork ? '1' : '0'}`);
+
+  const networkArgs: string[] = hostNetwork
+    ? [
+        // ── Linux: share host network namespace ────────────────────────────
+        // The container's localhost IS the host's localhost (IPv4 + IPv6).
+        // No port mapping needed — services are directly on host ports.
+        // No host.docker.internal needed — localhost works natively.
+        '--network=host',
+      ]
+    : [
+        // ── Mac / Windows Docker Desktop: bridge mode ──────────────────────
+        // Docker runs in a VM so localhost doesn't reach the real host.
+        // host.docker.internal is the stable alias that points to the host.
+        '--add-host=host.docker.internal:host-gateway',
+        '-p', `${API_PORT}:${API_PORT}`,
+        '-p', `${DASHBOARD_PORT}:${DASHBOARD_PORT}`,
+      ];
+
   const args = [
     'run', '-d',
     '--name', CONTAINER_NAME,
-    '-p', `${API_PORT}:${API_PORT}`,
-    '-p', `${DASHBOARD_PORT}:${DASHBOARD_PORT}`,
+    ...networkArgs,
     '-v', VOLUMES.data,
     '-v', VOLUMES.artifacts,
     ...envArgs,
