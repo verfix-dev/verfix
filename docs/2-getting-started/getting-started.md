@@ -11,7 +11,7 @@ npx verfix init
 ```
 
 This command will:
-1. Create a `verify.config.json` file for your configuration.
+1. Create a `verfix.config.json` file for your configuration.
 2. Generate an `AGENTS.md` file as a single source of truth for humans and AI agents.
 
 ## 2. Starting the Runtime
@@ -26,7 +26,7 @@ This spins up the Go API, Next.js Dashboard, Redis, PostgreSQL, and Playwright W
 
 ## 3. Your First Verification
 
-Open the `verify.config.json` file generated in step 1 and add a simple configuration:
+Open the `verfix.config.json` file generated in step 1 and add a simple configuration:
 
 ```json
 {
@@ -47,7 +47,7 @@ npx verfix run
 
 Alternatively, you can specify the config explicitly:
 ```bash
-npx verfix run -c verify.config.json
+npx verfix run -c verfix.config.json
 ```
 
 ## 4. Access the Dashboard

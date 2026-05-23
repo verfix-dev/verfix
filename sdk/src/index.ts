@@ -54,7 +54,7 @@ export type VerifyOptions = {
   retries?: number;
 };
 
-const DEFAULT_CONFIG = 'verify.config.json';
+const DEFAULT_CONFIG = 'verfix.config.json';
 
 export async function verify(options: VerifyOptions): Promise<VerifyResult> {
   const apiBase = options.apiBase || process.env.VERIFY_API || 'http://localhost:3001';
@@ -178,7 +178,7 @@ function normalizeFlows(flows: any[]): any[] {
 }
 
 function validateConfigSchema(config: VerifyConfig): void {
-  const schemaPath = path.resolve(process.cwd(), 'verify.config.schema.json');
+  const schemaPath = path.resolve(process.cwd(), 'verfix.config.schema.json');
   if (!fs.existsSync(schemaPath)) return;
 
   const schema = JSON.parse(fs.readFileSync(schemaPath, 'utf-8'));

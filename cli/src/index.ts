@@ -7,10 +7,35 @@ import axios from 'axios';
 import Ajv from 'ajv';
 import fs from 'fs';
 import path from 'path';
+import {
+  API_PORT, DASHBOARD_PORT, API_BASE, DASHBOARD_BASE,
+  DOCKER_IMAGE, CONTAINER_NAME, DEFAULT_CONFIG, HEALTH_ENDPOINT,
+} from './constants';
+import {
+  isDockerInstalled, isDockerRunning, getContainerState,
+  startContainer, stopContainer, pullImage, pullImageIfMissing,
+  tailLogs, formatUptime,
+} from './docker';
+import { waitForHealth, isApiHealthy, isDashboardReachable } from './health';
 
-const API_BASE = process.env.VERIFY_API || 'http://localhost:3001';
-const DASHBOARD_BASE = process.env.VERIFY_DASHBOARD || 'http://localhost:3000';
-const DEFAULT_CONFIG = 'verify.config.json';
+// ─── Load Environment Variables ────────────────────────────────────────────────
+const envPath = path.join(process.cwd(), '.verfix', '.env');
+if (fs.existsSync(envPath)) {
+  const envContent = fs.readFileSync(envPath, 'utf-8');
+  for (const line of envContent.split('\n')) {
+    const trimmed = line.trim();
+    if (trimmed && !trimmed.startsWith('#')) {
+      const idx = trimmed.indexOf('=');
+      if (idx !== -1) {
+        const key = trimmed.slice(0, idx).trim();
+        const value = trimmed.slice(idx + 1).trim();
+        if (key && !process.env[key]) {
+          process.env[key] = value;
+        }
+      }
+    }
+  }
+}
 
 const program = new Command();
 
@@ -19,33 +44,332 @@ program
   .description('AI Verification Runtime CLI — reliable browser verification for AI-generated software')
   .version('0.1.0');
 
-// ─── init command ────────────────────────────────────────────────────────────
+// ─── start command ───────────────────────────────────────────────────────────
 
 program
-  .command('init')
-  .description('Create verify.config.json and AGENTS.md in the current directory')
-  .option('-f, --force', 'Overwrite existing files')
-  .action(async (opts) => {
-    const cwd = process.cwd();
-    const configPath = path.join(cwd, DEFAULT_CONFIG);
-    const agentsPath = path.join(cwd, 'AGENTS.md');
+  .command('start')
+  .description('Start the Verfix runtime container')
+  .action(async () => {
+    if (!isDockerInstalled()) {
+      console.error(chalk.red('✗ Docker is not installed. Install Docker from https://docker.com'));
+      process.exit(1);
+    }
+    if (!isDockerRunning()) {
+      console.error(chalk.red('✗ Docker daemon is not running. Start Docker Desktop first.'));
+      process.exit(1);
+    }
 
-    const shouldWriteConfig = opts.force || !fs.existsSync(configPath);
-    const shouldWriteAgents = opts.force || !fs.existsSync(agentsPath);
+    const spinner = ora('Starting Verfix runtime...').start();
 
-    if (!shouldWriteConfig && !shouldWriteAgents) {
-      console.log(chalk.gray('Nothing to do. Files already exist. Use --force to overwrite.'));
+    try {
+      pullImageIfMissing();
+      const result = startContainer();
+
+      if (result === 'already_running') {
+        spinner.succeed('Verfix runtime is already running');
+        console.log(`    API:       ${chalk.cyan(`http://localhost:${API_PORT}`)}`);
+        console.log(`    Dashboard: ${chalk.cyan(`http://localhost:${DASHBOARD_PORT}`)}`);
+        return;
+      }
+
+      spinner.text = 'Waiting for health check...';
+      const healthy = await waitForHealth();
+      if (!healthy) {
+        spinner.fail('Runtime started but health check failed after 30s');
+        process.exit(1);
+      }
+
+      spinner.succeed('Verfix runtime is running');
+      console.log(`    API:       ${chalk.cyan(`http://localhost:${API_PORT}`)}`);
+      console.log(`    Dashboard: ${chalk.cyan(`http://localhost:${DASHBOARD_PORT}`)}`);
+    } catch (e: any) {
+      spinner.fail(e.message);
+      process.exit(1);
+    }
+  });
+
+// ─── stop command ────────────────────────────────────────────────────────────
+
+program
+  .command('stop')
+  .description('Stop the Verfix runtime container')
+  .action(() => {
+    try {
+      const stopped = stopContainer();
+      if (stopped) {
+        console.log(chalk.green('✓ Runtime stopped'));
+      } else {
+        console.log(chalk.gray('Runtime is not running'));
+      }
+    } catch (e: any) {
+      console.log(chalk.gray('Runtime is not running'));
+    }
+  });
+
+// ─── status command (runtime) ────────────────────────────────────────────────
+
+program
+  .command('status')
+  .description('Check runtime, API, and dashboard status')
+  .argument('[executionId]', 'Optional execution ID to check')
+  .option('-o, --output <format>', 'Output format: pretty | json', 'pretty')
+  .action(async (executionId, opts) => {
+    // If executionId is provided, use the legacy execution status check
+    if (executionId) {
+      try {
+        const res = await axios.get(`${API_BASE}/api/v1/executions/${executionId}`);
+        if (opts.output === 'json') {
+          console.log(JSON.stringify(res.data, null, 2));
+        } else {
+          const d = res.data;
+          console.log('');
+          console.log(`  ${chalk.bold('Execution:')} ${d.executionId}`);
+          console.log(`  ${chalk.bold('Status:')}    ${d.status === 'completed' ? (d.passed ? chalk.green(d.status) : chalk.red(d.status)) : chalk.yellow(d.status)}`);
+          if (d.duration_ms) console.log(`  ${chalk.bold('Duration:')} ${d.duration_ms}ms`);
+          console.log('');
+        }
+      } catch (e: any) {
+        console.error(chalk.red('Error: ' + e.message));
+        process.exit(1);
+      }
       return;
     }
 
-    if (shouldWriteConfig) {
-      fs.writeFileSync(configPath, defaultConfigTemplate(), 'utf-8');
-      console.log(chalk.green(`Created ${DEFAULT_CONFIG}`));
+    // Runtime status
+    const state = getContainerState();
+    const runtimeStatus = state ? state.status : 'not found';
+    const apiHealthy = await isApiHealthy();
+    const dashReachable = await isDashboardReachable();
+
+    console.log('');
+    console.log(`  ${chalk.bold('Runtime:')}    ${runtimeStatus === 'running' ? chalk.green(runtimeStatus) : chalk.red(runtimeStatus)}`);
+    console.log(`  ${chalk.bold('API:')}        ${apiHealthy ? chalk.green('healthy') : chalk.red('unreachable')}   (http://localhost:${API_PORT})`);
+    console.log(`  ${chalk.bold('Dashboard:')}  ${dashReachable ? chalk.green('healthy') : chalk.red('unreachable')}   (http://localhost:${DASHBOARD_PORT})`);
+    if (state?.image) {
+      console.log(`  ${chalk.bold('Image:')}      ${state.image}`);
+    }
+    if (state?.startedAt && runtimeStatus === 'running') {
+      console.log(`  ${chalk.bold('Uptime:')}     ${formatUptime(state.startedAt)}`);
+    }
+    console.log('');
+  });
+
+// ─── logs command ────────────────────────────────────────────────────────────
+
+program
+  .command('logs')
+  .description('Tail Verfix runtime container logs')
+  .option('--tail <n>', 'Number of lines to show', '50')
+  .action((opts) => {
+    if (!getContainerState()) {
+      console.error(chalk.red(`Container '${CONTAINER_NAME}' is not running. Start it with 'verfix start'.`));
+      process.exit(1);
+    }
+    try {
+      tailLogs(parseInt(opts.tail) || 50);
+    } catch (e: any) {
+      console.error(chalk.red(e.message));
+      process.exit(1);
+    }
+  });
+
+// ─── update command ──────────────────────────────────────────────────────────
+
+program
+  .command('update')
+  .description('Pull latest image and restart the runtime')
+  .action(async () => {
+    if (!isDockerInstalled()) {
+      console.error(chalk.red('✗ Docker is not installed.'));
+      process.exit(1);
+    }
+    if (!isDockerRunning()) {
+      console.error(chalk.red('✗ Docker daemon is not running.'));
+      process.exit(1);
     }
 
-    if (shouldWriteAgents) {
-      fs.writeFileSync(agentsPath, defaultAgentsTemplate(), 'utf-8');
-      console.log(chalk.green('Created AGENTS.md'));
+    const pullSpinner = ora('Pulling latest image...').start();
+    try {
+      pullImage();
+      pullSpinner.succeed('Image updated');
+    } catch (e: any) {
+      pullSpinner.fail(e.message);
+      process.exit(1);
+    }
+
+    // Stop existing container if running
+    stopContainer();
+
+    const startSpinner = ora('Starting runtime...').start();
+    try {
+      startContainer();
+      startSpinner.text = 'Waiting for health check...';
+      const healthy = await waitForHealth();
+      if (!healthy) {
+        startSpinner.fail('Health check failed after 30s');
+        process.exit(1);
+      }
+      startSpinner.succeed('Verfix runtime is running (updated)');
+      console.log(`    API:       ${chalk.cyan(`http://localhost:${API_PORT}`)}`);
+      console.log(`    Dashboard: ${chalk.cyan(`http://localhost:${DASHBOARD_PORT}`)}`);
+    } catch (e: any) {
+      startSpinner.fail(e.message);
+      process.exit(1);
+    }
+  });
+
+// ─── doctor command ──────────────────────────────────────────────────────────
+
+program
+  .command('doctor')
+  .description('Run diagnostic checks on the Verfix setup')
+  .action(async () => {
+    console.log('');
+    console.log(chalk.bold('  Verfix Doctor'));
+    console.log(chalk.gray('  ─────────────────────────────'));
+    console.log('');
+
+    let failures = 0;
+
+    // 1. Docker installed
+    if (isDockerInstalled()) {
+      console.log(chalk.green('  ✓ Docker installed'));
+    } else {
+      console.log(chalk.red('  ✗ Docker not installed'));
+      console.log(chalk.gray('    Install from https://docker.com'));
+      failures++;
+    }
+
+    // 2. Docker daemon running
+    if (isDockerRunning()) {
+      console.log(chalk.green('  ✓ Docker daemon running'));
+    } else {
+      console.log(chalk.red('  ✗ Docker daemon not running'));
+      console.log(chalk.gray('    Start Docker Desktop'));
+      failures++;
+    }
+
+    // 3. Container running
+    const state = getContainerState();
+    if (state?.status === 'running') {
+      console.log(chalk.green('  ✓ Container running'));
+    } else {
+      console.log(chalk.red('  ✗ Container not running'));
+      console.log(chalk.gray('    Run: verfix start'));
+      failures++;
+    }
+
+    // 4. API healthy
+    if (await isApiHealthy()) {
+      console.log(chalk.green('  ✓ API healthy'));
+    } else {
+      console.log(chalk.red('  ✗ API unreachable'));
+      console.log(chalk.gray(`    Check: curl http://localhost:${API_PORT}${HEALTH_ENDPOINT}`));
+      failures++;
+    }
+
+    // 5. Dashboard reachable
+    if (await isDashboardReachable()) {
+      console.log(chalk.green('  ✓ Dashboard reachable'));
+    } else {
+      console.log(chalk.red('  ✗ Dashboard unreachable'));
+      console.log(chalk.gray(`    Check: curl http://localhost:${DASHBOARD_PORT}`));
+      failures++;
+    }
+
+    // 6. verfix.config.json exists
+    const configPath = path.resolve(process.cwd(), DEFAULT_CONFIG);
+    if (fs.existsSync(configPath)) {
+      console.log(chalk.green(`  ✓ ${DEFAULT_CONFIG} found`));
+    } else {
+      console.log(chalk.red(`  ✗ ${DEFAULT_CONFIG} not found`));
+      console.log(chalk.gray('    Run: verfix init'));
+      failures++;
+    }
+
+    // 7. AGENTS.md exists
+    const agentsPath = path.resolve(process.cwd(), 'AGENTS.md');
+    if (fs.existsSync(agentsPath)) {
+      console.log(chalk.green('  ✓ AGENTS.md found'));
+    } else {
+      console.log(chalk.red('  ✗ AGENTS.md not found'));
+      console.log(chalk.gray('    Run: verfix init'));
+      failures++;
+    }
+
+    console.log('');
+    if (failures === 0) {
+      console.log(chalk.bold.green('  All checks passed!'));
+    } else {
+      console.log(chalk.bold.red(`  ${failures} check(s) failed`));
+    }
+    console.log('');
+    process.exit(failures);
+  });
+
+// ─── init command (interactive wizard) ───────────────────────────────────────
+
+program
+  .command('init')
+  .description('Interactive setup wizard — configure runtime, flows, and AGENTS.md')
+  .option('-f, --force', 'Overwrite existing files without prompting')
+  .action(async () => {
+    // Dynamic import to keep the main entry lean
+    const { runInitWizard } = await import('./init-wizard');
+    await runInitWizard();
+  });
+
+// ─── flows command ───────────────────────────────────────────────────────────
+
+program
+  .command('flows')
+  .description('List all flows defined in verfix.config.json')
+  .option('-c, --config <file>', 'Path to config file')
+  .option('-o, --output <format>', 'Output format: pretty | json', 'pretty')
+  .action((opts) => {
+    const configPath = opts.config
+      ? path.resolve(opts.config)
+      : path.resolve(process.cwd(), DEFAULT_CONFIG);
+
+    if (!fs.existsSync(configPath)) {
+      console.error(chalk.red(`Config file not found: ${configPath}`));
+      console.error(chalk.gray('Run: verfix init'));
+      process.exit(1);
+    }
+
+    const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+    const flows = config.flows || [];
+
+    if (flows.length === 0) {
+      console.log(chalk.gray('  No flows configured. Edit verfix.config.json to add flows.'));
+      return;
+    }
+
+    if (opts.output === 'json') {
+      const list = flows.map((f: any) => ({
+        id: f.id || f.name,
+        steps: (f.steps || []).length,
+        assertions: (f.assertions || []).length,
+      }));
+      console.log(JSON.stringify({ flows: list, total: list.length }, null, 2));
+      return;
+    }
+
+    console.log('');
+    console.log(chalk.bold(`  Flows in ${DEFAULT_CONFIG} (${flows.length}):`));
+    console.log('');
+    for (const f of flows) {
+      const id = f.id || f.name || '(unnamed)';
+      const stepCount = (f.steps || []).length;
+      const assertCount = (f.assertions || []).length;
+      const stepDesc = (f.steps || []).map((s: any) => s.action).join(' → ');
+      console.log(`  ${chalk.cyan('▸')} ${chalk.bold(id)}`);
+      console.log(`    ${chalk.gray(`${stepCount} step(s), ${assertCount} assertion(s)`)}`);
+      if (stepDesc) {
+        console.log(`    ${chalk.gray(stepDesc)}`);
+      }
+      console.log(`    ${chalk.gray('Run:')} verfix run --flow ${id} --output json`);
+      console.log('');
     }
   });
 
@@ -56,7 +380,7 @@ program
   .description('Run a verification job')
   .option('-u, --url <url>', 'Target URL to verify')
   .option('-t, --task <task>', 'Task description')
-  .option('-c, --config <file>', 'Path to verify.config.json config file')
+  .option('-c, --config <file>', 'Path to verfix.config.json config file')
   .option('-f, --flow <id>', 'Flow id or name to run')
   .option('-m, --mode <mode>', 'Verification mode: strict | assisted | smoke | exploratory')
   .option('-o, --output <format>', 'Output format: pretty | json', 'json')
@@ -93,7 +417,7 @@ program
     const payload: any = {
       url: baseUrl,
       task: opts.task || config.task || (opts.flow ? `Verify flow ${opts.flow}` : `Verify ${baseUrl}`),
-      mode: opts.mode || config.mode || 'strict',
+      mode: opts.mode || selectedFlow?.mode || config.mode || 'strict',
       assertions,
       flows: flows.length > 0 ? flows : undefined,
       selectors: config.selectors,
@@ -224,31 +548,6 @@ program
     process.exit(result.passed ? 0 : 1);
   });
 
-// ─── status command ───────────────────────────────────────────────────────────
-
-program
-  .command('status <executionId>')
-  .description('Get the status of a running or completed verification job')
-  .option('-o, --output <format>', 'Output format: pretty | json', 'pretty')
-  .action(async (executionId, opts) => {
-    try {
-      const res = await axios.get(`${API_BASE}/api/v1/executions/${executionId}`);
-      if (opts.output === 'json') {
-        console.log(JSON.stringify(res.data, null, 2));
-      } else {
-        const d = res.data;
-        console.log('');
-        console.log(`  ${chalk.bold('Execution:')} ${d.executionId}`);
-        console.log(`  ${chalk.bold('Status:')}    ${d.status === 'completed' ? (d.passed ? chalk.green(d.status) : chalk.red(d.status)) : chalk.yellow(d.status)}`);
-        if (d.duration_ms) console.log(`  ${chalk.bold('Duration:')} ${d.duration_ms}ms`);
-        console.log('');
-      }
-    } catch (e: any) {
-      console.error(chalk.red('Error: ' + e.message));
-      process.exit(1);
-    }
-  });
-
 // ─── list command ─────────────────────────────────────────────────────────────
 
 program
@@ -273,6 +572,8 @@ program
       console.error(chalk.red('Error: ' + e.message));
     }
   });
+
+// ─── Helper functions ────────────────────────────────────────────────────────
 
 function sleep(ms: number) {
   return new Promise(r => setTimeout(r, ms));
@@ -315,7 +616,7 @@ function normalizeFlows(flows: any[]): any[] {
 }
 
 function validateConfigSchema(config: any, configPath: string): void {
-  const schemaPath = path.resolve(process.cwd(), 'verify.config.schema.json');
+  const schemaPath = path.resolve(process.cwd(), 'verfix.config.schema.json');
   if (!fs.existsSync(schemaPath)) return;
 
   const schema = JSON.parse(fs.readFileSync(schemaPath, 'utf-8'));
@@ -366,110 +667,6 @@ function renderFixHint(type: string): string {
     default:
       return 'Assertion failed. Verify assertion inputs and app state before retrying.';
   }
-}
-
-function defaultConfigTemplate(): string {
-  return JSON.stringify({
-    baseUrl: 'http://localhost:3000',
-    mode: 'assisted',
-    flows: [
-      {
-        id: 'login',
-        steps: [
-          { action: 'navigate', url: '/login' },
-          { action: 'type', selector: '[data-testid=email]', value: 'test@example.com' },
-          { action: 'click', selector: '[data-testid=submit]' },
-        ],
-        assertions: [
-          { type: 'url_contains', value: '/dashboard' },
-          { type: 'no_console_errors' },
-        ],
-      },
-    ],
-  }, null, 2) + '\n';
-}
-
-function defaultAgentsTemplate(): string {
-  return [
-    '# VerifyRuntime agent guide',
-    '',
-    'This repo is the integration surface between agents (JSON contracts) and humans (timeline UI). The single source of truth is a root config file.',
-    '',
-    '## Config file (required)',
-    '',
-    'Create verify.config.json at the repo root. Agents and humans both edit this file.',
-    'Schema: see verify.config.schema.json for the single source of truth.',
-    '',
-    'If a run fails, update the flow or assertions in verify.config.json and re-run.',
-    '',
-    '## Modes (when to use)',
-    '',
-    '- strict: deterministic CI, stable selectors',
-    '- assisted: selectors are unstable or still evolving',
-    '- smoke: quick availability checks',
-    '- exploratory: AI-driven discovery when no flow exists yet (requires a task description)',
-    '',
-    '## Exploratory mode (what to send)',
-    '',
-    '- Provide only: baseUrl + task + mode: "exploratory"',
-    '- Do not include flows or assertions; the AI navigates based on the task description',
-    '',
-    'Example:',
-    '',
-    '```json',
-    '{',
-    '  "baseUrl": "http://localhost:3000",',
-    '  "mode": "assisted",',
-    '  "flows": [',
-    '    {',
-    '      "id": "login",',
-    '      "steps": [',
-    '        { "action": "navigate", "url": "/login" },',
-    '        { "action": "type", "selector": "[data-testid=email]", "value": "test@example.com" },',
-    '        { "action": "click", "selector": "[data-testid=submit]" }',
-    '      ],',
-    '      "assertions": [',
-    '        { "type": "url_contains", "value": "/dashboard" },',
-    '        { "type": "no_console_errors" }',
-    '      ]',
-    '    }',
-    '  ]',
-    '}',
-    '```',
-    '',
-    'Notes:',
-    '- Flow-level `assertions` run after each flow. Top-level `assertions` run after all flows.',
-    '- If neither flow-level nor top-level assertions are provided, defaults are injected.',
-    '- `navigate` steps accept `url` (preferred) or `value`.',
-    '',
-    '## Mode-specific flow examples',
-    '',
-    'Strict:',
-    '```json',
-    '{ "id": "login", "steps": [ { "action": "navigate", "url": "/login" } ], "assertions": [ { "type": "selector_visible", "selector": "#success" } ] }',
-    '```',
-    'Assisted:',
-    '```json',
-    '{ "id": "checkout", "steps": [ { "action": "click", "selector": "[data-testid=checkout]" } ], "assertions": [ { "type": "text_visible", "value": "Order placed" } ] }',
-    '```',
-    'Smoke:',
-    '```json',
-    '{ "id": "home", "steps": [ { "action": "navigate", "url": "/" } ], "assertions": [ { "type": "page_loaded" } ] }',
-    '```',
-    'Exploratory:',
-    '```json',
-    '{ "baseUrl": "http://localhost:3000", "mode": "exploratory", "task": "Find the login form and sign in" }',
-    '```',
-    '',
-    '## Agent retry loop',
-    '',
-    '1. Edit code',
-    '2. `verify({ flow: "login" })`',
-    '3. If `passed` continue',
-    '4. If `!passed`, read `failures[0].fix_hint`, patch, retry',
-    '5. After N attempts, open `timeline_url` for human review',
-    '',
-  ].join('\n');
 }
 
 program.parse(process.argv);
