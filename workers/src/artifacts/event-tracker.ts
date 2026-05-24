@@ -3,6 +3,8 @@ import { ExecutionEvent, ExecutionEventType } from '../assertions/types';
 import * as path from 'path';
 import * as crypto from 'crypto';
 import * as fs from 'fs';
+import pixelmatch from 'pixelmatch';
+import { PNG } from 'pngjs';
 
 export class EventTracker {
   private events: ExecutionEvent[] = [];
@@ -10,6 +12,8 @@ export class EventTracker {
   private artifactsDir: string;
   private execDir: string;
   private mode: string;
+  private lastScreenshotBuffer: Buffer | null = null;
+  private lastScreenshotPath: string | null = null;
 
   constructor(executionId: string, artifactsDir: string, mode: string) {
     this.executionId = executionId;
@@ -71,8 +75,16 @@ export class EventTracker {
     const domPath = path.join(this.execDir, domName);
 
     try {
-      await page.screenshot({ path: screenshotPath, type: 'png', scale: 'css' });
-      targetEvent.screenshot = screenshotPath;
+      const buffer = await page.screenshot({ type: 'png', scale: 'css' });
+      const shouldSave = await this.shouldCaptureScreenshot(buffer, reason);
+      if (shouldSave) {
+        fs.writeFileSync(screenshotPath, buffer);
+        targetEvent.screenshot = screenshotPath;
+        this.lastScreenshotBuffer = buffer;
+        this.lastScreenshotPath = screenshotPath;
+      } else if (this.lastScreenshotPath) {
+        targetEvent.screenshot = this.lastScreenshotPath;
+      }
     } catch (e: any) {
       console.warn(`[EventTracker] Signal screenshot failed: ${e.message}`);
     }
@@ -117,8 +129,16 @@ export class EventTracker {
     const domPath = path.join(this.execDir, domName);
 
     try {
-      await page.screenshot({ path: screenshotPath, type: 'png', scale: 'css' });
-      targetEvent.screenshot = screenshotPath;
+      const buffer = await page.screenshot({ type: 'png', scale: 'css' });
+      const shouldSave = await this.shouldCaptureScreenshot(buffer, reason);
+      if (shouldSave) {
+        fs.writeFileSync(screenshotPath, buffer);
+        targetEvent.screenshot = screenshotPath;
+        this.lastScreenshotBuffer = buffer;
+        this.lastScreenshotPath = screenshotPath;
+      } else if (this.lastScreenshotPath) {
+        targetEvent.screenshot = this.lastScreenshotPath;
+      }
     } catch (e: any) {
       console.warn(`[EventTracker] Sync screenshot failed: ${e.message}`);
     }
@@ -129,6 +149,28 @@ export class EventTracker {
       targetEvent.dom_snapshot = domPath;
     } catch (e: any) {
       console.warn(`[EventTracker] DOM snapshot failed: ${e.message}`);
+    }
+  }
+
+  private async shouldCaptureScreenshot(newScreenshot: Buffer, reason: string): Promise<boolean> {
+    if (!this.lastScreenshotBuffer) return true;
+    if (reason === 'failure') return true;
+
+    try {
+      const img1 = PNG.sync.read(this.lastScreenshotBuffer);
+      const img2 = PNG.sync.read(newScreenshot);
+      const { width, height } = img1;
+      
+      if (width !== img2.width || height !== img2.height) return true;
+
+      const diffPixels = pixelmatch(img1.data, img2.data, null as any, width, height, { threshold: 0.1 });
+      const diffRatio = diffPixels / (width * height);
+      
+      // If less than 2% changed, skip
+      return diffRatio > 0.02;
+    } catch (e) {
+      // On any comparison error, default to capturing
+      return true;
     }
   }
 

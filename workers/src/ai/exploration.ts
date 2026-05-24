@@ -159,8 +159,9 @@ ${domSnippet}
 
 Decide what to do next to achieve the goal. 
 - Avoid repeating failed actions or actions that resulted in "(State changed: false)". If an action had no effect on the page, you MUST try a completely different approach, a different selector, or a different action.
-- Evaluate the Current Page Title, URL, and Page State. If the goal has been successfully accomplished (or verified), output "done". Do not perform unnecessary actions if the current state already satisfies the user's task.
-- If the task requires you to verify something and it is visibly true based on the DOM, URL, or Title, output "done". If it is demonstrably false and cannot be fixed by navigation, output "fail".
+- Evaluate if the goal has been accomplished. IMPORTANT: If the goal has multiple parts (e.g. "open X and Y"), checking X successfully in a past step remains valid even when you navigate to check Y. You do NOT need to see all parts simultaneously in the current state to output "done". Look at the Action History to infer if previous parts of the goal were already satisfied.
+- If the entire goal (or all parts of it) is verified across the current state AND the action history, output "done". Do not perform unnecessary actions.
+- If any part of the goal is demonstrably false and cannot be fixed by navigation, output "fail".
 - Use the "navigate" action ONLY if you need to go to a completely different URL to proceed.
 - Use the "press" action if you need to press a keyboard key (like Enter after typing into a search box).
 
