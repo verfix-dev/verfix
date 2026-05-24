@@ -30,14 +30,14 @@ export async function executeFlow(page: Page, flow: Flow, job: JobPayload, track
       await executeStep(page, { ...step, value: stepValue }, job.selectors || {}, job.timeout || 10000);
       if (tracker) {
         const eventType = step.action === 'navigate' ? 'navigation' : 'action';
-        tracker.pushEvent(
+        const event = tracker.pushEvent(
           eventType,
           `${step.action} ${stepValue || ''}`.trim(),
           { flow: flow.name, action: step.action, target: step.target, value: stepValue },
           { category: 'info' },
         );
+        await tracker.captureStateSync(page, event.id, 'step');
       }
-      // Success steps are summarized in artifacts; no replay event needed.
     } catch (err: any) {
       if (tracker) {
         const event = tracker.pushEvent('retry', `❌ ${stepDesc} failed: ${err.message}`, { flow: flow.name, action: step.action, error: err.message }, { category: 'signal', capture_reason: 'retry', signal_flags: ['retry'] });

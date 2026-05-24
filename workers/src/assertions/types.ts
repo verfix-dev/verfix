@@ -99,11 +99,12 @@ export interface ExecutionEvent {
   message: string;
   metadata?: Record<string, unknown>;
   category?: 'signal' | 'summary' | 'info';
-  capture_reason?: 'failure' | 'retry';
+  capture_reason?: 'failure' | 'retry' | 'step';
   signal_flags?: string[];
   summary?: string;
   screenshot?: string;
   dom_snippet?: string;
+  dom_snapshot?: string;
 }
 
 export interface ExecutionResult {

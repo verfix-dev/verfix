@@ -1,10 +1,4 @@
-/**
- * Exploration Runtime — Phase 4C.
- * A fundamentally different execution path optimizing for discovery and flexibility.
- * Not meant for production CI/CD; built for ad-hoc QA and AI-agent workflows.
- */
-
-import { Page, Dialog, Locator } from 'playwright';
+import { Page, Dialog } from 'playwright';
 import { chatCompletion, isAIEnabled } from './provider';
 import { resolveWithHealing } from './self-healing';
 import { waitForStableDOM } from '../reliability/retry';
@@ -21,6 +15,18 @@ interface ActionHistory {
   error_msg?: string;
   dom_changed: boolean;
 }
+
+interface AIResponse {
+  thought: string;
+  action: 'click' | 'type' | 'press' | 'navigate' | 'done' | 'fail';
+  targetSelector?: string;
+  value?: string;
+}
+
+const MAX_STEPS = 12;
+const ACTION_TIMEOUT = 5000;
+const NAV_TIMEOUT = 10000;
+const DOM_SETTLE_MS = 500;
 
 export async function runExploration(
   page: Page,
@@ -42,16 +48,13 @@ export async function runExploration(
 
   log.push(`Started exploratory mode for task: "${task}"`);
 
-  // Handle unexpected dialogs automatically to prevent hanging
   const dialogHandler = async (dialog: Dialog) => {
     log.push(`[System] Auto-dismissed dialog: "${dialog.message()}"`);
     await dialog.dismiss();
   };
   page.on('dialog', dialogHandler);
 
-  const MAX_STEPS = 12;
   let stepCount = 0;
-  
   let previousDomHash = '';
   let previousUrl = '';
 
@@ -61,23 +64,86 @@ export async function runExploration(
     log.push(`\n--- Step ${stepCount} ---`);
 
     try {
-      const domSnippet = await getCompactDOM(page);
-      const currentUrl = page.url();
-      const pageTitle = await page.title();
-      
-      const currentDomHash = crypto.createHash('md5').update(domSnippet).digest('hex');
-      const stateChanged = currentDomHash !== previousDomHash || currentUrl !== previousUrl;
+      const { currentUrl, pageTitle, domSnippet, currentDomHash, stateChanged } = await capturePageState(page, previousDomHash, previousUrl);
 
-      // If we took an action in the previous step but the state didn't change at all, flag it.
       if (actionHistory.length > 0) {
         actionHistory[actionHistory.length - 1].dom_changed = stateChanged;
       }
 
-      const historyText = actionHistory.length > 0 
-        ? actionHistory.map(h => `Step ${h.step}: [${h.result}] ${h.action} ${h.target || ''} ${h.value ? `"${h.value}"` : ''} ${h.error_msg ? `(Error: ${h.error_msg})` : ''} ${h.result === 'success' ? `(State changed: ${h.dom_changed})` : ''}`).join('\n')
-        : 'No actions taken yet.';
+      const prompt = buildExplorationPrompt(task, pageTitle, currentUrl, actionHistory, domSnippet);
+      const response = await chatCompletion([
+        { role: 'system', content: 'You are an autonomous browser agent. Output only valid JSON.' },
+        { role: 'user', content: prompt }
+      ], { json: true, temperature: 0.2, maxTokens: 800 });
 
-      const prompt = `You are an AI browser exploration agent.
+      if (!response) throw new Error('AI failed to respond or is disabled.');
+
+      const parsed: AIResponse = JSON.parse(response);
+      log.push(`Thought: ${parsed.thought}`);
+      
+      if (parsed.action === 'done' || parsed.action === 'fail') {
+        return await handleCompletion(page, parsed, stepCount, log, start, dialogHandler, tracker);
+      }
+
+      logAction(parsed, log);
+
+      const { success: stepSuccess, error: stepError } = await performAction(page, parsed);
+
+      actionHistory.push({
+        step: stepCount,
+        thought: parsed.thought,
+        action: parsed.action,
+        target: parsed.targetSelector,
+        value: parsed.value,
+        result: stepSuccess ? 'success' : 'error',
+        error_msg: stepError || undefined,
+        dom_changed: false
+      });
+
+      await handleStepResult(page, parsed, stepCount, stepSuccess, stepError, log, tracker);
+
+      previousDomHash = currentDomHash;
+      previousUrl = currentUrl;
+
+    } catch (e: any) {
+      const msg = e.message;
+      log.push(`Error during step execution: ${msg}`);
+      console.warn(`    ⚠ Exploratory step error: ${msg}`);
+      actionHistory.push({
+        step: stepCount,
+        thought: 'Exception caught',
+        action: 'error',
+        result: 'error',
+        error_msg: msg,
+        dom_changed: false
+      });
+    }
+  }
+
+  return await handleMaxSteps(page, stepCount, log, start, dialogHandler, tracker);
+}
+
+async function capturePageState(page: Page, previousDomHash: string, previousUrl: string) {
+  const domSnippet = await getCompactDOM(page);
+  const currentUrl = page.url();
+  const pageTitle = await page.title();
+  const currentDomHash = crypto.createHash('md5').update(domSnippet).digest('hex');
+  const stateChanged = currentDomHash !== previousDomHash || currentUrl !== previousUrl;
+  return { currentUrl, pageTitle, domSnippet, currentDomHash, stateChanged };
+}
+
+function buildExplorationPrompt(
+  task: string,
+  pageTitle: string,
+  currentUrl: string,
+  actionHistory: ActionHistory[],
+  domSnippet: string
+): string {
+  const historyText = actionHistory.length > 0 
+    ? actionHistory.map(h => `Step ${h.step}: [${h.result}] ${h.action} ${h.target || ''} ${h.value ? `"${h.value}"` : ''} ${h.error_msg ? `(Error: ${h.error_msg})` : ''} ${h.result === 'success' ? `(State changed: ${h.dom_changed})` : ''}`).join('\n')
+    : 'No actions taken yet.';
+
+  return `You are an AI browser exploration agent.
 Your goal is: "${task}"
 
 Current Page Title: ${pageTitle}
@@ -105,153 +171,152 @@ Respond with a JSON object ONLY, in this exact format:
   "targetSelector": "CSS selector to click or type into, OR url to navigate to (omit if done/fail/press)",
   "value": "text to type, OR key to press like 'Enter' (omit if not typing/pressing)"
 }`;
+}
 
-      const response = await chatCompletion([
-        { role: 'system', content: 'You are an autonomous browser agent. Output only valid JSON.' },
-        { role: 'user', content: prompt }
-      ], { json: true, temperature: 0.2, maxTokens: 800 });
+function logAction(parsed: AIResponse, log: string[]) {
+  if (parsed.action === 'navigate' && parsed.targetSelector) {
+    log.push(`Action: navigate to "${parsed.targetSelector}"`);
+  } else if (parsed.action === 'click' && parsed.targetSelector) {
+    log.push(`Action: click on "${parsed.targetSelector}"`);
+  } else if (parsed.action === 'type' && parsed.targetSelector) {
+    log.push(`Action: type "${parsed.value}" into "${parsed.targetSelector}"`);
+  } else if (parsed.action === 'press' && parsed.value) {
+    log.push(`Action: press "${parsed.value}"`);
+  } else {
+    log.push(`Action: unknown or malformed (${parsed.action})`);
+  }
+}
 
-      if (!response) {
-        throw new Error('AI failed to respond or is disabled.');
-      }
+async function performAction(page: Page, parsed: AIResponse): Promise<{ success: boolean; error: string }> {
+  let stepSuccess = false;
+  let stepError = '';
 
-      const parsed = JSON.parse(response);
-      log.push(`Thought: ${parsed.thought}`);
-      
-      if (parsed.action === 'done') {
-        log.push('Action: DONE. Goal achieved.');
-        page.off('dialog', dialogHandler);
-        if (tracker) {
-          tracker.pushEvent(
-            'ai_reasoning',
-            'Exploration completed',
-            { status: 'passed', steps: stepCount },
-            { category: 'summary', summary: log.join('\n') },
-          );
-        }
-        return { passed: true, log, duration_ms: Date.now() - start };
-      }
-
-      if (parsed.action === 'fail') {
-        log.push('Action: FAIL. Goal cannot be achieved.');
-        page.off('dialog', dialogHandler);
-        if (tracker) {
-          tracker.pushEvent(
-            'ai_reasoning',
-            'Exploration failed',
-            { status: 'failed', steps: stepCount },
-            { category: 'summary', summary: log.join('\n') },
-          );
-        }
-        return { passed: false, log, duration_ms: Date.now() - start, error: 'Agent declared failure.' };
-      }
-
-      let stepSuccess = false;
-      let stepError = '';
-
-      if (parsed.action === 'navigate' && parsed.targetSelector) {
-        log.push(`Action: navigate to "${parsed.targetSelector}"`);
-        try {
-          await page.goto(parsed.targetSelector, { waitUntil: 'domcontentloaded', timeout: 10000 });
-          await waitForStableDOM(page, 500, 5000);
-          stepSuccess = true;
-        } catch (err: any) {
-          stepError = `Navigation failed: ${err.message}`;
-        }
-      } 
-      else if (parsed.action === 'click' && parsed.targetSelector) {
-        log.push(`Action: click on "${parsed.targetSelector}"`);
-        const res = await resolveWithHealing(page, parsed.targetSelector, 'assisted', parsed.thought, 5000);
-        if (!res.locator) {
-          stepError = `Could not find target ${parsed.targetSelector}`;
-        } else {
-          try {
-            await res.locator.click({ timeout: 5000 });
-            await waitForStableDOM(page, 500, 5000);
-            stepSuccess = true;
-          } catch (err: any) {
-            stepError = `Click failed: ${err.message}`;
-          }
-        }
-      } 
-      else if (parsed.action === 'type' && parsed.targetSelector) {
-        log.push(`Action: type "${parsed.value}" into "${parsed.targetSelector}"`);
-        const res = await resolveWithHealing(page, parsed.targetSelector, 'assisted', parsed.thought, 5000);
-        if (!res.locator) {
-          stepError = `Could not find target ${parsed.targetSelector}`;
-        } else {
-          try {
-            await res.locator.fill(parsed.value || '', { timeout: 5000 });
-            await waitForStableDOM(page, 500, 5000);
-            stepSuccess = true;
-          } catch (err: any) {
-            stepError = `Type failed: ${err.message}`;
-          }
-        }
-      } 
-      else if (parsed.action === 'press' && parsed.value) {
-        log.push(`Action: press "${parsed.value}"`);
-        try {
-          await page.keyboard.press(parsed.value);
-          await waitForStableDOM(page, 500, 5000);
-          stepSuccess = true;
-        } catch (err: any) {
-          stepError = `Press failed: ${err.message}`;
-        }
-      }
-      else {
-        stepError = `Unknown action or missing target/value: ${parsed.action}`;
-      }
-
-      actionHistory.push({
-        step: stepCount,
-        thought: parsed.thought,
-        action: parsed.action,
-        target: parsed.targetSelector,
-        value: parsed.value,
-        result: stepSuccess ? 'success' : 'error',
-        error_msg: stepError || undefined,
-        dom_changed: false // Will be updated on the next tick
-      });
-
-      if (!stepSuccess) {
-        log.push(`Error: ${stepError}`);
-        if (tracker) {
-          const event = tracker.pushEvent('retry', `Step ${stepCount} failed: ${stepError}`, { step: stepCount, action: parsed.action, target: parsed.targetSelector }, { category: 'signal', capture_reason: 'retry', signal_flags: ['retry'] });
-          await tracker.captureSignalState(page, event.id, 'retry');
-        }
-      } else {
-        // Success steps are summarized in the final reasoning event.
-      }
-
-      previousDomHash = currentDomHash;
-      previousUrl = currentUrl;
-
-    } catch (e: any) {
-      const msg = e.message;
-      log.push(`Error during step execution: ${msg}`);
-      console.warn(`    ⚠ Exploratory step error: ${msg}`);
-      actionHistory.push({
-        step: stepCount,
-        thought: 'Exception caught',
-        action: 'error',
-        result: 'error',
-        error_msg: msg,
-        dom_changed: false
-      });
+  if (parsed.action === 'navigate' && parsed.targetSelector) {
+    try {
+      await page.goto(parsed.targetSelector, { waitUntil: 'domcontentloaded', timeout: NAV_TIMEOUT });
+      await waitForStableDOM(page, DOM_SETTLE_MS, ACTION_TIMEOUT);
+      stepSuccess = true;
+    } catch (err: any) {
+      stepError = `Navigation failed: ${err.message}`;
     }
+  } else if (parsed.action === 'click' && parsed.targetSelector) {
+    const res = await resolveWithHealing(page, parsed.targetSelector, 'assisted', parsed.thought, ACTION_TIMEOUT);
+    if (!res.locator) {
+      stepError = `Could not find target ${parsed.targetSelector}`;
+    } else {
+      try {
+        await res.locator.click({ timeout: ACTION_TIMEOUT });
+        await waitForStableDOM(page, DOM_SETTLE_MS, ACTION_TIMEOUT);
+        stepSuccess = true;
+      } catch (err: any) {
+        stepError = `Click failed: ${err.message}`;
+      }
+    }
+  } else if (parsed.action === 'type' && parsed.targetSelector) {
+    const res = await resolveWithHealing(page, parsed.targetSelector, 'assisted', parsed.thought, ACTION_TIMEOUT);
+    if (!res.locator) {
+      stepError = `Could not find target ${parsed.targetSelector}`;
+    } else {
+      try {
+        await res.locator.fill(parsed.value || '', { timeout: ACTION_TIMEOUT });
+        await waitForStableDOM(page, DOM_SETTLE_MS, ACTION_TIMEOUT);
+        stepSuccess = true;
+      } catch (err: any) {
+        stepError = `Type failed: ${err.message}`;
+      }
+    }
+  } else if (parsed.action === 'press' && parsed.value) {
+    try {
+      await page.keyboard.press(parsed.value);
+      await waitForStableDOM(page, DOM_SETTLE_MS, ACTION_TIMEOUT);
+      stepSuccess = true;
+    } catch (err: any) {
+      stepError = `Press failed: ${err.message}`;
+    }
+  } else {
+    stepError = `Unknown action or missing target/value: ${parsed.action}`;
   }
 
+  return { success: stepSuccess, error: stepError };
+}
+
+async function handleStepResult(
+  page: Page,
+  parsed: AIResponse,
+  stepCount: number,
+  stepSuccess: boolean,
+  stepError: string,
+  log: string[],
+  tracker?: EventTracker
+) {
+  if (!stepSuccess) {
+    log.push(`Error: ${stepError}`);
+    if (tracker) {
+      const event = tracker.pushEvent('retry', `Step ${stepCount} failed: ${stepError}`, { step: stepCount, action: parsed.action, target: parsed.targetSelector }, { category: 'signal', capture_reason: 'retry', signal_flags: ['retry'] });
+      await tracker.captureSignalState(page, event.id, 'retry');
+    }
+  } else {
+    if (tracker) {
+      const eventType = parsed.action === 'navigate' ? 'navigation' : 'action';
+      const msg = `${parsed.action} ${parsed.targetSelector || parsed.value || ''}`.trim();
+      const event = tracker.pushEvent(
+        eventType, 
+        msg, 
+        { step: stepCount, action: parsed.action, target: parsed.targetSelector, value: parsed.value, thought: parsed.thought }, 
+        { category: 'info', summary: parsed.thought }
+      );
+      await tracker.captureStateSync(page, event.id, 'step');
+    }
+  }
+}
+
+async function handleCompletion(
+  page: Page,
+  parsed: AIResponse,
+  stepCount: number,
+  log: string[],
+  start: number,
+  dialogHandler: (dialog: Dialog) => Promise<void>,
+  tracker?: EventTracker
+) {
+  const isDone = parsed.action === 'done';
+  log.push(`Action: ${isDone ? 'DONE. Goal achieved.' : 'FAIL. Goal cannot be achieved.'}`);
+  page.off('dialog', dialogHandler);
+
+  if (tracker) {
+    const ev = tracker.pushEvent(
+      'ai_reasoning',
+      isDone ? 'Exploration completed' : 'Exploration failed',
+      { status: isDone ? 'passed' : 'failed', steps: stepCount },
+      { category: 'summary', summary: log.join('\n') },
+    );
+    await tracker.captureStateSync(page, ev.id, isDone ? 'step' : 'failure');
+  }
+
+  return { passed: isDone, log, duration_ms: Date.now() - start, error: isDone ? undefined : 'Agent declared failure.' };
+}
+
+async function handleMaxSteps(
+  page: Page,
+  stepCount: number,
+  log: string[],
+  start: number,
+  dialogHandler: (dialog: Dialog) => Promise<void>,
+  tracker?: EventTracker
+) {
   log.push('\nExploration failed: Maximum steps reached.');
   page.off('dialog', dialogHandler);
+  
   if (tracker) {
-    tracker.pushEvent(
+    const ev = tracker.pushEvent(
       'ai_reasoning',
       'Exploration failed: max steps reached',
       { status: 'failed', steps: stepCount },
       { category: 'summary', summary: log.join('\n') },
     );
+    await tracker.captureStateSync(page, ev.id, 'failure');
   }
+  
   return { passed: false, log, duration_ms: Date.now() - start, error: 'Max steps reached without success.' };
 }
 
@@ -260,7 +325,6 @@ async function getCompactDOM(page: Page): Promise<string> {
     const elements: string[] = [];
     const interactiveSelectors = 'a, button, input, select, textarea, [role="button"], [data-testid], [aria-label], h1, h2, h3, p, li, td, th, span';
     
-    // Quick visibility check function
     const isVisible = (elem: Element) => {
       if (!(elem instanceof HTMLElement)) return false;
       const style = window.getComputedStyle(elem);
@@ -271,7 +335,7 @@ async function getCompactDOM(page: Page): Promise<string> {
 
     document.querySelectorAll(interactiveSelectors).forEach((el, i) => {
       if (!isVisible(el)) return;
-      if (elements.length > 80) return; // Cap output to avoid token limits
+      if (elements.length > 80) return;
       
       const tag = el.tagName.toLowerCase();
       const attrs: string[] = [];
@@ -282,7 +346,6 @@ async function getCompactDOM(page: Page): Promise<string> {
       let text = (el as HTMLElement).innerText || el.textContent || '';
       text = text.trim().replace(/\s+/g, ' ').slice(0, 100);
       
-      // Only include elements that have attributes or text
       if (attrs.length > 0 || text.length > 0) {
         elements.push(`<${tag} ${attrs.join(' ')}>${text}</${tag}>`);
       }

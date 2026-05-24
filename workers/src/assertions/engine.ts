@@ -140,18 +140,6 @@ export async function runAssertions(
         result = { passed: false, duration_ms: 0, error: `Unknown assertion type: ${(assertion as any).type}` };
     }
 
-    // Capture failure screenshot
-    let screenshot_on_failure: string | undefined;
-    if (!result.passed) {
-      const failPath = `${artifactsDir}/${executionId}_fail_${assertion.type}.png`;
-      try {
-        await page.screenshot({ path: failPath, fullPage: false });
-        screenshot_on_failure = failPath;
-      } catch {
-        // Page might be closed
-      }
-    }
-
     let failure_type: AssertionResult['failure_type'];
     let fix_hint: string | undefined;
     if (!result.passed) {
@@ -166,28 +154,40 @@ export async function runAssertions(
       });
     }
 
-    const assertionResult = { type: assertion.type, ...result, screenshot_on_failure, failure_type, fix_hint };
-    results.push(assertionResult);
+    let screenshot_on_failure: string | undefined;
 
     // Emit event into the observability timeline
     if (tracker) {
       if (result.passed) {
-        tracker.pushEvent(
+        const event = tracker.pushEvent(
           'assertion_passed',
           `${assertion.type} passed`,
           { assertion: assertion.type, duration_ms: result.duration_ms, ...result.details },
           { category: 'info' },
         );
+        await tracker.captureStateSync(page, event.id, 'step');
       } else {
         const event = tracker.pushEvent(
           'assertion_failed',
           `${assertion.type} failed: ${result.error || 'check did not pass'}`,
-          { assertion: assertion.type, failure_type, fix_hint, ...result.details, screenshot: screenshot_on_failure },
+          { assertion: assertion.type, failure_type, fix_hint, ...result.details },
           { category: 'signal', capture_reason: 'failure', signal_flags: ['failure'] },
         );
-        if (screenshot_on_failure) event.screenshot = screenshot_on_failure;
+        await tracker.captureStateSync(page, event.id, 'failure');
+        screenshot_on_failure = event.screenshot;
+      }
+    } else if (!result.passed) {
+      const failPath = `${artifactsDir}/${executionId}_fail_${assertion.type}.png`;
+      try {
+        await page.screenshot({ path: failPath, fullPage: false });
+        screenshot_on_failure = failPath;
+      } catch {
+        // Page might be closed
       }
     }
+
+    const assertionResult = { type: assertion.type, ...result, screenshot_on_failure, failure_type, fix_hint };
+    results.push(assertionResult);
 
     // Enhanced logging
     const healedTag = (result.details as any)?.healed ? ' (🔧 healed)' : '';
