@@ -178,8 +178,10 @@ const worker = new Worker(
       console.log(`\n🌐 Navigating to ${targetUrl}...`);
       await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout });
       await waitForStableDOM(page, 400, 8000);
-      tracker.pushEvent('navigation', `navigate ${targetUrl}`, { url: targetUrl }, { category: 'info' });
-      tracker.pushEvent('dom_change', 'DOM stabilized after navigation', { url: targetUrl }, { category: 'info' });
+      const navEvent = tracker.pushEvent('navigation', `navigate ${targetUrl}`, { url: targetUrl }, { category: 'info' });
+      await tracker.captureStateSync(page, navEvent.id, 'step');
+      const domEvent = tracker.pushEvent('dom_change', 'DOM stabilized after navigation', { url: targetUrl }, { category: 'info' });
+      await tracker.captureStateSync(page, domEvent.id, 'step');
 
       let passed = false;
       let assertionResults: any[] = [];

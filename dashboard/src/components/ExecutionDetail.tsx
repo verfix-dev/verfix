@@ -176,7 +176,7 @@ function ReplayTab({ execution: e, apiBase }: { execution: Execution; apiBase: s
   }
 
   const getScreenshotUrl = (event?: ExecutionEvent | null) => {
-    const rawPath = event?.screenshot || e.artifacts?.screenshot || e.artifacts?.failed_screenshot;
+    const rawPath = event?.screenshot;
     if (!rawPath) return null;
     return `${apiBase}/artifacts/${rawPath.split('/artifacts/').pop()}`;
   };
