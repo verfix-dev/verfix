@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.4] - 2026-05-25
+
+### Added
+- Introduced runtime port management with new defaults: Dashboard `3610`, API `3611`.
+- Added automatic port-pair fallback when defaults are occupied (`3612/3613`, `3614/3615`, ...).
+- Added runtime port persistence in `.verfix/runtime.json`.
+- Added container-to-CLI runtime port sync so CLI reflects actual running container ports.
+
+### Changed
+- Updated CLI commands (`start`, `status`, `run`, `list`, `doctor`, `init`) to use shared runtime-resolved ports.
+- Updated dashboard API endpoint resolution to derive API base dynamically from dashboard origin.
+- Updated runtime defaults and documentation references from `3000/3001` to `3610/3611`.
+
+### Fixed
+- Fixed `verfix init` app-port auto-detection incorrectly selecting runtime/API ports as the user's app port.
+- Fixed repeated `init`/`start` workflows to behave idempotently without stale port output.
+- Fixed stale API port behavior by adding API health-based fallback discovery (including legacy `3001`) and self-healing runtime port persistence.
+
 ## [0.1.3] - 2026-05-23
 
 ### Fixed
