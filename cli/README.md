@@ -71,7 +71,7 @@ Output:
 {
   "passed": true,
   "failures": [],
-  "timeline_url": "http://localhost:3000/?executionId=exec_abc123",
+  "timeline_url": "http://localhost:3610/?executionId=exec_abc123",
   "exit_code": 0,
   "execution_id": "exec_abc123"
 }
@@ -79,7 +79,7 @@ Output:
 
 ### 3. Open the Dashboard
 
-Visit **http://localhost:3000** to see execution timelines, screenshots, and event replays.
+Visit **http://localhost:3610** (or the port in `.verfix/runtime.json`) to see execution timelines, screenshots, and event replays.
 
 ---
 
@@ -100,9 +100,12 @@ Start the Verfix runtime container. Pulls the image if not present, waits for he
 ```bash
 verfix start
 # ✓ Verfix runtime is running
-#     API:       http://localhost:3001
-#     Dashboard: http://localhost:3000
+#     API:       http://localhost:3611
+#     Dashboard: http://localhost:3610
 ```
+
+Default runtime ports are `3610` (dashboard) and `3611` (API).
+If they are occupied, Verfix automatically picks the next free pair (`3612/3613`, etc.) and persists them to `.verfix/runtime.json`.
 
 ### `verfix stop`
 
@@ -120,8 +123,8 @@ Check runtime, API, and dashboard health at a glance.
 ```bash
 verfix status
 #   Runtime:    running
-#   API:        healthy   (http://localhost:3001)
-#   Dashboard:  healthy   (http://localhost:3000)
+#   API:        healthy   (http://localhost:3611)
+#   Dashboard:  healthy   (http://localhost:3610)
 #   Image:      ghcr.io/verfix-dev/verfix-server:latest
 #   Uptime:     2h 14m
 ```
@@ -153,7 +156,7 @@ verfix run --config path/to/verfix.config.json --flow signup
 | `-c, --config <path>` | Config file path | `./verfix.config.json` |
 | `--timeout <ms>` | Timeout per flow | `15000` |
 | `--retries <n>` | Retries on failure | `2` |
-| `--dashboard <url>` | Dashboard URL for links | `http://localhost:3000` |
+| `--dashboard <url>` | Dashboard URL for links | `http://localhost:3610` |
 
 ### `verfix logs`
 
@@ -334,7 +337,7 @@ Every `verfix run --output json` returns this shape — stable, parseable, and d
       "fix_hint": "Element not found. Check that the selector matches a visible DOM element."
     }
   ],
-  "timeline_url": "http://localhost:3000/?executionId=exec_abc123",
+  "timeline_url": "http://localhost:3610/?executionId=exec_abc123",
   "exit_code": 1,
   "execution_id": "exec_abc123"
 }
@@ -387,8 +390,8 @@ Running `verfix init` generates an `AGENTS.md` file with instructions that codin
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `VERIFY_API` | Override API base URL | `http://localhost:3001` |
-| `VERIFY_DASHBOARD` | Override Dashboard URL | `http://localhost:3000` |
+| `VERIFY_API` | Override API base URL | `http://localhost:3611` |
+| `VERIFY_DASHBOARD` | Override Dashboard URL | `http://localhost:3610` |
 | `AI_API_KEY` | API key for AI-powered modes | — |
 | `AI_MODEL` | AI model for assisted/exploratory | `gpt-4o-mini` |
 
@@ -404,7 +407,7 @@ The entire runtime runs inside a single Docker container:
 │                                              │
 │  ┌─────────┐  ┌──────────┐  ┌────────────┐  │
 │  │ Go API  │  │  Redis   │  │ PostgreSQL │  │
-│  │  :3001  │  │  Queue   │  │   Store    │  │
+│  │  :3611  │  │  Queue   │  │   Store    │  │
 │  └────┬────┘  └────┬─────┘  └─────┬──────┘  │
 │       │            │              │          │
 │       v            v              │          │
@@ -415,7 +418,7 @@ The entire runtime runs inside a single Docker container:
 │                                              │
 │  ┌──────────────────────┐                   │
 │  │  Next.js Dashboard   │                   │
-│  │       :3000          │                   │
+│  │       :3610          │                   │
 │  └──────────────────────┘                   │
 └──────────────────────────────────────────────┘
         ▲
@@ -424,9 +427,9 @@ The entire runtime runs inside a single Docker container:
    verfix run --flow login
 ```
 
-- **API** (`:3001`) — Receives verification jobs, queues them, serves results
+- **API** (`:3611` by default) — Receives verification jobs, queues them, serves results
 - **Workers** — Pulls jobs from Redis, executes Playwright flows, captures artifacts
-- **Dashboard** (`:3000`) — Visual execution timeline with screenshots, events, and replays
+- **Dashboard** (`:3610` by default) — Visual execution timeline with screenshots, events, and replays
 - **PostgreSQL** — Persistent execution history
 - **Redis** — Job queue (BullMQ)
 

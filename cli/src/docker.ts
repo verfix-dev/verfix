@@ -7,10 +7,9 @@ import os from 'os';
 import {
   DOCKER_IMAGE,
   CONTAINER_NAME,
-  API_PORT,
-  DASHBOARD_PORT,
   VOLUMES,
 } from './constants';
+import { getRuntimePorts, resolveAvailableRuntimePorts, saveRuntimePorts, type RuntimePorts } from './runtime';
 
 /**
  * On Linux, Docker containers can use --network=host to share the host's
@@ -95,16 +94,52 @@ export function getContainerState(): { status: string; startedAt?: string; image
 }
 
 /**
+ * Read runtime ports from container env vars and persist them locally.
+ * This keeps CLI output aligned even if the running container predates
+ * local runtime.json or was started with non-default ports.
+ */
+export function syncRuntimePortsFromContainer(): RuntimePorts | null {
+  const result = spawnSync('docker', [
+    'inspect',
+    '--format',
+    '{{range .Config.Env}}{{println .}}{{end}}',
+    CONTAINER_NAME,
+  ], { stdio: 'pipe' });
+
+  if (result.status !== 0) return null;
+
+  const envLines = (result.stdout?.toString() || '').split('\n').map(s => s.trim()).filter(Boolean);
+  const envMap = new Map<string, string>();
+  for (const line of envLines) {
+    const idx = line.indexOf('=');
+    if (idx <= 0) continue;
+    envMap.set(line.slice(0, idx), line.slice(idx + 1));
+  }
+
+  const apiPort = Number.parseInt(envMap.get('API_PORT') || '', 10);
+  const dashboardPort = Number.parseInt(envMap.get('DASHBOARD_PORT') || '', 10);
+
+  if (!Number.isInteger(apiPort) || !Number.isInteger(dashboardPort)) {
+    return null;
+  }
+
+  const ports = { apiPort, dashboardPort };
+  saveRuntimePorts(ports);
+  return ports;
+}
+
+/**
  * Start the verfix container. Handles:
  * - Already running: returns 'already_running'
  * - Exists but stopped: starts it, returns 'started'
  * - Doesn't exist: creates and starts it, returns 'created'
  */
-export function startContainer(opts?: DockerRunOptions): 'already_running' | 'started' | 'created' {
+export async function startContainer(opts?: DockerRunOptions): Promise<'already_running' | 'started' | 'created'> {
   const state = getContainerState();
 
   if (state) {
     if (state.status === 'running') {
+      syncRuntimePortsFromContainer();
       // Container is running — if no new env vars, keep it as-is
       if (!opts?.aiApiKey && !opts?.aiModel) {
         return 'already_running';
@@ -122,6 +157,10 @@ export function startContainer(opts?: DockerRunOptions): 'already_running' | 'st
     }
   }
 
+  const preferredPorts = getRuntimePorts();
+  const resolvedPorts = await resolveAvailableRuntimePorts(preferredPorts);
+  saveRuntimePorts(resolvedPorts);
+
   // Create new container
   const envArgs: string[] = [];
 
@@ -131,6 +170,8 @@ export function startContainer(opts?: DockerRunOptions): 'already_running' | 'st
 
   if (aiKey) envArgs.push('-e', `AI_API_KEY=${aiKey}`);
   if (aiModel) envArgs.push('-e', `AI_MODEL=${aiModel}`);
+  envArgs.push('-e', `API_PORT=${resolvedPorts.apiPort}`);
+  envArgs.push('-e', `DASHBOARD_PORT=${resolvedPorts.dashboardPort}`);
 
   const hostNetwork = isHostNetworkMode();
 
@@ -152,8 +193,8 @@ export function startContainer(opts?: DockerRunOptions): 'already_running' | 'st
         // Docker runs in a VM so localhost doesn't reach the real host.
         // host.docker.internal is the stable alias that points to the host.
         '--add-host=host.docker.internal:host-gateway',
-        '-p', `${API_PORT}:${API_PORT}`,
-        '-p', `${DASHBOARD_PORT}:${DASHBOARD_PORT}`,
+        '-p', `${resolvedPorts.apiPort}:${resolvedPorts.apiPort}`,
+        '-p', `${resolvedPorts.dashboardPort}:${resolvedPorts.dashboardPort}`,
       ];
 
   const args = [
@@ -172,7 +213,7 @@ export function startContainer(opts?: DockerRunOptions): 'already_running' | 'st
     const stderr = result.stderr?.toString().trim() || '';
     if (stderr.includes('port is already allocated') || stderr.includes('address already in use')) {
       throw new Error(
-        `Port conflict: ports ${API_PORT} or ${DASHBOARD_PORT} are already in use.\n` +
+        `Port conflict: ports ${resolvedPorts.apiPort} or ${resolvedPorts.dashboardPort} are already in use.\n` +
         `Stop whatever is using those ports, or use 'verfix stop' first.`
       );
     }

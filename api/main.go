@@ -105,7 +105,8 @@ func main() {
 	// Artifact serving
 	app.Static("/artifacts", "../workers/artifacts")
 
-	log.Fatal(app.Listen(":3001"))
+	apiPort := getEnv("API_PORT", "3611")
+	log.Fatal(app.Listen(":" + apiPort))
 }
 
 // ─── Core Handlers ────────────────────────────────────────────────────────────

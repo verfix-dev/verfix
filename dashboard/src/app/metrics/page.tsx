@@ -2,9 +2,10 @@
 import { useEffect, useState } from 'react';
 import { Activity, Clock, Zap, AlertTriangle, CheckCircle2, XCircle, RefreshCw } from 'lucide-react';
 import TopBar from '@/components/TopBar';
+import { getApiBase } from '@/lib/api';
 
 
-const API = 'http://localhost:3001';
+const API = getApiBase();
 
 type Metrics = {
   total_executions: number;

@@ -154,12 +154,12 @@ VOLUME ["/var/lib/postgresql/15/main", "/app/workers/artifacts"]
 
 # ── Healthcheck ───────────────────────────────────────────────────────────────
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD curl -f http://localhost:3001/api/v1/health || exit 1
+    CMD sh -c 'curl -f http://localhost:${API_PORT:-3611}/api/v1/health || exit 1'
 
 # ── Ports ─────────────────────────────────────────────────────────────────────
-# 3001 = Go API  (api/main.go → app.Listen(":3001"))
-# 3000 = Next.js Dashboard
-EXPOSE 3001 3000
+# 3611 = Go API  (default; override with API_PORT)
+# 3610 = Next.js Dashboard (default; override with DASHBOARD_PORT)
+EXPOSE 3611 3610
 
 # tini as PID 1 — proper signal forwarding and zombie process reaping
 ENTRYPOINT ["/usr/bin/tini", "--"]

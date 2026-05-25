@@ -6,6 +6,7 @@ import ExecutionList from '@/components/ExecutionList';
 import ExecutionDetail from '@/components/ExecutionDetail';
 import Link from 'next/link';
 import { Zap, BarChart2, AlertTriangle, Activity, CheckCircle2, Clock, Plus, X } from 'lucide-react';
+import { getApiBase } from '@/lib/api';
 
 export type ExecutionEventType = 
   | 'assertion_failed'
@@ -71,7 +72,7 @@ export type AssertionResult = {
 export type ConsoleLine = { type: string; text: string; timestamp: string };
 export type NetworkRequest = { url: string; method: string; status: number; timing_ms: number; timestamp: string };
 
-const API = 'http://localhost:3001';
+const API = getApiBase();
 
 import { Suspense } from 'react';
 
