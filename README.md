@@ -87,11 +87,17 @@ npx verfix run --mode exploratory --task "verify the login page loads and shows 
 {
   "passed": true,
   "failures": [],
-  "timeline_url": "http://localhost:3000/?executionId=exec_abc123",
+  "timeline_url": "http://localhost:3610/?executionId=exec_abc123",
   "exit_code": 0,
   "execution_id": "exec_abc123"
 }
 ```
+
+Runtime defaults:
+- Dashboard: `http://localhost:3610`
+- API: `http://localhost:3611`
+- If occupied, Verfix automatically tries the next pair (`3612/3613`, `3614/3615`, ...)
+- Resolved ports persist in `.verfix/runtime.json`
 
 ---
 

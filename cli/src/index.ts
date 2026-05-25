@@ -8,15 +8,15 @@ import Ajv from 'ajv';
 import fs from 'fs';
 import path from 'path';
 import {
-  API_PORT, DASHBOARD_PORT, API_BASE, DASHBOARD_BASE,
   DOCKER_IMAGE, CONTAINER_NAME, DEFAULT_CONFIG, HEALTH_ENDPOINT,
 } from './constants';
 import {
   isDockerInstalled, isDockerRunning, getContainerState,
   startContainer, stopContainer, pullImage, pullImageIfMissing,
-  tailLogs, formatUptime, isHostNetworkMode,
+  tailLogs, formatUptime, isHostNetworkMode, syncRuntimePortsFromContainer,
 } from './docker';
-import { waitForHealth, isApiHealthy, isDashboardReachable } from './health';
+import { waitForHealth, isApiHealthy, isDashboardReachable, resolveApiBase } from './health';
+import { buildDashboardBase, getRuntimePorts } from './runtime';
 
 // ─── Load Environment Variables ────────────────────────────────────────────────
 const envPath = path.join(process.cwd(), '.verfix', '.env');
@@ -58,6 +58,13 @@ program
   .description('AI Verification Runtime CLI — reliable browser verification for AI-generated software')
   .version(version);
 
+function refreshRuntimePortsFromContainerIfRunning(): void {
+  const state = getContainerState();
+  if (state?.status === 'running') {
+    syncRuntimePortsFromContainer();
+  }
+}
+
 // ─── start command ───────────────────────────────────────────────────────────
 
 program
@@ -77,12 +84,14 @@ program
 
     try {
       pullImageIfMissing();
-      const result = startContainer();
+      const result = await startContainer();
 
       if (result === 'already_running') {
+        syncRuntimePortsFromContainer();
+        const runningPorts = getRuntimePorts();
         spinner.succeed('Verfix runtime is already running');
-        console.log(`    API:       ${chalk.cyan(`http://localhost:${API_PORT}`)}`);
-        console.log(`    Dashboard: ${chalk.cyan(`http://localhost:${DASHBOARD_PORT}`)}`);
+        console.log(`    API:       ${chalk.cyan(`http://localhost:${runningPorts.apiPort}`)}`);
+        console.log(`    Dashboard: ${chalk.cyan(`http://localhost:${runningPorts.dashboardPort}`)}`);
         return;
       }
 
@@ -94,8 +103,9 @@ program
       }
 
       spinner.succeed('Verfix runtime is running');
-      console.log(`    API:       ${chalk.cyan(`http://localhost:${API_PORT}`)}`);
-      console.log(`    Dashboard: ${chalk.cyan(`http://localhost:${DASHBOARD_PORT}`)}`);
+      const startedPorts = getRuntimePorts();
+      console.log(`    API:       ${chalk.cyan(`http://localhost:${startedPorts.apiPort}`)}`);
+      console.log(`    Dashboard: ${chalk.cyan(`http://localhost:${startedPorts.dashboardPort}`)}`);
     } catch (e: any) {
       spinner.fail(e.message);
       process.exit(1);
@@ -128,10 +138,13 @@ program
   .argument('[executionId]', 'Optional execution ID to check')
   .option('-o, --output <format>', 'Output format: pretty | json', 'pretty')
   .action(async (executionId, opts) => {
+    refreshRuntimePortsFromContainerIfRunning();
+    const apiBase = await resolveApiBase();
+    const runtimePorts = getRuntimePorts();
     // If executionId is provided, use the legacy execution status check
     if (executionId) {
       try {
-        const res = await axios.get(`${API_BASE}/api/v1/executions/${executionId}`);
+        const res = await axios.get(`${apiBase}/api/v1/executions/${executionId}`);
         if (opts.output === 'json') {
           console.log(JSON.stringify(res.data, null, 2));
         } else {
@@ -157,8 +170,8 @@ program
 
     console.log('');
     console.log(`  ${chalk.bold('Runtime:')}    ${runtimeStatus === 'running' ? chalk.green(runtimeStatus) : chalk.red(runtimeStatus)}`);
-    console.log(`  ${chalk.bold('API:')}        ${apiHealthy ? chalk.green('healthy') : chalk.red('unreachable')}   (http://localhost:${API_PORT})`);
-    console.log(`  ${chalk.bold('Dashboard:')}  ${dashReachable ? chalk.green('healthy') : chalk.red('unreachable')}   (http://localhost:${DASHBOARD_PORT})`);
+    console.log(`  ${chalk.bold('API:')}        ${apiHealthy ? chalk.green('healthy') : chalk.red('unreachable')}   (http://localhost:${runtimePorts.apiPort})`);
+    console.log(`  ${chalk.bold('Dashboard:')}  ${dashReachable ? chalk.green('healthy') : chalk.red('unreachable')}   (http://localhost:${runtimePorts.dashboardPort})`);
     if (state?.image) {
       console.log(`  ${chalk.bold('Image:')}      ${state.image}`);
     }
@@ -216,7 +229,7 @@ program
 
     const startSpinner = ora('Starting runtime...').start();
     try {
-      startContainer();
+      await startContainer();
       startSpinner.text = 'Waiting for health check...';
       const healthy = await waitForHealth();
       if (!healthy) {
@@ -224,8 +237,9 @@ program
         process.exit(1);
       }
       startSpinner.succeed('Verfix runtime is running (updated)');
-      console.log(`    API:       ${chalk.cyan(`http://localhost:${API_PORT}`)}`);
-      console.log(`    Dashboard: ${chalk.cyan(`http://localhost:${DASHBOARD_PORT}`)}`);
+      const startedPorts = getRuntimePorts();
+      console.log(`    API:       ${chalk.cyan(`http://localhost:${startedPorts.apiPort}`)}`);
+      console.log(`    Dashboard: ${chalk.cyan(`http://localhost:${startedPorts.dashboardPort}`)}`);
     } catch (e: any) {
       startSpinner.fail(e.message);
       process.exit(1);
@@ -238,6 +252,8 @@ program
   .command('doctor')
   .description('Run diagnostic checks on the Verfix setup')
   .action(async () => {
+    refreshRuntimePortsFromContainerIfRunning();
+    const runtimePorts = getRuntimePorts();
     console.log('');
     console.log(chalk.bold('  Verfix Doctor'));
     console.log(chalk.gray('  ─────────────────────────────'));
@@ -278,7 +294,7 @@ program
       console.log(chalk.green('  ✓ API healthy'));
     } else {
       console.log(chalk.red('  ✗ API unreachable'));
-      console.log(chalk.gray(`    Check: curl http://localhost:${API_PORT}${HEALTH_ENDPOINT}`));
+      console.log(chalk.gray(`    Check: curl http://localhost:${runtimePorts.apiPort}${HEALTH_ENDPOINT}`));
       failures++;
     }
 
@@ -287,7 +303,7 @@ program
       console.log(chalk.green('  ✓ Dashboard reachable'));
     } else {
       console.log(chalk.red('  ✗ Dashboard unreachable'));
-      console.log(chalk.gray(`    Check: curl http://localhost:${DASHBOARD_PORT}`));
+      console.log(chalk.gray(`    Check: curl http://localhost:${runtimePorts.dashboardPort}`));
       failures++;
     }
 
@@ -402,6 +418,10 @@ program
   .option('--timeout <ms>', 'Timeout in milliseconds', '15000')
   .option('--retries <n>', 'Number of retries on failure', '2')
   .action(async (opts) => {
+    refreshRuntimePortsFromContainerIfRunning();
+    const apiBase = await resolveApiBase();
+    const runtimePorts = getRuntimePorts();
+    const dashboardBase = buildDashboardBase(runtimePorts);
     // Load config file if provided or found in cwd
     let config: any = {};
     const configPath = opts.config
@@ -463,7 +483,7 @@ program
 
     let executionId = '';
     try {
-      const res = await axios.post(`${API_BASE}/api/v1/verify`, payload);
+      const res = await axios.post(`${apiBase}/api/v1/verify`, payload);
       executionId = res.data.executionId;
       submitSpinner?.succeed(`Job queued: ${chalk.bold(executionId)}`);
     } catch (e: any) {
@@ -483,7 +503,7 @@ program
     while (Date.now() - startTime < maxWait) {
       await sleep(pollInterval);
       try {
-        const res = await axios.get(`${API_BASE}/api/v1/executions/${executionId}`);
+        const res = await axios.get(`${apiBase}/api/v1/executions/${executionId}`);
         const data = res.data;
         if (data.status === 'completed' || data.status === 'failed') {
           result = data;
@@ -502,7 +522,7 @@ program
       process.exit(1);
     }
 
-    const timelineUrl = buildTimelineUrl(opts.dashboard || DASHBOARD_BASE, executionId);
+    const timelineUrl = buildTimelineUrl(opts.dashboard || dashboardBase, executionId);
 
     if (opts.output === 'json') {
       const failures = buildFailures(result);
@@ -571,8 +591,10 @@ program
   .command('list')
   .description('List recent verification executions')
   .action(async () => {
+    refreshRuntimePortsFromContainerIfRunning();
+    const apiBase = await resolveApiBase();
     try {
-      const res = await axios.get(`${API_BASE}/api/v1/executions`);
+      const res = await axios.get(`${apiBase}/api/v1/executions`);
       const { executions } = res.data;
       if (!executions || executions.length === 0) {
         console.log(chalk.gray('  No executions found.'));

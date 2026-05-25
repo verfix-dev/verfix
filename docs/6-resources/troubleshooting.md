@@ -9,7 +9,8 @@ docker logs -f verfix
 ```
 
 ### Dashboard Shows Blank / 500 Error
-Ensure you aren't running another service on port `3000`. You can change the dashboard port in `.verfix/.env`.
+Verfix defaults to dashboard/API ports `3610/3611` and auto-falls back (`3612/3613`, etc.) when occupied.
+Check the active values in `.verfix/runtime.json`, then verify those ports are reachable.
 
 ### Playwright "Executable doesn't exist"
 This means the runtime image was built without properly downloading the Chromium binaries. If you are modifying the Dockerfile locally, ensure `npx playwright install chromium` runs successfully.

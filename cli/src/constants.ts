@@ -1,12 +1,5 @@
-// ─── Single source of truth for all runtime constants ───────────────────────
-// Derived from api/main.go (app.Listen(":3001")) and dashboard (port 3000).
-// Never hardcode these values elsewhere — import from here.
-
-export const API_PORT = 3001;
-export const DASHBOARD_PORT = 3000;
-
-export const API_BASE = process.env.VERIFY_API || `http://localhost:${API_PORT}`;
-export const DASHBOARD_BASE = process.env.VERIFY_DASHBOARD || `http://localhost:${DASHBOARD_PORT}`;
+// ─── Single source of truth for static runtime constants ────────────────────
+// Dynamic ports are resolved via cli/src/runtime.ts.
 
 export const HEALTH_ENDPOINT = '/api/v1/health';
 

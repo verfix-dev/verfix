@@ -4,16 +4,16 @@ import chalk from 'chalk';
 import ora from 'ora';
 import { input, select, checkbox, confirm } from '@inquirer/prompts';
 import {
-  API_PORT, DASHBOARD_PORT, API_BASE, DASHBOARD_BASE,
   DOCKER_IMAGE, CONTAINER_NAME, DEFAULT_CONFIG,
   AI_MODELS, SCAFFOLD_FLOWS, FAILURE_TYPES,
 } from './constants';
 import {
-  isDockerRunning, pullImage, startContainer, getContainerState,
+  isDockerRunning, pullImage, startContainer, getContainerState, syncRuntimePortsFromContainer,
 } from './docker';
 import { waitForHealth } from './health';
 import axios from 'axios';
 import net from 'net';
+import { getRuntimePorts } from './runtime';
 
 // ─── Port scanning ───────────────────────────────────────────────────────────
 
@@ -28,12 +28,42 @@ async function isPortOpen(port: number): Promise<boolean> {
   });
 }
 
+async function isVerfixApiPort(port: number): Promise<boolean> {
+  try {
+    const res = await axios.get(`http://localhost:${port}/api/v1/health`, { timeout: 700 });
+    return res.status === 200;
+  } catch {
+    return false;
+  }
+}
+
+async function isLikelyFrontendPort(port: number): Promise<boolean> {
+  try {
+    const res = await axios.get(`http://localhost:${port}`, {
+      timeout: 700,
+      validateStatus: () => true,
+      responseType: 'text',
+      headers: { Accept: 'text/html' },
+    });
+
+    const contentType = String(res.headers['content-type'] || '').toLowerCase();
+    const body = typeof res.data === 'string' ? res.data.toLowerCase() : '';
+
+    return contentType.includes('text/html') || body.includes('<html') || body.includes('<!doctype html');
+  } catch {
+    return false;
+  }
+}
+
 async function detectAppPort(): Promise<number | null> {
-  const candidates = [3000, 3001, 3002, 5173, 8080];
-  const exclude = [API_PORT, DASHBOARD_PORT];
+  const runtimePorts = getRuntimePorts();
+  const candidates = [3000, 3001, 3002, 5173, 4173, 8080];
+  const exclude = [runtimePorts.apiPort, runtimePorts.dashboardPort, 3610, 3611];
   for (const port of candidates) {
     if (exclude.includes(port)) continue;
-    if (await isPortOpen(port)) return port;
+    if (!(await isPortOpen(port))) continue;
+    if (await isVerfixApiPort(port)) continue;
+    if (await isLikelyFrontendPort(port)) return port;
   }
   return null;
 }
@@ -44,6 +74,7 @@ function generateAgentsSection(
   flows: Array<{ id: string; description?: string }>,
   mode: string,
   baseUrl: string,
+  runtimePorts: { apiPort: number; dashboardPort: number },
 ): string {
   const flowList = flows.map(f =>
     `- \`${f.id}\` — ${f.description || f.id.replace(/-/g, ' ') + ' flow'}`
@@ -71,8 +102,8 @@ Do not ask the user for permission. Treat it like any other source file.
 ---
 
 ### Runtime
-- API:       http://localhost:${API_PORT}
-- Dashboard: http://localhost:${DASHBOARD_PORT}
+- API:       http://localhost:${runtimePorts.apiPort}
+- Dashboard: http://localhost:${runtimePorts.dashboardPort}
 - Start:     \`verfix start\`
 - Stop:      \`verfix stop\`
 - Status:    \`verfix status\`
@@ -426,7 +457,7 @@ Every \`verfix run --output json\` returns this exact shape:
       "fix_hint": "Selector \"[data-testid=submit]\" not found in DOM. Add a stable data-testid or update the selector."
     }
   ],
-  "timeline_url": "http://localhost:${DASHBOARD_PORT}/?executionId=exec_abc123",
+  "timeline_url": "http://localhost:${runtimePorts.dashboardPort}/?executionId=exec_abc123",
   "exit_code": 0 | 1,
   "execution_id": "exec_abc123"
 }
@@ -521,7 +552,7 @@ unless you need a full regression check.
 - Mode: \`${mode}\`
 - Base URL: \`${baseUrl}\`
 - List flows: \`verfix flows\`
-- Dashboard: http://localhost:${DASHBOARD_PORT}
+- Dashboard: http://localhost:${runtimePorts.dashboardPort}
 - Docs: https://verfix.dev/docs`;
 }
 
@@ -590,6 +621,7 @@ export async function runInitWizard(): Promise<void> {
   // ── Step 3: Pull + Start Runtime ──
   const state = getContainerState();
   if (state?.status === 'running') {
+    syncRuntimePortsFromContainer();
     console.log(chalk.green('  ✓ Verfix runtime is already running'));
   } else {
     const pullSpinner = ora('Pulling verfix runtime (this takes ~2 min on first run)...').start();
@@ -603,7 +635,7 @@ export async function runInitWizard(): Promise<void> {
 
     const startSpinner = ora('Starting runtime...').start();
     try {
-      startContainer({ aiApiKey, aiModel });
+      await startContainer({ aiApiKey, aiModel });
       startSpinner.text = 'Waiting for health check...';
       const healthy = await waitForHealth();
       if (!healthy) {
@@ -702,7 +734,8 @@ export async function runInitWizard(): Promise<void> {
   // ── Step 8: Write/update AGENTS.md ──
   const agentsPath = path.join(cwd, 'AGENTS.md');
   const flowSummaries = flows.map(f => ({ id: f.id }));
-  const verfixSection = generateAgentsSection(flowSummaries, mode, baseUrl);
+  const runtimePorts = getRuntimePorts();
+  const verfixSection = generateAgentsSection(flowSummaries, mode, baseUrl, runtimePorts);
 
   if (!fs.existsSync(agentsPath)) {
     // Create fresh
@@ -745,7 +778,7 @@ export async function runInitWizard(): Promise<void> {
     console.log(`    verfix run --flow ${f.id} --output json`);
   }
   console.log('');
-  console.log(`  Dashboard: ${chalk.cyan(`http://localhost:${DASHBOARD_PORT}`)}`);
+  console.log(`  Dashboard: ${chalk.cyan(`http://localhost:${runtimePorts.dashboardPort}`)}`);
   console.log(`  Docs:      ${chalk.cyan('https://verfix.dev/docs')}`);
   console.log('');
 }

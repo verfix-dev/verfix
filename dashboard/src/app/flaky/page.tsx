@@ -2,9 +2,10 @@
 import { useEffect, useState } from 'react';
 import { AlertTriangle, RefreshCw } from 'lucide-react';
 import TopBar from '@/components/TopBar';
+import { getApiBase } from '@/lib/api';
 
 
-const API = 'http://localhost:3001';
+const API = getApiBase();
 
 type FlakyURL = {
   url: string;
