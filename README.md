@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="https://verfix.dev/logo.png" alt="Verfix" width="120" />
+
 <h1>Verfix</h1>
 
 <p><strong>Local-first browser verification runtime for AI coding agents.</strong><br/>
