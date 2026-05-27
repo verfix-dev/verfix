@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://verfix.dev/logo.svg" alt="Verfix" width="80" />
+  <img src="https://verfix.dev/logo.png" alt="Verfix" width="80" />
 </p>
 
 <h1 align="center">verfix</h1>
