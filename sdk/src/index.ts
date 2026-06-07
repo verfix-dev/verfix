@@ -54,11 +54,34 @@ export type VerifyOptions = {
   retries?: number;
 };
 
+export interface FlowInfo {
+  id: string;
+  steps: number;
+  assertions: number;
+  mode?: string;
+}
+
+export interface HealthStatus {
+  healthy: boolean;
+  api: string;       // 'healthy' | 'unreachable'
+  dashboard: string; // 'healthy' | 'unreachable'
+}
+
+export interface ExecutionStatus {
+  executionId: string;
+  status: 'queued' | 'running' | 'completed' | 'failed';
+  passed?: boolean;
+  duration_ms?: number;
+  task: string;
+  url: string;
+}
+
 const DEFAULT_CONFIG = 'verfix.config.json';
 
+// Keep verify() for backward compatibility
 export async function verify(options: VerifyOptions): Promise<VerifyResult> {
-  const apiBase = options.apiBase || process.env.VERIFY_API || 'http://localhost:3001';
-  const dashboardBase = options.dashboardBase || process.env.VERIFY_DASHBOARD || 'http://localhost:3000';
+  const apiBase = options.apiBase || process.env.VERIFY_API || 'http://localhost:3611';
+  const dashboardBase = options.dashboardBase || process.env.VERIFY_DASHBOARD || 'http://localhost:3610';
 
   const { config, didLoadConfig } = loadConfig(options.config);
   if (didLoadConfig) {
@@ -102,6 +125,116 @@ export async function verify(options: VerifyOptions): Promise<VerifyResult> {
   };
 }
 
+export class Verfix {
+  private apiBase: string;
+  private dashboardBase: string;
+  private config?: string | VerifyConfig;
+
+  constructor(options?: {
+    apiBase?: string;
+    dashboardBase?: string;
+    config?: string | VerifyConfig;
+  }) {
+    this.apiBase = options?.apiBase || process.env.VERIFY_API || 'http://localhost:3611';
+    this.dashboardBase = options?.dashboardBase || process.env.VERIFY_DASHBOARD || 'http://localhost:3610';
+    this.config = options?.config;
+  }
+
+  async runFlow(flowId: string, options?: { mode?: string; url?: string }): Promise<VerifyResult> {
+    return verify({
+      config: this.config,
+      flow: flowId,
+      url: options?.url,
+      mode: options?.mode as any,
+      apiBase: this.apiBase,
+      dashboardBase: this.dashboardBase,
+    });
+  }
+
+  async runAll(options?: { mode?: string; url?: string }): Promise<VerifyResult[]> {
+    const flows = await this.listFlows();
+    const results: VerifyResult[] = [];
+    for (const flow of flows) {
+      const result = await this.runFlow(flow.id, options);
+      results.push(result);
+    }
+    return results;
+  }
+
+  async exploratory(task: string, options?: { url?: string }): Promise<VerifyResult> {
+    return verify({
+      config: this.config,
+      task,
+      mode: 'exploratory',
+      url: options?.url,
+      apiBase: this.apiBase,
+      dashboardBase: this.dashboardBase,
+    });
+  }
+
+  async listFlows(): Promise<FlowInfo[]> {
+    let flows: any[] = [];
+    if (this.config && typeof this.config !== 'string') {
+      flows = (this.config as VerifyConfig).flows || [];
+    } else {
+      const configPath = (this.config as string) || path.resolve(process.cwd(), DEFAULT_CONFIG);
+      if (fs.existsSync(configPath)) {
+        const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+        flows = config.flows || [];
+      }
+    }
+    return flows.map((f: any, idx: number) => ({
+      id: f.id || f.name || `flow_${idx + 1}`,
+      steps: f.steps ? f.steps.length : 0,
+      assertions: f.assertions ? f.assertions.length : 0,
+      mode: f.mode,
+    }));
+  }
+
+  async status(executionId: string): Promise<ExecutionStatus> {
+    const res = await axios.get(`${this.apiBase}/api/v1/executions/${executionId}`);
+    return res.data;
+  }
+
+  async health(): Promise<HealthStatus> {
+    try {
+      const res = await axios.get(`${this.apiBase}/api/v1/health`);
+      const apiHealthy = res.status === 200 && res.data.status === 'healthy';
+      const dashboardReachable = await this.checkDashboardReachable();
+      return {
+        healthy: apiHealthy && dashboardReachable,
+        api: apiHealthy ? 'healthy' : 'unreachable',
+        dashboard: dashboardReachable ? 'healthy' : 'unreachable',
+      };
+    } catch {
+      return {
+        healthy: false,
+        api: 'unreachable',
+        dashboard: 'unreachable',
+      };
+    }
+  }
+
+  async listExecutions(options?: { limit?: number }): Promise<ExecutionStatus[]> {
+    const limit = options?.limit || 50;
+    const res = await axios.get(`${this.apiBase}/api/v1/executions`, { params: { limit } });
+    return res.data.executions || [];
+  }
+
+  private async checkDashboardReachable(): Promise<boolean> {
+    try {
+      await axios.get(this.dashboardBase, { timeout: 2000 });
+      return true;
+    } catch (e: any) {
+      if (e.code && e.code === 'ECONNREFUSED') {
+        return false;
+      }
+      return true;
+    }
+  }
+}
+
+// Internal helpers (moved below)
 function loadConfig(input?: string | VerifyConfig): { config: VerifyConfig; didLoadConfig: boolean } {
   if (!input) {
     const defaultPath = path.resolve(process.cwd(), DEFAULT_CONFIG);
@@ -144,6 +277,7 @@ function sleep(ms: number) {
   return new Promise(r => setTimeout(r, ms));
 }
 
+// Timeline url generator
 function buildTimelineUrl(base: string, executionId: string): string {
   const trimmed = base.replace(/\/+$/, '');
   return `${trimmed}/?executionId=${encodeURIComponent(executionId)}`;
