@@ -1,7 +1,7 @@
 {
   "name": "@verifyruntime/sdk",
-  "version": "0.1.0",
-  "description": "VerifyRuntime SDK",
+  "version": "0.2.0",
+  "description": "SDK for Verfix — local browser verification runtime. Run deterministic browser flows, inspect execution history, and check runtime health.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
