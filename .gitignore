@@ -22,3 +22,5 @@ workers/artifacts/
 
 # OS
 .DS_Store
+
+/ignore
