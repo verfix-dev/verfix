@@ -16,6 +16,21 @@ export function detectAgentPlatform(cwd: string): AgentPlatform {
   return 'generic';
 }
 
+/** Returns all platforms whose config files exist in the project directory. */
+export function detectAllAgentPlatforms(cwd: string): Exclude<AgentPlatform, 'generic'>[] {
+  const found: Exclude<AgentPlatform, 'generic'>[] = [];
+  if (fs.existsSync(path.join(cwd, '.cursor')) || fs.existsSync(path.join(cwd, '.cursorrules'))) {
+    found.push('cursor');
+  }
+  if (fs.existsSync(path.join(cwd, 'CLAUDE.md')) || fs.existsSync(path.join(cwd, '.claude'))) {
+    found.push('claude');
+  }
+  if (fs.existsSync(path.join(cwd, 'CODEX.md'))) {
+    found.push('codex');
+  }
+  return found;
+}
+
 export function getAgentFilePath(platform: AgentPlatform, cwd: string): string {
   switch (platform) {
     case 'cursor':
