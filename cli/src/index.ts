@@ -17,6 +17,7 @@ import {
 } from './docker';
 import { waitForHealth, isApiHealthy, isDashboardReachable, resolveApiBase } from './health';
 import { buildDashboardBase, getRuntimePorts } from './runtime';
+import { emitJson, emitJsonError, isJsonMode } from './json-output';
 
 // ─── Load Environment Variables ────────────────────────────────────────────────
 const envPath = path.join(process.cwd(), '.verfix', '.env');
@@ -73,11 +74,11 @@ program
   .action(async () => {
     if (!isDockerInstalled()) {
       console.error(chalk.red('✗ Docker is not installed. Install Docker from https://docker.com'));
-      process.exit(1);
+      process.exit(2);
     }
     if (!isDockerRunning()) {
       console.error(chalk.red('✗ Docker daemon is not running. Start Docker Desktop first.'));
-      process.exit(1);
+      process.exit(2);
     }
 
     const spinner = ora('Starting Verfix runtime...').start();
@@ -99,7 +100,7 @@ program
       const healthy = await waitForHealth();
       if (!healthy) {
         spinner.fail('Runtime started but health check failed after 30s');
-        process.exit(1);
+        process.exit(2);
       }
 
       spinner.succeed('Verfix runtime is running');
@@ -108,7 +109,7 @@ program
       console.log(`    Dashboard: ${chalk.cyan(`http://localhost:${startedPorts.dashboardPort}`)}`);
     } catch (e: any) {
       spinner.fail(e.message);
-      process.exit(1);
+      process.exit(2);
     }
   });
 
@@ -145,8 +146,8 @@ program
     if (executionId) {
       try {
         const res = await axios.get(`${apiBase}/api/v1/executions/${executionId}`);
-        if (opts.output === 'json') {
-          console.log(JSON.stringify(res.data, null, 2));
+        if (isJsonMode(opts)) {
+          emitJson(res.data);
         } else {
           const d = res.data;
           console.log('');
@@ -156,8 +157,11 @@ program
           console.log('');
         }
       } catch (e: any) {
+        if (isJsonMode(opts)) {
+          emitJsonError({ error: 'status_lookup_failed', message: e.message, hint: 'Check that the execution ID is valid and the runtime is running.' });
+        }
         console.error(chalk.red('Error: ' + e.message));
-        process.exit(1);
+        process.exit(2);
       }
       return;
     }
@@ -167,6 +171,19 @@ program
     const runtimeStatus = state ? state.status : 'not found';
     const apiHealthy = await isApiHealthy();
     const dashReachable = await isDashboardReachable();
+
+    if (isJsonMode(opts)) {
+      emitJson({
+        runtime: runtimeStatus,
+        api: apiHealthy ? 'healthy' : 'unreachable',
+        api_url: `http://localhost:${runtimePorts.apiPort}`,
+        dashboard: dashReachable ? 'healthy' : 'unreachable',
+        dashboard_url: `http://localhost:${runtimePorts.dashboardPort}`,
+        image: state?.image || null,
+        uptime: state?.startedAt && runtimeStatus === 'running' ? formatUptime(state.startedAt) : null,
+      });
+      return;
+    }
 
     console.log('');
     console.log(`  ${chalk.bold('Runtime:')}    ${runtimeStatus === 'running' ? chalk.green(runtimeStatus) : chalk.red(runtimeStatus)}`);
@@ -190,13 +207,13 @@ program
   .action((opts) => {
     if (!getContainerState()) {
       console.error(chalk.red(`Container '${CONTAINER_NAME}' is not running. Start it with 'verfix start'.`));
-      process.exit(1);
+      process.exit(2);
     }
     try {
       tailLogs(parseInt(opts.tail) || 50);
     } catch (e: any) {
       console.error(chalk.red(e.message));
-      process.exit(1);
+      process.exit(2);
     }
   });
 
@@ -208,11 +225,11 @@ program
   .action(async () => {
     if (!isDockerInstalled()) {
       console.error(chalk.red('✗ Docker is not installed.'));
-      process.exit(1);
+      process.exit(2);
     }
     if (!isDockerRunning()) {
       console.error(chalk.red('✗ Docker daemon is not running.'));
-      process.exit(1);
+      process.exit(2);
     }
 
     const pullSpinner = ora('Pulling latest image...').start();
@@ -221,7 +238,7 @@ program
       pullSpinner.succeed('Image updated');
     } catch (e: any) {
       pullSpinner.fail(e.message);
-      process.exit(1);
+      process.exit(2);
     }
 
     // Stop existing container if running
@@ -234,7 +251,7 @@ program
       const healthy = await waitForHealth();
       if (!healthy) {
         startSpinner.fail('Health check failed after 30s');
-        process.exit(1);
+        process.exit(2);
       }
       startSpinner.succeed('Verfix runtime is running (updated)');
       const startedPorts = getRuntimePorts();
@@ -242,7 +259,7 @@ program
       console.log(`    Dashboard: ${chalk.cyan(`http://localhost:${startedPorts.dashboardPort}`)}`);
     } catch (e: any) {
       startSpinner.fail(e.message);
-      process.exit(1);
+      process.exit(2);
     }
   });
 
@@ -251,80 +268,121 @@ program
 program
   .command('doctor')
   .description('Run diagnostic checks on the Verfix setup')
-  .action(async () => {
+  .option('-o, --output <format>', 'Output format: pretty | json', 'pretty')
+  .action(async (opts) => {
     refreshRuntimePortsFromContainerIfRunning();
     const runtimePorts = getRuntimePorts();
-    console.log('');
-    console.log(chalk.bold('  Verfix Doctor'));
-    console.log(chalk.gray('  ─────────────────────────────'));
-    console.log('');
+    if (!isJsonMode(opts)) {
+      console.log('');
+      console.log(chalk.bold('  Verfix Doctor'));
+      console.log(chalk.gray('  ─────────────────────────────'));
+      console.log('');
+    }
 
     let failures = 0;
 
     // 1. Docker installed
-    if (isDockerInstalled()) {
-      console.log(chalk.green('  ✓ Docker installed'));
-    } else {
-      console.log(chalk.red('  ✗ Docker not installed'));
-      console.log(chalk.gray('    Install from https://docker.com'));
-      failures++;
+    const dockerInstalled = isDockerInstalled();
+    if (!isJsonMode(opts)) {
+      if (dockerInstalled) {
+        console.log(chalk.green('  ✓ Docker installed'));
+      } else {
+        console.log(chalk.red('  ✗ Docker not installed'));
+        console.log(chalk.gray('    Install from https://docker.com'));
+      }
     }
+    if (!dockerInstalled) failures++;
 
     // 2. Docker daemon running
-    if (isDockerRunning()) {
-      console.log(chalk.green('  ✓ Docker daemon running'));
-    } else {
-      console.log(chalk.red('  ✗ Docker daemon not running'));
-      console.log(chalk.gray('    Start Docker Desktop'));
-      failures++;
+    const dockerRunning = isDockerRunning();
+    if (!isJsonMode(opts)) {
+      if (dockerRunning) {
+        console.log(chalk.green('  ✓ Docker daemon running'));
+      } else {
+        console.log(chalk.red('  ✗ Docker daemon not running'));
+        console.log(chalk.gray('    Start Docker Desktop'));
+      }
     }
+    if (!dockerRunning) failures++;
 
     // 3. Container running
     const state = getContainerState();
-    if (state?.status === 'running') {
-      console.log(chalk.green('  ✓ Container running'));
-    } else {
-      console.log(chalk.red('  ✗ Container not running'));
-      console.log(chalk.gray('    Run: verfix start'));
-      failures++;
+    const containerRunning = state?.status === 'running';
+    if (!isJsonMode(opts)) {
+      if (containerRunning) {
+        console.log(chalk.green('  ✓ Container running'));
+      } else {
+        console.log(chalk.red('  ✗ Container not running'));
+        console.log(chalk.gray('    Run: verfix start'));
+      }
     }
+    if (!containerRunning) failures++;
 
     // 4. API healthy
-    if (await isApiHealthy()) {
-      console.log(chalk.green('  ✓ API healthy'));
-    } else {
-      console.log(chalk.red('  ✗ API unreachable'));
-      console.log(chalk.gray(`    Check: curl http://localhost:${runtimePorts.apiPort}${HEALTH_ENDPOINT}`));
-      failures++;
+    const apiHealthy = await isApiHealthy();
+    if (!isJsonMode(opts)) {
+      if (apiHealthy) {
+        console.log(chalk.green('  ✓ API healthy'));
+      } else {
+        console.log(chalk.red('  ✗ API unreachable'));
+        console.log(chalk.gray(`    Check: curl http://localhost:${runtimePorts.apiPort}${HEALTH_ENDPOINT}`));
+      }
     }
+    if (!apiHealthy) failures++;
 
     // 5. Dashboard reachable
-    if (await isDashboardReachable()) {
-      console.log(chalk.green('  ✓ Dashboard reachable'));
-    } else {
-      console.log(chalk.red('  ✗ Dashboard unreachable'));
-      console.log(chalk.gray(`    Check: curl http://localhost:${runtimePorts.dashboardPort}`));
-      failures++;
+    const dashReachable = await isDashboardReachable();
+    if (!isJsonMode(opts)) {
+      if (dashReachable) {
+        console.log(chalk.green('  ✓ Dashboard reachable'));
+      } else {
+        console.log(chalk.red('  ✗ Dashboard unreachable'));
+        console.log(chalk.gray(`    Check: curl http://localhost:${runtimePorts.dashboardPort}`));
+      }
     }
+    if (!dashReachable) failures++;
 
     // 6. verfix.config.json exists
     const configPath = path.resolve(process.cwd(), DEFAULT_CONFIG);
-    if (fs.existsSync(configPath)) {
-      console.log(chalk.green(`  ✓ ${DEFAULT_CONFIG} found`));
-    } else {
-      console.log(chalk.red(`  ✗ ${DEFAULT_CONFIG} not found`));
-      console.log(chalk.gray('    Run: verfix init'));
-      failures++;
+    const configFound = fs.existsSync(configPath);
+    if (!isJsonMode(opts)) {
+      if (configFound) {
+        console.log(chalk.green(`  ✓ ${DEFAULT_CONFIG} found`));
+      } else {
+        console.log(chalk.red(`  ✗ ${DEFAULT_CONFIG} not found`));
+        console.log(chalk.gray('    Run: verfix init'));
+      }
     }
+    if (!configFound) failures++;
 
     // 7. AGENTS.md exists
     const agentsPath = path.resolve(process.cwd(), 'AGENTS.md');
-    if (fs.existsSync(agentsPath)) {
-      console.log(chalk.green('  ✓ AGENTS.md found'));
-    } else {
-      console.log(chalk.red('  ✗ AGENTS.md not found'));
-      console.log(chalk.gray('    Run: verfix init'));
-      failures++;
+    const agentsMdFound = fs.existsSync(agentsPath);
+    if (!isJsonMode(opts)) {
+      if (agentsMdFound) {
+        console.log(chalk.green('  ✓ AGENTS.md found'));
+      } else {
+        console.log(chalk.red('  ✗ AGENTS.md not found'));
+        console.log(chalk.gray('    Run: verfix init'));
+      }
+    }
+    if (!agentsMdFound) failures++;
+
+    if (isJsonMode(opts)) {
+      emitJson({
+        checks: {
+          docker_installed: dockerInstalled,
+          docker_running: dockerRunning,
+          container_running: containerRunning,
+          api_healthy: apiHealthy,
+          dashboard_reachable: dashReachable,
+          config_found: configFound,
+          agents_md_found: agentsMdFound,
+        },
+        failures: failures,
+        passed: failures === 0,
+      });
+      process.exit(failures > 0 ? 1 : 0);
     }
 
     console.log('');
@@ -334,7 +392,7 @@ program
       console.log(chalk.bold.red(`  ${failures} check(s) failed`));
     }
     console.log('');
-    process.exit(failures);
+    process.exit(failures > 0 ? 1 : 0);
   });
 
 // ─── init command (interactive wizard) ───────────────────────────────────────
@@ -362,26 +420,48 @@ program
       : path.resolve(process.cwd(), DEFAULT_CONFIG);
 
     if (!fs.existsSync(configPath)) {
+      if (isJsonMode(opts)) {
+        emitJsonError({ error: 'config_not_found', message: `Config file not found: ${configPath}`, hint: 'Run: verfix init' });
+      }
       console.error(chalk.red(`Config file not found: ${configPath}`));
       console.error(chalk.gray('Run: verfix init'));
-      process.exit(1);
+      process.exit(2);
     }
 
     const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
     const flows = config.flows || [];
 
     if (flows.length === 0) {
+      if (isJsonMode(opts)) {
+        emitJson({ flows: [], total: 0 });
+        return;
+      }
       console.log(chalk.gray('  No flows configured. Edit verfix.config.json to add flows.'));
       return;
     }
 
+    const allFlowIds = flows.map((f: any) => f.id || f.name).filter(Boolean);
+    const getDependencies = (description?: string) => {
+      if (!description) return [];
+      const requiresIndex = description.indexOf('Requires:');
+      if (requiresIndex === -1) return [];
+      const text = description.substring(requiresIndex + 9);
+      return allFlowIds.filter((id: string) => text.includes(id));
+    };
+
     if (opts.output === 'json') {
-      const list = flows.map((f: any) => ({
-        id: f.id || f.name,
-        steps: (f.steps || []).length,
-        assertions: (f.assertions || []).length,
-      }));
-      console.log(JSON.stringify({ flows: list, total: list.length }, null, 2));
+      const list = flows.map((f: any) => {
+        const id = f.id || f.name;
+        const deps = getDependencies(f.description);
+        return {
+          id,
+          steps: (f.steps || []).length,
+          assertions: (f.assertions || []).length,
+          description: f.description,
+          composable_with: deps.length > 0 ? deps : undefined,
+        };
+      });
+      emitJson({ flows: list, total: list.length });
       return;
     }
 
@@ -397,6 +477,13 @@ program
       console.log(`    ${chalk.gray(`${stepCount} step(s), ${assertCount} assertion(s)`)}`);
       if (stepDesc) {
         console.log(`    ${chalk.gray(stepDesc)}`);
+      }
+      if (f.description) {
+        if (f.description.includes('Requires:')) {
+          console.log(`    ${chalk.yellow(`⚠ ${f.description}`)}`);
+        } else {
+          console.log(`    ${chalk.gray(f.description)}`);
+        }
       }
       console.log(`    ${chalk.gray('Run:')} verfix run --flow ${id} --output json`);
       console.log('');
@@ -433,28 +520,52 @@ program
       config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
       didLoadConfig = true;
     } else if (opts.config) {
+      if (isJsonMode(opts)) {
+        emitJsonError({ error: 'config_not_found', message: `Config file not found: ${configPath}`, hint: 'Run: verfix init' });
+      }
       console.error(chalk.red(`Config file not found: ${configPath}`));
-      process.exit(1);
+      process.exit(2);
     }
 
     if (didLoadConfig) {
-      validateConfigSchema(config, configPath);
+      try {
+        validateConfigSchema(config, configPath);
+      } catch (e: any) {
+        if (isJsonMode(opts)) {
+          emitJsonError({ error: 'config_validation_failed', message: e.message, hint: 'Fix the config file to match the schema.' });
+        }
+        console.error(chalk.red(e.message));
+        process.exit(2);
+      }
     }
 
-    const selectedFlow = selectFlow(config?.flows, opts.flow);
+    let selectedFlows: any[] = [];
+    try {
+      selectedFlows = selectFlows(config?.flows, opts.flow);
+    } catch (e: any) {
+      if (isJsonMode(opts)) {
+        emitJsonError({ error: 'flow_not_found', message: e.message, hint: 'Run: verfix flows to see available flows.' });
+      }
+      console.error(chalk.red(e.message));
+      process.exit(2);
+    }
 
-    const flows = selectedFlow ? normalizeFlows([selectedFlow]) : normalizeFlows(config?.flows || []);
-    const assertions = selectedFlow?.assertions ? undefined : config.assertions;
+    const flows = selectedFlows.length > 0 ? normalizeFlows(selectedFlows) : normalizeFlows(config?.flows || []);
+    const assertions = selectedFlows.length > 0 ? undefined : config.assertions;
 
     const baseUrl = opts.url || config.baseUrl || config.url;
     // Rewrite localhost → host.docker.internal so Playwright inside the
     // container can reach the user's app running on the host machine.
-    const targetUrl = resolveJobUrl(baseUrl);
+    const resolved = resolveJobUrl(baseUrl);
+    const targetUrl = resolved.url;
+    if (resolved.rewritten && !isJsonMode(opts)) {
+      console.log(chalk.gray(`  ℹ  Target URL: ${baseUrl} → ${targetUrl} (host.docker.internal)`));
+    }
 
     const payload: any = {
       url: targetUrl,
       task: opts.task || config.task || (opts.flow ? `Verify flow ${opts.flow}` : `Verify ${targetUrl}`),
-      mode: opts.mode || selectedFlow?.mode || config.mode || 'strict',
+      mode: opts.mode || selectedFlows[0]?.mode || config.mode || 'strict',
       assertions,
       flows: flows.length > 0 ? flows : undefined,
       selectors: config.selectors,
@@ -464,8 +575,11 @@ program
     };
 
     if (!payload.url) {
+      if (isJsonMode(opts)) {
+        emitJsonError({ error: 'missing_url', message: '--url is required (or set baseUrl in config file)', hint: 'Pass --url <url> or add baseUrl to your config.' });
+      }
       console.error(chalk.red('Error: --url is required (or set baseUrl in config file)'));
-      process.exit(1);
+      process.exit(2);
     }
 
     if (opts.output === 'pretty') {
@@ -488,8 +602,11 @@ program
       submitSpinner?.succeed(`Job queued: ${chalk.bold(executionId)}`);
     } catch (e: any) {
       submitSpinner?.fail('Failed to submit job');
+      if (isJsonMode(opts)) {
+        emitJsonError({ error: 'submit_failed', message: e.message, hint: 'Check that the runtime is running: verfix status' });
+      }
       console.error(chalk.red(e.message));
-      process.exit(1);
+      process.exit(2);
     }
 
     // Poll for result
@@ -517,14 +634,17 @@ program
     pollSpinner?.stop();
 
     if (!result) {
+      if (isJsonMode(opts)) {
+        emitJsonError({ error: 'poll_timeout', message: 'Timed out waiting for result. Job may still be running.', hint: `Run: verfix status ${executionId}` });
+      }
       console.error(chalk.yellow('⚠ Timed out waiting for result. Job may still be running.'));
       console.log(`  Run: verfix status ${executionId}`);
-      process.exit(1);
+      process.exit(2);
     }
 
     const timelineUrl = buildTimelineUrl(opts.dashboard || dashboardBase, executionId);
 
-    if (opts.output === 'json') {
+    if (isJsonMode(opts)) {
       const failures = buildFailures(result);
 
       const jsonResult = {
@@ -535,7 +655,7 @@ program
         execution_id: result.executionId,
         raw: result,
       };
-      console.log(JSON.stringify(jsonResult, null, 2));
+      emitJson(jsonResult);
       process.exit(jsonResult.exit_code);
     }
 
@@ -628,19 +748,16 @@ function sleep(ms: number) {
  * real host. We rewrite to host.docker.internal which is injected by
  * Docker Desktop and by our --add-host flag.
  */
-function resolveJobUrl(url: string): string {
-  if (!url) return url;
+function resolveJobUrl(url: string): { url: string; rewritten: boolean } {
+  if (!url) return { url, rewritten: false };
   // Host network mode (Linux): localhost resolves correctly inside container.
-  if (isHostNetworkMode()) return url;
+  if (isHostNetworkMode()) return { url, rewritten: false };
   // Bridge mode (Mac/Windows): must point Playwright at host.docker.internal.
   const rewritten = url.replace(
     /\/\/(localhost|127\.0\.0\.1)(:\d+)?/g,
     '//host.docker.internal$2',
   );
-  if (rewritten !== url) {
-    console.log(chalk.gray(`  ℹ  Target URL: ${url} → ${rewritten} (host.docker.internal)`));
-  }
-  return rewritten;
+  return { url: rewritten, rewritten: rewritten !== url };
 }
 
 function buildTimelineUrl(base: string, executionId: string): string {
@@ -648,14 +765,18 @@ function buildTimelineUrl(base: string, executionId: string): string {
   return `${trimmed}/?executionId=${encodeURIComponent(executionId)}`;
 }
 
-function selectFlow(flows: any[] | undefined, idOrName?: string): any | undefined {
-  if (!idOrName || !flows || flows.length === 0) return undefined;
-  const found = flows.find(f => f.id === idOrName || f.name === idOrName);
-  if (!found) {
-    console.error(chalk.red(`Flow not found: ${idOrName}`));
-    process.exit(1);
+function selectFlows(flows: any[] | undefined, idOrNames?: string): any[] {
+  if (!idOrNames || !flows || flows.length === 0) return [];
+  const ids = idOrNames.split(',').map(s => s.trim()).filter(Boolean);
+  const selected: any[] = [];
+  for (const id of ids) {
+    const found = flows.find(f => f.id === id || f.name === id);
+    if (!found) {
+      throw new Error(`Flow not found: ${id}`);
+    }
+    selected.push(found);
   }
-  return found;
+  return selected;
 }
 
 function normalizeFlows(flows: any[]): any[] {
@@ -688,12 +809,11 @@ function validateConfigSchema(config: any, configPath: string): void {
   const validate = ajv.compile(schema);
   const valid = validate(config);
   if (!valid) {
-    console.error(chalk.red(`Config schema validation failed: ${configPath}`));
-    for (const err of validate.errors || []) {
+    const details = (validate.errors || []).map(err => {
       const loc = err.instancePath || '/';
-      console.error(chalk.red(`  ${loc} ${err.message || 'is invalid'}`));
-    }
-    process.exit(1);
+      return `${loc} ${err.message || 'is invalid'}`;
+    }).join('; ');
+    throw new Error(`Config schema validation failed: ${configPath} — ${details}`);
   }
 }
 
