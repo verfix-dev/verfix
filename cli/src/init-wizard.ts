@@ -5,7 +5,7 @@ import ora from 'ora';
 import { input, select, checkbox, confirm } from '@inquirer/prompts';
 import {
   DOCKER_IMAGE, CONTAINER_NAME, DEFAULT_CONFIG,
-  AI_MODELS, SCAFFOLD_FLOWS,
+  AI_MODELS,
 } from './constants';
 import {
   generateAgentsSection,
@@ -13,7 +13,7 @@ import {
   generateClaudeSection,
   generateCodexInstructions,
 } from './agents-md';
-import { detectAgentPlatform, getAgentFilePath } from './agent-platform';
+import { detectAllAgentPlatforms, getAgentFilePath } from './agent-platform';
 import {
   isDockerRunning, pullImage, startContainer, getContainerState, syncRuntimePortsFromContainer,
 } from './docker';
@@ -76,6 +76,21 @@ async function detectAppPort(): Promise<number | null> {
 }
 
 
+
+// ─── README section builder ───────────────────────────────────────────────────
+
+function buildReadmeSection(anchor: string): string {
+  return `${anchor}
+## Verification
+
+This project uses [Verfix](https://verfix.dev) for browser verification.
+
+\`\`\`bash
+verfix run --flow <flow-id> --output json
+\`\`\`
+
+See [AGENTS.md](./AGENTS.md) for full verification documentation.`;
+}
 
 // ─── Main init wizard ────────────────────────────────────────────────────────
 
@@ -198,42 +213,7 @@ export async function runInitWizard(): Promise<void> {
     default: 'assisted',
   });
 
-  // ── Step 6: Select flows to scaffold ──
-  const flowChoices = [
-    { name: 'login', value: 'login', checked: true },
-    { name: 'dashboard-load', value: 'dashboard-load', checked: true },
-    { name: 'signup', value: 'signup', checked: false },
-    { name: 'checkout', value: 'checkout', checked: false },
-    { name: 'custom', value: '__custom__', checked: false },
-  ];
-
-  const selectedFlowIds = await checkbox({
-    message: 'Which flows do you want to scaffold?',
-    choices: flowChoices,
-  });
-
-  // Handle custom flow
-  const flowIds = [...selectedFlowIds];
-  if (flowIds.includes('__custom__')) {
-    const customName = await input({ message: 'Custom flow name (e.g. profile-edit)', default: 'custom-flow' });
-    flowIds.splice(flowIds.indexOf('__custom__'), 1, customName);
-  }
-
-  // Build flows array
-  const flows = flowIds.map(id => {
-    const scaffold = SCAFFOLD_FLOWS[id];
-    if (scaffold) {
-      return { id, ...scaffold };
-    }
-    // Custom or unknown flow — minimal scaffold
-    return {
-      id,
-      steps: [{ action: 'navigate', url: `/${id}` }],
-      assertions: [{ type: 'page_loaded' }, { type: 'no_console_errors' }],
-    };
-  });
-
-  // ── Step 7: Write verfix.config.json ──
+  // ── Step 7: Write verfix.config.json (empty flows — agent creates them) ──
   const configPath = path.join(cwd, DEFAULT_CONFIG);
   let writeConfig = true;
 
@@ -245,60 +225,21 @@ export async function runInitWizard(): Promise<void> {
   }
 
   if (writeConfig) {
-    const config = { baseUrl, mode, flows };
+    const config = { baseUrl, mode, flows: [] };
     fs.writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n', 'utf-8');
     console.log(chalk.green(`  ✓ verfix.config.json created`));
   } else {
     console.log(chalk.gray('  ⏭ Keeping existing verfix.config.json'));
   }
 
-  // ── Step 7.5: Inject npm scripts ──
-  const pkgPath = path.join(cwd, 'package.json');
-  if (fs.existsSync(pkgPath)) {
-    try {
-      const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
-      pkg.scripts = pkg.scripts || {};
-      
-      const hasVerify = 'verify' in pkg.scripts;
-      const hasVerifyAll = 'verify:all' in pkg.scripts;
-      
-      if (!hasVerify || !hasVerifyAll) {
-        const injectScripts = await confirm({
-          message: 'Add Verfix scripts (verify, verify:all) to package.json?',
-          default: true,
-        });
-
-        if (injectScripts) {
-          let updated = false;
-          if (!hasVerify) {
-            pkg.scripts.verify = 'verfix run --output json';
-            updated = true;
-          }
-          if (!hasVerifyAll) {
-            pkg.scripts['verify:all'] = 'verfix run --output json';
-            updated = true;
-          }
-          if (updated) {
-            fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n', 'utf-8');
-            console.log(chalk.green('  ✓ package.json scripts added'));
-          }
-        }
-      } else {
-        console.log(chalk.gray('  ⏭ package.json already contains verify scripts'));
-      }
-    } catch (e: any) {
-      console.log(chalk.yellow(`  ⚠ Could not parse package.json: ${e.message}`));
-    }
-  }
-
   // ── Step 8: Write/update AGENTS.md ──
   const agentsPath = path.join(cwd, 'AGENTS.md');
-  const flowSummaries = flows.map(f => ({ id: f.id }));
+  const flowSummaries: { id: string }[] = [];
   const runtimePorts = getRuntimePorts();
   const verfixSection = generateAgentsSection(flowSummaries, mode, baseUrl, runtimePorts);
 
   if (!fs.existsSync(agentsPath)) {
-    // Create fresh
+    // New file — create it fresh, no prompt needed
     fs.writeFileSync(agentsPath, verfixSection + '\n', 'utf-8');
     console.log(chalk.green('  ✓ AGENTS.md created'));
   } else {
@@ -306,6 +247,7 @@ export async function runInitWizard(): Promise<void> {
     const sectionRegex = /## Verfix — Browser Verification[\s\S]*?(?=\n## [^V]|\n## $|$)/;
 
     if (sectionRegex.test(existing)) {
+      // File already has a Verfix section — ask before replacing
       const updateIt = await confirm({
         message: 'AGENTS.md already has a Verfix section. Update it?',
         default: true,
@@ -318,21 +260,64 @@ export async function runInitWizard(): Promise<void> {
         console.log(chalk.gray('  ⏭ Keeping existing AGENTS.md'));
       }
     } else {
-      // Append section
-      const separator = existing.endsWith('\n') ? '\n' : '\n\n';
-      fs.writeFileSync(agentsPath, existing + separator + verfixSection + '\n', 'utf-8');
-      console.log(chalk.green('  ✓ AGENTS.md updated (Verfix section appended)'));
+      // Existing file, no Verfix section yet — ask before appending
+      const appendIt = await confirm({
+        message: 'AGENTS.md exists. Append Verfix section to it?',
+        default: true,
+      });
+      if (appendIt) {
+        const separator = existing.endsWith('\n') ? '\n' : '\n\n';
+        fs.writeFileSync(agentsPath, existing + separator + verfixSection + '\n', 'utf-8');
+        console.log(chalk.green('  ✓ AGENTS.md updated (Verfix section appended)'));
+      } else {
+        console.log(chalk.gray('  ⏭ Skipping AGENTS.md'));
+      }
     }
   }
 
-  // ── Step 8.5: Write/update platform-specific agent file ──
-  const platform = detectAgentPlatform(cwd);
-  let platformFileUpdated = false;
-  let platformFileName = '';
+  // ── Step 8.5: Write/update platform-specific agent files ──
+  // Detect which platforms exist in the project and pre-check them,
+  // but let the user make the final selection (they may use multiple agents).
+  const detectedPlatforms = detectAllAgentPlatforms(cwd);
 
-  if (platform !== 'generic') {
+  const platformChoices = [
+    {
+      name: 'Cursor (.cursorrules)',
+      value: 'cursor' as const,
+      checked: detectedPlatforms.includes('cursor'),
+    },
+    {
+      name: 'Claude (CLAUDE.md)',
+      value: 'claude' as const,
+      checked: detectedPlatforms.includes('claude'),
+    },
+    {
+      name: 'Codex / OpenAI (CODEX.md)',
+      value: 'codex' as const,
+      checked: detectedPlatforms.includes('codex'),
+    },
+  ];
+
+  // Always print a note before the checkbox so it's clear what happens on empty selection
+  console.log(chalk.gray('  ℹ AGENTS.md is always written as the default. Select agents below for'));
+  console.log(chalk.gray('    additional platform-specific files (.cursorrules, CLAUDE.md, CODEX.md).'));
+  console.log(chalk.gray('    Press Enter with nothing selected to use AGENTS.md only.'));
+  console.log('');
+
+  const detectedLabel = detectedPlatforms.length > 0
+    ? ` — detected: ${detectedPlatforms.join(', ')}`
+    : '';
+
+  const selectedPlatforms = await checkbox({
+    message: `Coding agents to configure${detectedLabel} (space to toggle, Enter to confirm):`,
+    choices: platformChoices,
+  });
+
+  const updatedPlatformFiles: string[] = [];
+
+  for (const platform of selectedPlatforms) {
     const platformPath = getAgentFilePath(platform, cwd);
-    platformFileName = path.basename(platformPath);
+    const platformFileName = path.basename(platformPath);
     let platformContent = '';
 
     if (platform === 'cursor') {
@@ -343,101 +328,106 @@ export async function runInitWizard(): Promise<void> {
       platformContent = generateCodexInstructions(flowSummaries, mode, baseUrl, runtimePorts);
     }
 
-    if (platformContent) {
-      if (!fs.existsSync(platformPath)) {
-        fs.writeFileSync(platformPath, platformContent + '\n', 'utf-8');
-        console.log(chalk.green(`  ✓ ${platformFileName} created`));
-        platformFileUpdated = true;
-      } else {
-        const existingPlatform = fs.readFileSync(platformPath, 'utf-8');
-        const hasVerfix = existingPlatform.includes('Verfix') || existingPlatform.includes('project that uses Verfix');
+    if (!platformContent) continue;
 
-        let updatePlatform = true;
-        if (hasVerfix) {
-          updatePlatform = await confirm({
-            message: `${platformFileName} already references Verfix. Update/Overwrite it?`,
-            default: true,
-          });
-        }
+    if (!fs.existsSync(platformPath)) {
+      // New file — create without prompting
+      fs.writeFileSync(platformPath, platformContent + '\n', 'utf-8');
+      console.log(chalk.green(`  ✓ ${platformFileName} created`));
+      updatedPlatformFiles.push(platformFileName);
+    } else {
+      const existingPlatform = fs.readFileSync(platformPath, 'utf-8');
+      const hasVerfixSection = existingPlatform.includes('Verfix') || existingPlatform.includes('project that uses Verfix');
 
-        if (updatePlatform) {
-          if (platform === 'cursor') {
-            const startMarker = 'You are working in a project that uses Verfix';
-            if (existingPlatform.includes(startMarker)) {
-              const index = existingPlatform.indexOf(startMarker);
-              const baseContent = existingPlatform.substring(0, index);
-              fs.writeFileSync(platformPath, baseContent + platformContent + '\n', 'utf-8');
-            } else {
-              const separator = existingPlatform.endsWith('\n') ? '\n' : '\n\n';
-              fs.writeFileSync(platformPath, existingPlatform + separator + platformContent + '\n', 'utf-8');
-            }
-          } else {
-            const regex = /## Verfix[\s\S]*?(?=\n## |$)/;
-            if (regex.test(existingPlatform)) {
-              const updated = existingPlatform.replace(regex, platformContent.trim());
-              fs.writeFileSync(platformPath, updated, 'utf-8');
-            } else {
-              const separator = existingPlatform.endsWith('\n') ? '\n' : '\n\n';
-              fs.writeFileSync(platformPath, existingPlatform + separator + platformContent + '\n', 'utf-8');
-            }
-          }
-          console.log(chalk.green(`  ✓ ${platformFileName} updated`));
-          platformFileUpdated = true;
-        } else {
+      if (hasVerfixSection) {
+        // Already has Verfix content — ask before replacing
+        const updatePlatform = await confirm({
+          message: `${platformFileName} already references Verfix. Update it?`,
+          default: true,
+        });
+        if (!updatePlatform) {
           console.log(chalk.gray(`  ⏭ Keeping existing ${platformFileName}`));
+          continue;
+        }
+      } else {
+        // Exists but no Verfix section yet — ask before appending
+        const appendPlatform = await confirm({
+          message: `${platformFileName} exists. Append Verfix section to it?`,
+          default: true,
+        });
+        if (!appendPlatform) {
+          console.log(chalk.gray(`  ⏭ Skipping ${platformFileName}`));
+          continue;
         }
       }
+
+      // Write — replace existing Verfix section or append
+      if (platform === 'cursor') {
+        const startMarker = 'You are working in a project that uses Verfix';
+        if (existingPlatform.includes(startMarker)) {
+          const index = existingPlatform.indexOf(startMarker);
+          const baseContent = existingPlatform.substring(0, index);
+          fs.writeFileSync(platformPath, baseContent + platformContent + '\n', 'utf-8');
+        } else {
+          const separator = existingPlatform.endsWith('\n') ? '\n' : '\n\n';
+          fs.writeFileSync(platformPath, existingPlatform + separator + platformContent + '\n', 'utf-8');
+        }
+      } else {
+        const regex = /## Verfix[\s\S]*?(?=\n## |$)/;
+        if (regex.test(existingPlatform)) {
+          const updated = existingPlatform.replace(regex, platformContent.trim());
+          fs.writeFileSync(platformPath, updated, 'utf-8');
+        } else {
+          const separator = existingPlatform.endsWith('\n') ? '\n' : '\n\n';
+          fs.writeFileSync(platformPath, existingPlatform + separator + platformContent + '\n', 'utf-8');
+        }
+      }
+      console.log(chalk.green(`  ✓ ${platformFileName} updated`));
+      updatedPlatformFiles.push(platformFileName);
     }
   }
 
   // ── Step 8.7: Write/update README.md ──
   const readmePath = path.join(cwd, 'README.md');
+  // Unique anchor so we never accidentally match an unrelated ## Verification section
+  const README_VERFIX_ANCHOR = '<!-- verfix -->';
   let readmeUpdated = false;
+
   if (fs.existsSync(readmePath)) {
     const readmeContent = fs.readFileSync(readmePath, 'utf-8');
-    const hasVerfixSection = readmeContent.includes('## Verification') || readmeContent.includes('Verfix');
-    
-    let updateReadme = true;
-    if (hasVerfixSection) {
-      updateReadme = await confirm({
-        message: 'README.md already references Verfix. Update/Overwrite it?',
-        default: false,
-      });
-    } else {
-      updateReadme = await confirm({
-        message: 'Add Verfix Verification section to README.md?',
+    const hasVerfixAnchor = readmeContent.includes(README_VERFIX_ANCHOR);
+
+    if (hasVerfixAnchor) {
+      // Has our anchor — safe to replace just the Verfix block
+      const updateReadme = await confirm({
+        message: 'README.md already has a Verfix section. Update it?',
         default: true,
       });
-    }
-
-    if (updateReadme) {
-      const verfixReadmeSection = `
-## Verification
-
-This project uses [Verfix](https://verfix.dev) for browser verification.
-
-\`\`\`bash
-npx verfix run --flow <flow-id> --output json
-\`\`\`
-
-See [AGENTS.md](./AGENTS.md) for full verification documentation.
-`;
-
-      if (hasVerfixSection) {
-        const regex = /## Verification[\s\S]*?(?=\n## |$)/;
-        if (regex.test(readmeContent)) {
-          const updated = readmeContent.replace(regex, verfixReadmeSection.trim());
-          fs.writeFileSync(readmePath, updated, 'utf-8');
-        } else {
-          const separator = readmeContent.endsWith('\n') ? '\n' : '\n\n';
-          fs.writeFileSync(readmePath, readmeContent + separator + verfixReadmeSection.trim() + '\n', 'utf-8');
-        }
+      if (updateReadme) {
+        const verfixReadmeSection = buildReadmeSection(README_VERFIX_ANCHOR);
+        const regex = new RegExp(`${README_VERFIX_ANCHOR}[\\s\\S]*?(?=\\n## |$)`);
+        const updated = regex.test(readmeContent)
+          ? readmeContent.replace(regex, verfixReadmeSection.trim())
+          : readmeContent + '\n' + verfixReadmeSection.trim() + '\n';
+        fs.writeFileSync(readmePath, updated, 'utf-8');
+        console.log(chalk.green('  ✓ README.md updated'));
+        readmeUpdated = true;
       } else {
+        console.log(chalk.gray('  ⏭ Keeping existing README.md'));
+      }
+    } else {
+      // No anchor yet — ask opt-in (default false to be safe)
+      const addToReadme = await confirm({
+        message: 'Add a Verfix section to README.md?',
+        default: false,
+      });
+      if (addToReadme) {
+        const verfixReadmeSection = buildReadmeSection(README_VERFIX_ANCHOR);
         const separator = readmeContent.endsWith('\n') ? '\n' : '\n\n';
         fs.writeFileSync(readmePath, readmeContent + separator + verfixReadmeSection.trim() + '\n', 'utf-8');
+        console.log(chalk.green('  ✓ README.md updated'));
+        readmeUpdated = true;
       }
-      console.log(chalk.green('  ✓ README.md updated'));
-      readmeUpdated = true;
     }
   }
 
@@ -446,19 +436,18 @@ See [AGENTS.md](./AGENTS.md) for full verification documentation.
   console.log(chalk.bold.green('  Setup complete!'));
   console.log('');
   console.log(chalk.green('  ✓ Runtime started'));
-  if (writeConfig) console.log(chalk.green('  ✓ verfix.config.json created'));
+  if (writeConfig) console.log(chalk.green('  ✓ verfix.config.json created (no flows yet)'));
   console.log(chalk.green('  ✓ AGENTS.md updated'));
-  if (platform !== 'generic' && platformFileUpdated) {
-    console.log(chalk.green(`  ✓ ${platformFileName} updated`));
+  for (const f of updatedPlatformFiles) {
+    console.log(chalk.green(`  ✓ ${f} updated`));
   }
   if (readmeUpdated) {
     console.log(chalk.green('  ✓ README.md updated'));
   }
   console.log('');
-  console.log(chalk.bold('  Your flows:'));
-  for (const f of flows) {
-    console.log(`    verfix run --flow ${f.id} --output json`);
-  }
+  console.log(chalk.bold('  Next step — add your first flow:'));
+  console.log(`    Edit ${chalk.cyan('verfix.config.json')} and add a flow to the ${chalk.cyan('flows')} array`);
+  console.log(`    Then run: ${chalk.cyan('verfix run --flow <id> --output json')}`);
   console.log('');
   console.log(`  Dashboard: ${chalk.cyan(`http://localhost:${runtimePorts.dashboardPort}`)}`);
   console.log(`  Docs:      ${chalk.cyan('https://verfix.dev/docs')}`);
