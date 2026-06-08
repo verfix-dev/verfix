@@ -12,12 +12,8 @@ export const VOLUMES = {
   artifacts: 'verfix-artifacts:/app/workers/artifacts',
 };
 
-export const AI_MODELS = [
-  { name: 'gpt-5.5 (default)', value: 'gpt-5.5' },
-  { name: 'gpt-5.4-nano', value: 'gpt-5.4-nano' },
-  { name: 'gpt-5.4-mini', value: 'gpt-5.4-mini' },
-  { name: 'custom openai model(type your own)', value: '__custom__' },
-];
+
+
 
 export const SCAFFOLD_FLOWS: Record<string, { steps: any[]; assertions: any[] }> = {
   login: {

@@ -10,6 +10,7 @@ import path from 'path';
 import {
   DOCKER_IMAGE, CONTAINER_NAME, DEFAULT_CONFIG, HEALTH_ENDPOINT,
 } from './constants';
+
 import {
   isDockerInstalled, isDockerRunning, getContainerState,
   startContainer, stopContainer, pullImage, pullImageIfMissing,
@@ -269,6 +270,7 @@ program
   .command('doctor')
   .description('Run diagnostic checks on the Verfix setup')
   .option('-o, --output <format>', 'Output format: pretty | json', 'pretty')
+  .option('--check-connectivity', 'Also test API key connectivity (makes a live API call)', false)
   .action(async (opts) => {
     refreshRuntimePortsFromContainerIfRunning();
     const runtimePorts = getRuntimePorts();
@@ -280,15 +282,26 @@ program
     }
 
     let failures = 0;
+    let warnings = 0;
+
+    // ── Helper: print check result ──
+    function printCheck(
+      icon: string,
+      label: string,
+      hint?: string,
+    ): void {
+      if (isJsonMode(opts)) return;
+      console.log(`  ${icon} ${label}`);
+      if (hint) console.log(chalk.gray(`    ${hint}`));
+    }
 
     // 1. Docker installed
     const dockerInstalled = isDockerInstalled();
     if (!isJsonMode(opts)) {
       if (dockerInstalled) {
-        console.log(chalk.green('  ✓ Docker installed'));
+        printCheck(chalk.green('✓'), 'Docker installed');
       } else {
-        console.log(chalk.red('  ✗ Docker not installed'));
-        console.log(chalk.gray('    Install from https://docker.com'));
+        printCheck(chalk.red('✗'), 'Docker not installed', 'Install from https://docker.com');
       }
     }
     if (!dockerInstalled) failures++;
@@ -297,10 +310,9 @@ program
     const dockerRunning = isDockerRunning();
     if (!isJsonMode(opts)) {
       if (dockerRunning) {
-        console.log(chalk.green('  ✓ Docker daemon running'));
+        printCheck(chalk.green('✓'), 'Docker daemon running');
       } else {
-        console.log(chalk.red('  ✗ Docker daemon not running'));
-        console.log(chalk.gray('    Start Docker Desktop'));
+        printCheck(chalk.red('✗'), 'Docker daemon not running', 'Start Docker Desktop');
       }
     }
     if (!dockerRunning) failures++;
@@ -310,10 +322,9 @@ program
     const containerRunning = state?.status === 'running';
     if (!isJsonMode(opts)) {
       if (containerRunning) {
-        console.log(chalk.green('  ✓ Container running'));
+        printCheck(chalk.green('✓'), 'Container running');
       } else {
-        console.log(chalk.red('  ✗ Container not running'));
-        console.log(chalk.gray('    Run: verfix start'));
+        printCheck(chalk.red('✗'), 'Container not running', 'Run: verfix start');
       }
     }
     if (!containerRunning) failures++;
@@ -322,10 +333,9 @@ program
     const apiHealthy = await isApiHealthy();
     if (!isJsonMode(opts)) {
       if (apiHealthy) {
-        console.log(chalk.green('  ✓ API healthy'));
+        printCheck(chalk.green('✓'), 'API healthy');
       } else {
-        console.log(chalk.red('  ✗ API unreachable'));
-        console.log(chalk.gray(`    Check: curl http://localhost:${runtimePorts.apiPort}${HEALTH_ENDPOINT}`));
+        printCheck(chalk.red('✗'), 'API unreachable', `Check: curl http://localhost:${runtimePorts.apiPort}${HEALTH_ENDPOINT}`);
       }
     }
     if (!apiHealthy) failures++;
@@ -334,10 +344,9 @@ program
     const dashReachable = await isDashboardReachable();
     if (!isJsonMode(opts)) {
       if (dashReachable) {
-        console.log(chalk.green('  ✓ Dashboard reachable'));
+        printCheck(chalk.green('✓'), 'Dashboard reachable');
       } else {
-        console.log(chalk.red('  ✗ Dashboard unreachable'));
-        console.log(chalk.gray(`    Check: curl http://localhost:${runtimePorts.dashboardPort}`));
+        printCheck(chalk.red('✗'), 'Dashboard unreachable', `Check: curl http://localhost:${runtimePorts.dashboardPort}`);
       }
     }
     if (!dashReachable) failures++;
@@ -347,10 +356,9 @@ program
     const configFound = fs.existsSync(configPath);
     if (!isJsonMode(opts)) {
       if (configFound) {
-        console.log(chalk.green(`  ✓ ${DEFAULT_CONFIG} found`));
+        printCheck(chalk.green('✓'), `${DEFAULT_CONFIG} found`);
       } else {
-        console.log(chalk.red(`  ✗ ${DEFAULT_CONFIG} not found`));
-        console.log(chalk.gray('    Run: verfix init'));
+        printCheck(chalk.red('✗'), `${DEFAULT_CONFIG} not found`, 'Run: verfix init');
       }
     }
     if (!configFound) failures++;
@@ -360,14 +368,144 @@ program
     const agentsMdFound = fs.existsSync(agentsPath);
     if (!isJsonMode(opts)) {
       if (agentsMdFound) {
-        console.log(chalk.green('  ✓ AGENTS.md found'));
+        printCheck(chalk.green('✓'), 'AGENTS.md found');
       } else {
-        console.log(chalk.red('  ✗ AGENTS.md not found'));
-        console.log(chalk.gray('    Run: verfix init'));
+        printCheck(chalk.red('✗'), 'AGENTS.md not found', 'Run: verfix init');
       }
     }
     if (!agentsMdFound) failures++;
 
+    // ── Provider checks ──
+    if (!isJsonMode(opts)) {
+      console.log('');
+      console.log(chalk.bold('  AI Provider'));
+      console.log(chalk.gray('  ─────────────────────────────'));
+      console.log('');
+    }
+
+    // Dynamically import provider modules (avoid bloating the main entry)
+    const { PROVIDER_REGISTRY, getAllProviders, detectProviderFromModel, isValidModel } = await import('./providers/registry');
+    const { parseEnvFile, loadAIConfig, loadApiKey } = await import('./config/loader');
+
+    const cwd = process.cwd();
+    const envVars = parseEnvFile(cwd);
+    const aiConfig = loadAIConfig(cwd);
+
+    // 8. AI provider configured
+    const providerConfigured = aiConfig !== null;
+    let providerValid = false;
+    let keyFormatValid = false;
+    let modelValid = false;
+    let connectivityOk: boolean | null = null;
+    let connectivityError: string | undefined;
+
+    if (!isJsonMode(opts)) {
+      if (providerConfigured) {
+        printCheck(chalk.green('✓'), `AI provider configured: ${chalk.bold(aiConfig!.provider)}`);
+        providerValid = true;
+      } else {
+        // Check if there's a legacy AI_API_KEY without a provider
+        const hasLegacyKey = !!(envVars['AI_API_KEY'] || process.env.AI_API_KEY);
+        if (hasLegacyKey) {
+          const legacyModel = envVars['AI_MODEL'] || process.env.AI_MODEL || '';
+          const detectedProvider = legacyModel ? detectProviderFromModel(legacyModel) : null;
+          printCheck(
+            chalk.yellow('⚠'),
+            'AI config uses legacy format (no provider field)',
+            detectedProvider
+              ? `Run: verfix init to migrate to provider: ${detectedProvider}`
+              : 'Run: verfix init to set up a provider',
+          );
+          warnings++;
+        } else {
+          printCheck(chalk.yellow('⚠'), 'No AI provider configured', 'Run: verfix init to configure AI (optional)');
+          warnings++;
+        }
+      }
+    } else {
+      providerValid = providerConfigured;
+    }
+
+    if (aiConfig) {
+      const def = PROVIDER_REGISTRY[aiConfig.provider];
+
+      // 9. API key format valid
+      const apiKey = loadApiKey(cwd, aiConfig.provider);
+      if (apiKey) {
+        keyFormatValid = def.keyPattern.test(apiKey);
+        if (!isJsonMode(opts)) {
+          if (keyFormatValid) {
+            const masked = apiKey.slice(0, 8) + '*'.repeat(Math.max(0, apiKey.length - 8));
+            printCheck(chalk.green('✓'), `API key format valid (${masked})`);
+          } else {
+            printCheck(
+              chalk.red('✗'),
+              `API key format invalid for ${def.displayName}`,
+              `Key should ${def.keyPatternHint}. Check ${def.envVar}`,
+            );
+            failures++;
+          }
+        } else {
+          if (!keyFormatValid) failures++;
+        }
+
+        // 10. Model valid for provider
+        modelValid = isValidModel(aiConfig.provider, aiConfig.model);
+        if (!isJsonMode(opts)) {
+          if (modelValid) {
+            printCheck(chalk.green('✓'), `Model valid: ${chalk.bold(aiConfig.model)}`);
+          } else {
+            const available = def.models.map((m) => m.id).join(', ');
+            printCheck(
+              chalk.red('✗'),
+              `Model '${aiConfig.model}' not in ${def.displayName} model list`,
+              available ? `Available models: ${available}` : 'Run: verfix init to re-select a model',
+            );
+            failures++;
+          }
+        } else {
+          if (!modelValid) failures++;
+        }
+
+        // 11. Connectivity test (optional, flag-gated)
+        if (opts.checkConnectivity) {
+          const connSpinner = isJsonMode(opts) ? null : ora(`Testing ${def.displayName} connectivity...`).start();
+          try {
+            const { createProviderInstance } = await import('./providers/factory');
+            const provider = createProviderInstance(aiConfig.provider);
+            const result = await provider.testConnectivity(apiKey);
+            connectivityOk = result.ok;
+            connectivityError = result.error;
+            if (connSpinner) {
+              if (result.ok) {
+                connSpinner.succeed(`${def.displayName} API reachable`);
+              } else {
+                connSpinner.fail(`${def.displayName} connectivity failed: ${result.error}`);
+                failures++;
+              }
+            } else {
+              if (!result.ok) failures++;
+            }
+          } catch (e: any) {
+            connectivityOk = false;
+            connectivityError = e.message;
+            if (connSpinner) connSpinner.fail(`Connectivity test error: ${e.message}`);
+            failures++;
+          }
+        }
+      } else {
+        if (!isJsonMode(opts)) {
+          printCheck(
+            chalk.red('✗'),
+            `API key not found`,
+            `Set ${def.envVar} in .verfix/.env or as environment variable`,
+          );
+        }
+        failures++;
+      }
+    }
+
+    // ── Output ──
     if (isJsonMode(opts)) {
       emitJson({
         checks: {
@@ -378,22 +516,34 @@ program
           dashboard_reachable: dashReachable,
           config_found: configFound,
           agents_md_found: agentsMdFound,
+          provider_configured: providerValid,
+          key_format_valid: keyFormatValid,
+          model_valid: modelValid,
+          connectivity: connectivityOk,
+          connectivity_error: connectivityError,
         },
-        failures: failures,
+        provider: aiConfig?.provider ?? null,
+        model: aiConfig?.model ?? null,
+        failures,
+        warnings,
         passed: failures === 0,
       });
       process.exit(failures > 0 ? 1 : 0);
     }
 
     console.log('');
-    if (failures === 0) {
+    if (failures === 0 && warnings === 0) {
       console.log(chalk.bold.green('  All checks passed!'));
+    } else if (failures === 0) {
+      console.log(chalk.bold.yellow(`  All checks passed (${warnings} warning(s))`));
     } else {
       console.log(chalk.bold.red(`  ${failures} check(s) failed`));
+      if (warnings > 0) console.log(chalk.yellow(`  ${warnings} warning(s)`));
     }
     console.log('');
     process.exit(failures > 0 ? 1 : 0);
   });
+
 
 // ─── init command (interactive wizard) ───────────────────────────────────────
 

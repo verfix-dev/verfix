@@ -2,10 +2,9 @@ import fs from 'fs';
 import path from 'path';
 import chalk from 'chalk';
 import ora from 'ora';
-import { input, select, checkbox, confirm } from '@inquirer/prompts';
+import { input, select, checkbox, confirm, password } from '@inquirer/prompts';
 import {
   DOCKER_IMAGE, CONTAINER_NAME, DEFAULT_CONFIG,
-  AI_MODELS,
 } from './constants';
 import {
   generateAgentsSection,
@@ -21,6 +20,10 @@ import { waitForHealth } from './health';
 import axios from 'axios';
 import net from 'net';
 import { getRuntimePorts } from './runtime';
+import { PROVIDER_REGISTRY, getAllProviders, getProviderChoices, detectProviderFromModel } from './providers/registry';
+import type { ProviderId } from './providers/types';
+import { detectLegacyConfig } from './config/migration';
+import { saveAIConfig, updateAIConfigInFile } from './config/loader';
 
 // ─── Port scanning ───────────────────────────────────────────────────────────
 
@@ -75,8 +78,6 @@ async function detectAppPort(): Promise<number | null> {
   return null;
 }
 
-
-
 // ─── README section builder ───────────────────────────────────────────────────
 
 function buildReadmeSection(anchor: string): string {
@@ -90,6 +91,233 @@ verfix run --flow <flow-id> --output json
 \`\`\`
 
 See [AGENTS.md](./AGENTS.md) for full verification documentation.`;
+}
+
+// ─── Provider-aware AI config flow ───────────────────────────────────────────
+
+/**
+ * Run the 4-step provider-aware AI configuration flow.
+ * Returns the selected provider, model, and API key, or null if skipped.
+ */
+async function runProviderFlow(cwd: string): Promise<{
+  provider: ProviderId;
+  model: string;
+  apiKey: string;
+} | null> {
+  // Check for legacy config and offer migration
+  const legacy = detectLegacyConfig(cwd);
+  if (legacy.migrated && legacy.notice) {
+    console.log('');
+    console.log(chalk.yellow(`  ⚠ ${legacy.notice}`));
+    if (legacy.provider) {
+      console.log(chalk.gray(`    Auto-migrating to provider: ${chalk.bold(legacy.provider)}`));
+    } else {
+      console.log(chalk.gray('    Could not auto-detect provider from model name. Please re-enter your config below.'));
+    }
+    console.log('');
+  }
+
+  // Check for pre-existing env vars from any provider
+  const prefilledProvider = detectPrefilledProvider();
+
+  // ── Step 1: Provider Selection ──
+  console.log(chalk.bold.cyan('  Step 1/4 — Select AI Provider'));
+  console.log('');
+
+  const choices = getProviderChoices().map((c) => ({
+    name: c.value === prefilledProvider
+      ? `${c.name} ${chalk.green('(key found in environment)')}`
+      : c.name,
+    value: c.value,
+  }));
+
+  const provider = await select<ProviderId>({
+    message: 'AI provider',
+    choices,
+    default: prefilledProvider ?? 'openai',
+  });
+
+  const def = PROVIDER_REGISTRY[provider];
+
+  // ── Step 2: API Key Input ──
+  console.log('');
+  console.log(chalk.bold.cyan('  Step 2/4 — API Key'));
+  console.log('');
+
+  // Check if key already exists
+  const existingKey = process.env[def.envVar] || '';
+  const existingKeyMasked = existingKey ? `${existingKey.slice(0, 8)}${'*'.repeat(Math.max(0, existingKey.length - 8))}` : '';
+
+  if (existingKey) {
+    console.log(chalk.gray(`  ℹ Found ${def.envVar} in environment: ${existingKeyMasked}`));
+    console.log('');
+  }
+
+  let apiKey: string;
+
+  if (existingKey) {
+    const useExisting = await confirm({
+      message: `Use existing ${def.envVar} from environment?`,
+      default: true,
+    });
+    if (useExisting) {
+      apiKey = existingKey;
+    } else {
+      apiKey = await password({
+        message: `Enter ${def.displayName} API key (${def.keyPatternHint}):`,
+        mask: '*',
+      });
+    }
+  } else {
+    apiKey = await password({
+      message: `Enter ${def.displayName} API key (${def.keyPatternHint}):`,
+      mask: '*',
+    });
+  }
+
+  if (!apiKey || apiKey.trim() === '') {
+    console.log(chalk.gray('  ⏭ Skipping AI configuration (no key provided)'));
+    return null;
+  }
+
+  apiKey = apiKey.trim();
+
+  // Validate key format
+  if (!def.keyPattern.test(apiKey)) {
+    console.log(chalk.red(`  ✗ Key format invalid — expected a key that ${def.keyPatternHint}`));
+    const retry = await confirm({
+      message: 'Re-enter the API key?',
+      default: true,
+    });
+    if (retry) {
+      apiKey = (await password({
+        message: `${def.displayName} API key:`,
+        mask: '*',
+      })).trim();
+      if (!def.keyPattern.test(apiKey)) {
+        console.log(chalk.red('  ✗ Key format still invalid. Skipping AI configuration.'));
+        return null;
+      }
+    } else {
+      return null;
+    }
+  }
+
+  console.log(chalk.green('  ✓ Key format looks valid'));
+
+  // Optional connectivity test
+  console.log('');
+  const runTest = await confirm({
+    message: 'Test API key connectivity now? (recommended)',
+    default: true,
+  });
+
+  if (runTest) {
+    const connectSpinner = ora(`Testing ${def.displayName} connectivity...`).start();
+    try {
+      const { testConnectivity } = await getProviderImpl(provider);
+      const result = await testConnectivity(apiKey);
+      if (result.ok) {
+        connectSpinner.succeed(`Connected to ${def.displayName} API`);
+      } else {
+        connectSpinner.fail(`Connectivity test failed: ${result.error}`);
+        const continueAnyway = await confirm({
+          message: 'Continue with this key anyway?',
+          default: false,
+        });
+        if (!continueAnyway) return null;
+      }
+    } catch {
+      connectSpinner.warn('Connectivity test skipped (timeout)');
+    }
+  }
+
+  // ── Step 3: Model Selection ──
+  console.log('');
+  console.log(chalk.bold.cyan('  Step 3/4 — Select Model'));
+  console.log('');
+
+  let model: string;
+
+  if (def.freeformModel) {
+    // OpenRouter: freeform input
+    console.log(chalk.gray(`  ℹ OpenRouter supports any model. Enter the model ID (e.g. openai/gpt-4o-mini)`));
+    console.log('');
+    model = await input({
+      message: 'Model ID',
+      default: 'openai/gpt-4o-mini',
+    });
+  } else {
+    // Curated model list
+    const modelChoices = def.models.map((m) => ({
+      name: m.recommended ? `${m.name} ⭐` : m.name,
+      value: m.id,
+    }));
+
+    model = await select({
+      message: `${def.displayName} model`,
+      choices: modelChoices,
+      default: def.models.find((m) => m.recommended)?.id ?? def.models[0]?.id,
+    });
+  }
+
+  // ── Step 4: Confirm & Persist ──
+  console.log('');
+  console.log(chalk.bold.cyan('  Step 4/4 — Confirm'));
+  console.log('');
+  console.log(`  Provider: ${chalk.cyan(def.displayName)}`);
+  console.log(`  Model:    ${chalk.cyan(model)}`);
+  console.log(`  Key:      ${chalk.gray(apiKey.slice(0, 8) + '*'.repeat(Math.max(0, apiKey.length - 8)))}`);
+  console.log('');
+
+  const confirmed = await confirm({
+    message: 'Save this configuration?',
+    default: true,
+  });
+
+  if (!confirmed) {
+    console.log(chalk.gray('  ⏭ AI configuration skipped'));
+    return null;
+  }
+
+  return { provider, model, apiKey };
+}
+
+/**
+ * Detect if any provider has a key already set in process.env.
+ */
+function detectPrefilledProvider(): ProviderId | null {
+  const providers = getAllProviders();
+  for (const p of providers) {
+    if (process.env[p.envVar]) return p.id;
+  }
+  return null;
+}
+
+/**
+ * Lazy-load provider implementation for connectivity testing.
+ */
+async function getProviderImpl(provider: ProviderId): Promise<{
+  testConnectivity: (key: string) => Promise<{ ok: boolean; error?: string }>;
+}> {
+  switch (provider) {
+    case 'openai': {
+      const { OpenAIProvider } = await import('./providers/openai');
+      return new OpenAIProvider();
+    }
+    case 'anthropic': {
+      const { AnthropicProvider } = await import('./providers/anthropic');
+      return new AnthropicProvider();
+    }
+    case 'gemini': {
+      const { GeminiProvider } = await import('./providers/gemini');
+      return new GeminiProvider();
+    }
+    case 'openrouter': {
+      const { OpenRouterProvider } = await import('./providers/openrouter');
+      return new OpenRouterProvider();
+    }
+  }
 }
 
 // ─── Main init wizard ────────────────────────────────────────────────────────
@@ -109,52 +337,27 @@ export async function runInitWizard(): Promise<void> {
     process.exit(1);
   }
   dockerSpinner.succeed('Docker is running');
+  console.log('');
 
-  // ── Step 2: Collect env vars ──
-  // Always prompt during init so the user can update keys even if .verfix/.env exists.
-  const existingKey = process.env.AI_API_KEY || '';
-  const existingModel = process.env.AI_MODEL || '';
+  // ── Step 2: Provider-Aware AI Config ──
+  const aiConfig = await runProviderFlow(cwd);
 
-  let aiApiKey = await input({
-    message: existingKey
-      ? 'AI API key (press Enter to keep existing)'
-      : 'AI API key for Assisted/Exploratory mode (optional, press Enter to skip)',
-    default: existingKey,
-  });
+  let aiApiKey = '';
+  let aiModel = '';
+  let aiProvider: ProviderId | undefined;
 
-  let aiModel = existingModel;
+  if (aiConfig) {
+    aiProvider = aiConfig.provider;
+    aiApiKey = aiConfig.apiKey;
+    aiModel = aiConfig.model;
 
-  if (aiApiKey && aiApiKey !== existingKey) {
-    // Key changed — reset model so user picks again
-    aiModel = '';
-  }
-
-  if (aiApiKey && !aiModel) {
-    const modelChoice = await select({
-      message: 'AI model to use',
-      choices: AI_MODELS,
-      default: 'gpt-5.5',
-    });
-
-    if (modelChoice === '__custom__') {
-      aiModel = await input({ message: 'Enter custom model name', default: 'gpt-4o-mini' });
-    } else {
-      aiModel = modelChoice;
-    }
-  }
-
-  // Write .verfix/.env if keys provided
-  if (aiApiKey) {
-    const envDir = path.join(cwd, '.verfix');
-    if (!fs.existsSync(envDir)) fs.mkdirSync(envDir, { recursive: true });
-    const envContent = [
-      `AI_API_KEY=${aiApiKey}`,
-      aiModel ? `AI_MODEL=${aiModel}` : '',
-    ].filter(Boolean).join('\n') + '\n';
-    fs.writeFileSync(path.join(envDir, '.env'), envContent, 'utf-8');
+    // Persist to .verfix/.env
+    saveAIConfig(cwd, aiProvider, aiModel, aiApiKey);
+    console.log(chalk.green('  ✓ AI configuration saved'));
   }
 
   // ── Step 3: Pull + Start Runtime ──
+  console.log('');
   const state = getContainerState();
   if (state?.status === 'running') {
     syncRuntimePortsFromContainer();
@@ -171,7 +374,7 @@ export async function runInitWizard(): Promise<void> {
 
     const startSpinner = ora('Starting runtime...').start();
     try {
-      await startContainer({ aiApiKey, aiModel });
+      await startContainer({ aiApiKey, aiModel, aiProvider });
       startSpinner.text = 'Waiting for health check...';
       const healthy = await waitForHealth();
       if (!healthy) {
@@ -213,7 +416,7 @@ export async function runInitWizard(): Promise<void> {
     default: 'assisted',
   });
 
-  // ── Step 7: Write verfix.config.json (empty flows — agent creates them) ──
+  // ── Step 6: Write verfix.config.json ──
   const configPath = path.join(cwd, DEFAULT_CONFIG);
   let writeConfig = true;
 
@@ -225,21 +428,29 @@ export async function runInitWizard(): Promise<void> {
   }
 
   if (writeConfig) {
-    const config = { baseUrl, mode, flows: [] };
+    const config: Record<string, unknown> = { baseUrl, mode, flows: [] };
+    if (aiProvider && aiModel) {
+      config.ai = { provider: aiProvider, model: aiModel };
+    }
     fs.writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n', 'utf-8');
     console.log(chalk.green(`  ✓ verfix.config.json created`));
   } else {
-    console.log(chalk.gray('  ⏭ Keeping existing verfix.config.json'));
+    // If config exists, update just the ai block without overwriting flows
+    if (aiProvider && aiModel && fs.existsSync(configPath)) {
+      updateAIConfigInFile(configPath, aiProvider, aiModel);
+      console.log(chalk.green(`  ✓ verfix.config.json ai block updated`));
+    } else {
+      console.log(chalk.gray('  ⏭ Keeping existing verfix.config.json'));
+    }
   }
 
-  // ── Step 8: Write/update AGENTS.md ──
+  // ── Step 7: Write/update AGENTS.md ──
   const agentsPath = path.join(cwd, 'AGENTS.md');
   const flowSummaries: { id: string }[] = [];
   const runtimePorts = getRuntimePorts();
   const verfixSection = generateAgentsSection(flowSummaries, mode, baseUrl, runtimePorts);
 
   if (!fs.existsSync(agentsPath)) {
-    // New file — create it fresh, no prompt needed
     fs.writeFileSync(agentsPath, verfixSection + '\n', 'utf-8');
     console.log(chalk.green('  ✓ AGENTS.md created'));
   } else {
@@ -247,7 +458,6 @@ export async function runInitWizard(): Promise<void> {
     const sectionRegex = /## Verfix — Browser Verification[\s\S]*?(?=\n## [^V]|\n## $|$)/;
 
     if (sectionRegex.test(existing)) {
-      // File already has a Verfix section — ask before replacing
       const updateIt = await confirm({
         message: 'AGENTS.md already has a Verfix section. Update it?',
         default: true,
@@ -260,7 +470,6 @@ export async function runInitWizard(): Promise<void> {
         console.log(chalk.gray('  ⏭ Keeping existing AGENTS.md'));
       }
     } else {
-      // Existing file, no Verfix section yet — ask before appending
       const appendIt = await confirm({
         message: 'AGENTS.md exists. Append Verfix section to it?',
         default: true,
@@ -275,9 +484,7 @@ export async function runInitWizard(): Promise<void> {
     }
   }
 
-  // ── Step 8.5: Write/update platform-specific agent files ──
-  // Detect which platforms exist in the project and pre-check them,
-  // but let the user make the final selection (they may use multiple agents).
+  // ── Step 8: Platform-specific agent files ──
   const detectedPlatforms = detectAllAgentPlatforms(cwd);
 
   const platformChoices = [
@@ -298,7 +505,6 @@ export async function runInitWizard(): Promise<void> {
     },
   ];
 
-  // Always print a note before the checkbox so it's clear what happens on empty selection
   console.log(chalk.gray('  ℹ AGENTS.md is always written as the default. Select agents below for'));
   console.log(chalk.gray('    additional platform-specific files (.cursorrules, CLAUDE.md, CODEX.md).'));
   console.log(chalk.gray('    Press Enter with nothing selected to use AGENTS.md only.'));
@@ -331,7 +537,6 @@ export async function runInitWizard(): Promise<void> {
     if (!platformContent) continue;
 
     if (!fs.existsSync(platformPath)) {
-      // New file — create without prompting
       fs.writeFileSync(platformPath, platformContent + '\n', 'utf-8');
       console.log(chalk.green(`  ✓ ${platformFileName} created`));
       updatedPlatformFiles.push(platformFileName);
@@ -340,7 +545,6 @@ export async function runInitWizard(): Promise<void> {
       const hasVerfixSection = existingPlatform.includes('Verfix') || existingPlatform.includes('project that uses Verfix');
 
       if (hasVerfixSection) {
-        // Already has Verfix content — ask before replacing
         const updatePlatform = await confirm({
           message: `${platformFileName} already references Verfix. Update it?`,
           default: true,
@@ -350,7 +554,6 @@ export async function runInitWizard(): Promise<void> {
           continue;
         }
       } else {
-        // Exists but no Verfix section yet — ask before appending
         const appendPlatform = await confirm({
           message: `${platformFileName} exists. Append Verfix section to it?`,
           default: true,
@@ -361,7 +564,6 @@ export async function runInitWizard(): Promise<void> {
         }
       }
 
-      // Write — replace existing Verfix section or append
       if (platform === 'cursor') {
         const startMarker = 'You are working in a project that uses Verfix';
         if (existingPlatform.includes(startMarker)) {
@@ -387,9 +589,8 @@ export async function runInitWizard(): Promise<void> {
     }
   }
 
-  // ── Step 8.7: Write/update README.md ──
+  // ── Step 9: README.md ──
   const readmePath = path.join(cwd, 'README.md');
-  // Unique anchor so we never accidentally match an unrelated ## Verification section
   const README_VERFIX_ANCHOR = '<!-- verfix -->';
   let readmeUpdated = false;
 
@@ -398,7 +599,6 @@ export async function runInitWizard(): Promise<void> {
     const hasVerfixAnchor = readmeContent.includes(README_VERFIX_ANCHOR);
 
     if (hasVerfixAnchor) {
-      // Has our anchor — safe to replace just the Verfix block
       const updateReadme = await confirm({
         message: 'README.md already has a Verfix section. Update it?',
         default: true,
@@ -416,7 +616,6 @@ export async function runInitWizard(): Promise<void> {
         console.log(chalk.gray('  ⏭ Keeping existing README.md'));
       }
     } else {
-      // No anchor yet — ask opt-in (default false to be safe)
       const addToReadme = await confirm({
         message: 'Add a Verfix section to README.md?',
         default: false,
@@ -431,12 +630,15 @@ export async function runInitWizard(): Promise<void> {
     }
   }
 
-  // ── Step 9: Print summary ──
+  // ── Summary ──
   console.log('');
   console.log(chalk.bold.green('  Setup complete!'));
   console.log('');
   console.log(chalk.green('  ✓ Runtime started'));
-  if (writeConfig) console.log(chalk.green('  ✓ verfix.config.json created (no flows yet)'));
+  if (aiProvider) {
+    console.log(chalk.green(`  ✓ AI configured: ${PROVIDER_REGISTRY[aiProvider].displayName} / ${aiModel}`));
+  }
+  if (writeConfig) console.log(chalk.green('  ✓ verfix.config.json created'));
   console.log(chalk.green('  ✓ AGENTS.md updated'));
   for (const f of updatedPlatformFiles) {
     console.log(chalk.green(`  ✓ ${f} updated`));
