@@ -76,6 +76,7 @@ function test_anthropic_key_validation() {
 function test_gemini_key_validation() {
   const def = PROVIDER_REGISTRY.gemini;
   assert.ok(def.keyPattern.test('AIzaSyBcXyz'), 'AIza... should be valid');
+  assert.ok(def.keyPattern.test('AQ.Ab123'), 'AQ.Ab123 should be valid');
   assert.ok(!def.keyPattern.test('sk-abc'), 'sk- prefix should fail Gemini');
   assert.ok(!def.keyPattern.test('sk-ant-abc'), 'sk-ant- should fail Gemini');
   console.log('✓ Gemini key validation');

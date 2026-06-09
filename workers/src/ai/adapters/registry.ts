@@ -79,7 +79,7 @@ export function detectProviderId(): string {
   // 2. Heuristic: inspect AI_API_KEY prefix
   const key = process.env.AI_API_KEY || ''
   if (key.startsWith('sk-ant-'))  return 'anthropic'
-  if (key.startsWith('AIza'))     return 'gemini'
+  if (key.startsWith('AIza') || key.startsWith('AQ')) return 'gemini'
   if (key.startsWith('sk-or-'))   return 'openrouter'
 
   // 3. Provider-specific key vars (new format from CLI)

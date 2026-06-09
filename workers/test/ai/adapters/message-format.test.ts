@@ -371,8 +371,8 @@ async function test_gemini_returns_null_when_no_key() {
 async function test_gemini_default_model() {
   resetEnv();
   const adapter = new GeminiAdapter();
-  assert.strictEqual(adapter.getModelName(), 'gemini-2.5-flash', 'default Gemini model');
-  console.log('✓ Gemini: default model = gemini-2.5-flash');
+  assert.strictEqual(adapter.getModelName(), 'gemini-3.5-flash', 'default Gemini model');
+  console.log('✓ Gemini: default model = gemini-3.5-flash');
 }
 
 // ─── Run all ──────────────────────────────────────────────────────────────────

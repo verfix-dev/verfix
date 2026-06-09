@@ -28,7 +28,7 @@ export class GeminiAdapter implements ProviderAdapter {
   }
 
   getModelName(): string {
-    return process.env.AI_MODEL || 'gemini-2.5-flash'
+    return process.env.AI_MODEL || 'gemini-3.5-flash'
   }
 
   async chat(messages: ChatMessage[], opts?: CompletionOptions): Promise<string | null> {

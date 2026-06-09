@@ -68,8 +68,8 @@ function test_isEnabled_true_with_legacy_AI_API_KEY() {
 function test_getModelName_default() {
   resetEnv();
   const adapter = new OpenAIAdapter();
-  assert.strictEqual(adapter.getModelName(), 'gpt-4o-mini', 'default model');
-  console.log('✓ getModelName() default = gpt-4o-mini');
+  assert.strictEqual(adapter.getModelName(), 'gpt-5.4-mini', 'default model');
+  console.log('✓ getModelName() default = gpt-5.4-mini');
 }
 
 function test_getModelName_from_env() {

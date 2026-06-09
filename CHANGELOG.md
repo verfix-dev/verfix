@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **API Key Connectivity Testing:** Added an interactive connectivity test step for AI API keys during the `verfix init` setup wizard.
 - **Config Migration & Validation:** Added schema validation and automated configuration migration support for legacy configurations.
 - **AI Agent Context File:** Added the new [.github/agents.md](file:///home/aditya/projects/verfix/.github/agents.md) file containing coding standards, monorepo architecture, testing instructions, and critical networking guardrails for AI coding assistants.
+- **2026 Model Support:** Updated static model lists for OpenAI (`gpt-5.4-mini`/`gpt-5.5`), Anthropic (`claude-sonnet-4-6`/`claude-opus-4-8`), and Gemini (`gemini-3.5-flash`/`gemini-3.5-pro`), and added support for the new Gemini `AQ` key prefix.
 
 ### Changed
 - Improved Docker networking resolving logic in CLI and workers to handle platform-specific URLs (`host.docker.internal` vs. host networking) across multiple AI providers.

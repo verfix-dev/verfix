@@ -5,26 +5,21 @@ import { ProviderDefinition, ProviderId, ProviderModel } from './types'
 // ---------------------------------------------------------------------------
 
 const OPENAI_MODELS: ProviderModel[] = [
-  { id: 'gpt-4.1-mini', name: 'GPT-4.1 Mini (recommended)', recommended: true },
-  { id: 'gpt-4o-mini', name: 'GPT-4o Mini' },
-  { id: 'gpt-4o', name: 'GPT-4o' },
-  { id: 'gpt-4-turbo', name: 'GPT-4 Turbo' },
-  { id: 'o1-mini', name: 'o1 Mini' },
-  { id: 'o3-mini', name: 'o3 Mini' },
+  { id: 'gpt-5.4-mini', name: 'GPT-5.4 Mini (recommended & affordable)', recommended: true },
+  { id: 'gpt-5.5', name: 'GPT-5.5' },
+  { id: 'gpt-5.5-pro', name: 'GPT-5.5 Pro' },
 ]
 
 const ANTHROPIC_MODELS: ProviderModel[] = [
-  { id: 'claude-sonnet-4-5', name: 'Claude Sonnet 4.5 (recommended)', recommended: true },
-  { id: 'claude-3-7-sonnet-20250219', name: 'Claude 3.7 Sonnet' },
-  { id: 'claude-3-5-haiku-20241022', name: 'Claude 3.5 Haiku' },
-  { id: 'claude-opus-4-5', name: 'Claude Opus 4.5' },
+  { id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6 (recommended & affordable)', recommended: true },
+  { id: 'claude-opus-4-8', name: 'Claude Opus 4.8' },
+  { id: 'claude-opus-4-7', name: 'Claude Opus 4.7' },
 ]
 
 const GEMINI_MODELS: ProviderModel[] = [
-  { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro (recommended)', recommended: true },
-  { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash' },
-  { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash' },
-  { id: 'gemini-1.5-pro', name: 'Gemini 1.5 Pro' },
+  { id: 'gemini-3.5-pro', name: 'Gemini 3.5 Pro (recommended)', recommended: true },
+  { id: 'gemini-3.5-flash', name: 'Gemini 3.5 Flash (affordable)' },
+  { id: 'gemini-3.1-pro', name: 'Gemini 3.1 Pro' },
 ]
 
 // ---------------------------------------------------------------------------
@@ -64,8 +59,8 @@ export const PROVIDER_REGISTRY: Record<ProviderId, ProviderDefinition> = {
     id: 'gemini',
     displayName: 'Google Gemini',
     envVar: 'GEMINI_API_KEY',
-    keyPattern: /^AIza/,
-    keyPatternHint: "starts with 'AIza'",
+    keyPattern: /^(AIza|AQ)/,
+    keyPatternHint: "starts with 'AIza' or 'AQ'",
     models: GEMINI_MODELS,
     baseUrl: 'https://generativelanguage.googleapis.com',
     authHeader: 'X-Goog-Api-Key',

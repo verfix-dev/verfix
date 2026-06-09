@@ -24,7 +24,7 @@ export class OpenAIAdapter implements ProviderAdapter {
   }
 
   getModelName(): string {
-    return process.env.AI_MODEL || 'gpt-4o-mini'
+    return process.env.AI_MODEL || 'gpt-5.4-mini'
   }
 
   async chat(messages: ChatMessage[], opts?: CompletionOptions): Promise<string | null> {

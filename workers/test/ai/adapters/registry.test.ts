@@ -70,7 +70,10 @@ function test_heuristic_gemini_key() {
   resetEnv()
   process.env.AI_API_KEY = 'AIzaSyBcTestKey'
   assert.strictEqual(detectProviderId(), 'gemini', 'AIza → gemini')
-  console.log('✓ AI_API_KEY=AIza... → gemini (heuristic)')
+  resetEnv()
+  process.env.AI_API_KEY = 'AQ.Ab123'
+  assert.strictEqual(detectProviderId(), 'gemini', 'AQ → gemini')
+  console.log('✓ AI_API_KEY=AIza... / AQ... → gemini (heuristic)')
 }
 
 function test_heuristic_openrouter_key() {

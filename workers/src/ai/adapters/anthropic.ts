@@ -29,7 +29,7 @@ export class AnthropicAdapter implements ProviderAdapter {
   }
 
   getModelName(): string {
-    return process.env.AI_MODEL || 'claude-sonnet-4-5'
+    return process.env.AI_MODEL || 'claude-sonnet-4-6'
   }
 
   async chat(messages: ChatMessage[], opts?: CompletionOptions): Promise<string | null> {
