@@ -27,6 +27,8 @@ export function isHostNetworkMode(): boolean {
 export interface DockerRunOptions {
   aiApiKey?: string;
   aiModel?: string;
+  /** Provider ID — used to pass provider-specific env var to container */
+  aiProvider?: string;
 }
 
 /**
@@ -164,11 +166,38 @@ export async function startContainer(opts?: DockerRunOptions): Promise<'already_
   // Create new container
   const envArgs: string[] = [];
 
-  // Pass through host env vars if set, or use provided values
-  const aiKey = opts?.aiApiKey || process.env.AI_API_KEY;
+  // Pass through AI config to the container.
+  // New format: provider-specific env var + AI_PROVIDER + AI_MODEL
+  // Legacy bridge: also pass AI_API_KEY for backward compat with older runtime images.
+  const aiProvider = opts?.aiProvider || process.env.AI_PROVIDER;
   const aiModel = opts?.aiModel || process.env.AI_MODEL;
 
-  if (aiKey) envArgs.push('-e', `AI_API_KEY=${aiKey}`);
+  // Map provider IDs to their env var names
+  const providerKeyMap: Record<string, string> = {
+    openai: 'OPENAI_API_KEY',
+    anthropic: 'ANTHROPIC_API_KEY',
+    gemini: 'GEMINI_API_KEY',
+    openrouter: 'OPENROUTER_API_KEY',
+  };
+
+  let aiKey = opts?.aiApiKey;
+  if (!aiKey && aiProvider && providerKeyMap[aiProvider]) {
+    aiKey = process.env[providerKeyMap[aiProvider]];
+  }
+  if (!aiKey) {
+    // Fall back to legacy generic key
+    aiKey = process.env.AI_API_KEY;
+  }
+
+  if (aiProvider) envArgs.push('-e', `AI_PROVIDER=${aiProvider}`);
+  if (aiKey) {
+    // Pass provider-specific key if we know the provider
+    if (aiProvider && providerKeyMap[aiProvider]) {
+      envArgs.push('-e', `${providerKeyMap[aiProvider]}=${aiKey}`);
+    }
+    // Always pass legacy AI_API_KEY for backward compat with older runtime images
+    envArgs.push('-e', `AI_API_KEY=${aiKey}`);
+  }
   if (aiModel) envArgs.push('-e', `AI_MODEL=${aiModel}`);
   envArgs.push('-e', `API_PORT=${resolvedPorts.apiPort}`);
   envArgs.push('-e', `DASHBOARD_PORT=${resolvedPorts.dashboardPort}`);
