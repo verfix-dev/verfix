@@ -83,9 +83,10 @@ export class OpenAIAdapter implements ProviderAdapter {
       }
 
       // Retry with max_completion_tokens for o1/o3 reasoning models
+      let parsedError: any | null = null
       if (res.status === 400 && opts?.maxTokens && !useCompletionTokens) {
-        const errBody = await parseJsonSafe(res) as any
-        const msg: string = errBody?.error?.message || ''
+        parsedError = await parseJsonSafe(res) as any
+        const msg: string = parsedError?.error?.message || ''
         if (msg.includes('max_tokens') && msg.includes('max_completion_tokens')) {
           console.log('  ℹ️  Retrying with max_completion_tokens (reasoning model detected)')
           return this._doRequest(url, key, messages, opts, true)
@@ -93,7 +94,7 @@ export class OpenAIAdapter implements ProviderAdapter {
       }
 
       if (!res.ok) {
-        const errBody = await parseJsonSafe(res) as any
+        const errBody = parsedError ?? await parseJsonSafe(res) as any
         console.warn(`  ⚠ OpenAI HTTP ${res.status}: ${errBody?.error?.message || res.statusText}`)
         return null
       }
