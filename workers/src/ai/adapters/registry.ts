@@ -8,8 +8,13 @@
  *      sk-ant-*  → anthropic
  *      AIza*     → gemini
  *      sk-or-*   → openrouter
- *      sk-* / anything else → openai (safe default)
- *   3. Fallback: openai
+ *      sk-* / anything else → openai
+ *   3. Provider-specific key env vars
+ *      ANTHROPIC_API_KEY → anthropic
+ *      GEMINI_API_KEY → gemini
+ *      OPENROUTER_API_KEY → openrouter
+ *      OPENAI_API_KEY → openai
+ *   4. Fallback: openai
  *
  * The adapter is lazily constructed and then cached for the lifetime
  * of the process. Reset with _resetAdapterCache() in tests.
@@ -59,7 +64,7 @@ export function resolveAdapter(): ProviderAdapter {
 
 /**
  * Determine which provider to use.
- * This function is pure (no side effects) and testable in isolation.
+ * This function is testable in isolation.
  */
 export function detectProviderId(): string {
   // 1. Explicit env var wins

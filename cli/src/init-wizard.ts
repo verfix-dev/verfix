@@ -110,7 +110,7 @@ async function runProviderFlow(cwd: string): Promise<{
     console.log('');
     console.log(chalk.yellow(`  ⚠ ${legacy.notice}`));
     if (legacy.provider) {
-      console.log(chalk.gray(`    Auto-migrating to provider: ${chalk.bold(legacy.provider)}`));
+      console.log(chalk.gray(`    Detected provider from legacy config: ${chalk.bold(legacy.provider)}`));
     } else {
       console.log(chalk.gray('    Could not auto-detect provider from model name. Please re-enter your config below.'));
     }

@@ -31,7 +31,6 @@ export async function createProvider(id: ProviderId): Promise<AIProvider> {
 /**
  * Synchronous factory that creates a provider instance by ID.
  * Uses synchronous require() for use in contexts where async isn't possible.
- * Falls back gracefully by returning a minimal stub if the module isn't loaded.
  */
 export function createProviderInstance(id: ProviderId): AIProvider {
   switch (id) {
