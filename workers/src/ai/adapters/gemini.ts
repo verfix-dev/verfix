@@ -49,9 +49,9 @@ export class GeminiAdapter implements ProviderAdapter {
 
     const geminiMessages = messages
       .filter((m) => m.role !== 'system')
-      .map((m, i) => ({
+      .map((m) => ({
         role: m.role === 'assistant' ? 'model' : 'user',
-        parts: [{ text: i === 0 && systemPrefix ? systemPrefix + m.content : m.content }],
+        parts: [{ text: m.content }],
       }))
 
     if (geminiMessages.length === 0) {
@@ -63,6 +63,11 @@ export class GeminiAdapter implements ProviderAdapter {
     // If the first message is somehow 'model', add a dummy user message.
     if (geminiMessages[0].role !== 'user') {
       geminiMessages.unshift({ role: 'user', parts: [{ text: '(start)' }] })
+    }
+
+    // Gemini has no system role — prepend system content to the first user message.
+    if (systemPrefix) {
+      geminiMessages[0].parts[0].text = systemPrefix + geminiMessages[0].parts[0].text
     }
 
     const generationConfig: Record<string, unknown> = {
