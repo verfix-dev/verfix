@@ -23,7 +23,10 @@ export function detectLegacyConfig(cwd: string): MigrationResult {
   }
 
   const content = fs.readFileSync(envPath, 'utf-8')
-  const lines = content.split('\n').filter(l => l.trim() && !l.startsWith('#'))
+  const lines = content
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l && !l.startsWith('#'))
   const env: Record<string, string> = {}
   for (const line of lines) {
     const idx = line.indexOf('=')
