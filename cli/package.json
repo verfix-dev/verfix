@@ -1,6 +1,6 @@
 {
   "name": "verfix",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Browser verification CLI for AI coding agents — run deterministic browser flows, assert UI state, and get structured failure reports. Local-first, Docker-powered.",
   "main": "dist/index.js",
   "scripts": {
