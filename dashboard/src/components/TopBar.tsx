@@ -1,38 +1,88 @@
 'use client';
-import Link from 'next/link';
-import { usePathname } from 'next/navigation';
-import { Zap, BarChart2, AlertTriangle, ArrowLeft } from 'lucide-react';
 
-const LINKS = [
-  { href: '/', label: 'Executions', icon: null },
-  { href: '/metrics', label: 'Metrics', icon: BarChart2 },
-  { href: '/flaky', label: 'Flaky', icon: AlertTriangle },
-];
+import { useEffect, useState } from 'react';
+import { CheckCircle2, Moon, Sun, PanelLeft, Plus, X } from 'lucide-react';
+import { useWorkspace } from '@/context/WorkspaceContext';
+
+type Theme = 'dark' | 'light';
 
 export default function TopBar() {
-  const path = usePathname();
+  const {
+    executions,
+    sidebarCollapsed,
+    setSidebarCollapsed,
+    showNewJob,
+    setShowNewJob,
+  } = useWorkspace();
+
+  const [theme, setTheme] = useState<Theme>('dark');
+
+  useEffect(() => {
+    const syncTheme = setTimeout(() => {
+      const saved = window.localStorage.getItem('verfix-theme');
+      const next: Theme = saved === 'light' ? 'light' : 'dark';
+      document.documentElement.dataset.theme = next;
+      setTheme(next);
+    }, 0);
+
+    return () => clearTimeout(syncTheme);
+  }, []);
+
+  const toggleTheme = () => {
+    const next: Theme = theme === 'dark' ? 'light' : 'dark';
+    document.documentElement.dataset.theme = next;
+    window.localStorage.setItem('verfix-theme', next);
+    setTheme(next);
+  };
+
+  // Calculate stats directly from workspace context
+  const activeCount = executions.filter(e => e.status === 'running' || e.status === 'queued').length;
+  const completedExecs = executions.filter(e => e.status === 'completed' || e.status === 'failed');
+  const passRate = completedExecs.length > 0
+    ? Math.round(completedExecs.filter(e => e.passed).length / completedExecs.length * 100)
+    : undefined;
+
   return (
-    <div style={{ height: 44, background: 'var(--bg-surface)', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', padding: '0 16px', gap: 0, flexShrink: 0 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingRight: 20, borderRight: '1px solid var(--border)', marginRight: 8 }}>
-        <div style={{ width: 22, height: 22, borderRadius: 6, background: 'var(--gradient-brand)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <Zap size={11} color="white" />
-        </div>
-        <span style={{ fontWeight: 700, fontSize: 13, background: 'var(--gradient-brand)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', letterSpacing: '-0.01em' }}>Verfix</span>
+    <header className="topbar">
+      {/* Sidebar Toggle Button */}
+      <button
+        type="button"
+        className="icon-button topbar-sidebar-toggle"
+        onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+        aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+        title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+      >
+        <PanelLeft size={15} aria-hidden="true" />
+      </button>
+
+      <div className="topbar-spacer" />
+
+      {/* Toolbar Status & Cluster */}
+      <div className="toolbar-cluster" aria-label="Dashboard status">
+        {activeCount > 0 && (
+          <span className="status-chip">
+            <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--accent-blue)', animation: 'pulse-dot 1.5s infinite' }} />
+            {activeCount} active
+          </span>
+        )}
+        {typeof passRate === 'number' && (
+          <span className="status-chip optional" style={{ color: passRate >= 80 ? 'var(--accent-green)' : 'var(--accent-yellow)' }}>
+            <CheckCircle2 size={12} aria-hidden="true" />
+            {passRate}% pass
+          </span>
+        )}
+        <button 
+          className="icon-button" 
+          type="button" 
+          onClick={toggleTheme} 
+          aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`} 
+          title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`}
+        >
+          {theme === 'dark' ? <Sun size={15} aria-hidden="true" /> : <Moon size={15} aria-hidden="true" />}
+        </button>
+
+
       </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-        {LINKS.map(l => {
-          const active = path === l.href;
-          const Icon = l.icon;
-          return (
-            <Link key={l.href} href={l.href} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '4px 10px', borderRadius: 5, fontSize: 12, fontWeight: active ? 600 : 500, color: active ? 'var(--text-primary)' : 'var(--text-muted)', textDecoration: 'none', background: active ? 'var(--bg-elevated)' : 'transparent', transition: 'all 0.1s' }}>
-              {Icon && <Icon size={11} />}
-              {l.label}
-            </Link>
-          );
-        })}
-      </div>
-      <div style={{ flex: 1 }} />
-      <span style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'JetBrains Mono, monospace' }}>Phase 3</span>
-    </div>
+    </header>
   );
 }

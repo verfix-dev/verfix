@@ -1,29 +1,61 @@
 'use client';
+
 import { useState } from 'react';
-import { Play, Plus, Trash2, ChevronDown, ChevronUp, X, Settings2 } from 'lucide-react';
+import { 
+  AlertTriangle, 
+  ChevronDown, 
+  ChevronUp, 
+  Compass, 
+  Play, 
+  Plus, 
+  Settings2, 
+  X, 
+  Globe, 
+  FileText, 
+  Zap, 
+  CheckSquare, 
+  Activity, 
+  Sparkles,
+  Trash2
+} from 'lucide-react';
 
 type Assertion = { type: string; selector?: string; value?: string };
 type FlowStep = { action: string; testId?: string; selector?: string; value?: string };
 
-const ASSERTION_TYPES = ['page_loaded','no_console_errors','selector_visible','text_visible','url_contains','title_contains','network_request_success'];
+const ASSERTION_TYPES = [
+  'page_loaded',
+  'no_console_errors',
+  'selector_visible',
+  'text_visible',
+  'url_contains',
+  'title_contains',
+  'network_request_success'
+];
 const NEEDS_SELECTOR = ['selector_visible'];
-const NEEDS_VALUE = ['text_visible','url_contains','title_contains','network_request_success'];
+const NEEDS_VALUE = ['text_visible', 'url_contains', 'title_contains', 'network_request_success'];
 
 const QUICK_PRESETS = [
-  { label: 'Smoke Test', assertions: [{ type: 'page_loaded' }, { type: 'no_console_errors' }] },
-  { label: 'URL Check', assertions: [{ type: 'page_loaded' }, { type: 'url_contains', value: '' }] },
-  { label: 'Full Check', assertions: [{ type: 'page_loaded' }, { type: 'no_console_errors' }, { type: 'selector_visible', selector: 'body' }] },
+  { label: 'Smoke Presets', assertions: [{ type: 'page_loaded' }, { type: 'no_console_errors' }] },
+  { label: 'Verify Target URL', assertions: [{ type: 'page_loaded' }, { type: 'url_contains', value: '' }] },
+  { label: 'Verify Main Body', assertions: [{ type: 'page_loaded' }, { type: 'no_console_errors' }, { type: 'selector_visible', selector: 'body' }] },
 ];
 
-export default function NewJobPanel({ apiBase, onJobSubmitted, onClose }: {
+export default function NewJobPanel({ 
+  apiBase, 
+  onJobSubmitted, 
+  onClose 
+}: {
   apiBase: string;
   onJobSubmitted: (id: string) => void;
   onClose?: () => void;
 }) {
   const [url, setUrl] = useState('');
   const [task, setTask] = useState('');
-  const [mode, setMode] = useState<'strict'|'assisted'|'smoke'|'exploratory'>('strict');
-  const [assertions, setAssertions] = useState<Assertion[]>([{ type: 'page_loaded' }, { type: 'no_console_errors' }]);
+  const [mode, setMode] = useState<'strict' | 'assisted' | 'smoke' | 'exploratory'>('strict');
+  const [assertions, setAssertions] = useState<Assertion[]>([
+    { type: 'page_loaded' }, 
+    { type: 'no_console_errors' }
+  ]);
   const [steps, setSteps] = useState<FlowStep[]>([]);
   const [loading, setLoading] = useState(false);
   const [showFlows, setShowFlows] = useState(false);
@@ -44,7 +76,10 @@ export default function NewJobPanel({ apiBase, onJobSubmitted, onClose }: {
     setSteps(s => s.map((x, idx) => idx === i ? { ...x, ...patch } : x));
 
   const submit = async () => {
-    if (!url) { setError('Target URL is required'); return; }
+    if (!url) { 
+      setError('Target URL is required'); 
+      return; 
+    }
     if (mode === 'exploratory' && !task.trim()) {
       setError('Task Description is required for exploratory mode');
       return;
@@ -76,162 +111,380 @@ export default function NewJobPanel({ apiBase, onJobSubmitted, onClose }: {
       } else {
         setError(data.error || 'Failed to submit');
       }
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to submit verification');
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      {/* Header */}
-      <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <div>
-          <p style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>New Verification</p>
-          <p style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 1 }}>Configure and run a browser verification job</p>
-        </div>
-        {onClose && (
-          <button onClick={onClose} style={{ padding: 4, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', borderRadius: 4, display: 'flex' }}>
-            <X size={14} />
-          </button>
-        )}
-      </div>
-
-      <div style={{ flex: 1, overflow: 'auto', padding: '16px' }}>
-        {/* URL */}
-        <div style={{ marginBottom: 12 }}>
-          <label style={labelStyle}>Target URL *</label>
-          <input
-            value={url}
-            onChange={e => setUrl(e.target.value)}
-            placeholder="https://localhost:3000"
-            style={inputStyle}
-            onKeyDown={e => e.key === 'Enter' && submit()}
-          />
-        </div>
-
-        {/* Task */}
-        <div style={{ marginBottom: 14 }}>
-          <label style={labelStyle}>Task Description</label>
-          <input value={task} onChange={e => setTask(e.target.value)} placeholder="e.g. Verify login flow works" style={inputStyle} />
-        </div>
-
-        {/* Mode */}
-        <div style={{ marginBottom: 16 }}>
-          <label style={labelStyle}>Mode</label>
-          <div style={{ display: 'flex', gap: 6 }}>
-            {(['strict','assisted','smoke','exploratory'] as const).map(m => (
-              <button key={m} onClick={() => setMode(m)} style={{ flex: 1, padding: '6px 0', borderRadius: 6, border: '1px solid', fontSize: 10, fontWeight: 600, cursor: 'pointer', transition: 'all 0.12s', borderColor: mode === m ? 'var(--accent-blue)' : 'var(--border)', background: mode === m ? 'rgba(92,142,247,0.12)' : 'var(--bg-elevated)', color: mode === m ? 'var(--accent-blue)' : 'var(--text-muted)' }}>
-                {m}
-              </button>
-            ))}
+    <div className="new-verification-container">
+      <div className="new-verification-card">
+        {/* Card Header */}
+        <div style={{ padding: '18px 40px', borderBottom: '1px solid var(--border)', background: 'var(--bg-surface)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div>
+            <h2 style={{ fontSize: 16, fontWeight: 800, color: 'var(--text-primary)' }}>Start Verification</h2>
+            <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>Define your target URL and assertion parameters to run.</p>
           </div>
+          {onClose && (
+            <button 
+              className="icon-button" 
+              type="button" 
+              onClick={onClose} 
+              aria-label="Close new verification panel" 
+              style={{ width: 28, height: 28 }}
+            >
+              <X size={14} aria-hidden="true" />
+            </button>
+          )}
         </div>
 
-        {mode === 'exploratory' ? (
-          <div style={{ marginBottom: 14, padding: '12px', background: 'rgba(155,114,247,0.1)', border: '1px solid rgba(155,114,247,0.3)', borderRadius: 8 }}>
-            <p style={{ fontSize: 12, color: 'var(--accent-purple)', fontWeight: 600, marginBottom: 4 }}>🧭 Exploratory Mode</p>
-            <p style={{ fontSize: 11, color: 'var(--text-primary)', lineHeight: 1.5 }}>
-              The AI will autonomously navigate the page to achieve the Task Description. Assertions and Flows are disabled.
-            </p>
-          </div>
-        ) : (
-          <>
-            {/* Assertions */}
-            <div style={{ marginBottom: 14 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                <label style={{ ...labelStyle, marginBottom: 0 }}>Assertions</label>
-            <div style={{ display: 'flex', gap: 4 }}>
-              {QUICK_PRESETS.map(p => (
-                <button key={p.label} onClick={() => applyPreset(p)} style={{ padding: '2px 7px', background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 4, fontSize: 10, color: 'var(--text-muted)', cursor: 'pointer', fontFamily: 'inherit' }}>
-                  {p.label}
-                </button>
-              ))}
-              <button onClick={addAssertion} style={{ padding: '2px 7px', background: 'rgba(92,142,247,0.1)', border: '1px solid rgba(92,142,247,0.3)', borderRadius: 4, fontSize: 10, color: 'var(--accent-blue)', cursor: 'pointer', fontFamily: 'inherit', display: 'flex', alignItems: 'center', gap: 3 }}>
-                <Plus size={9} /> Add
-              </button>
-            </div>
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-            {assertions.map((a, i) => (
-              <div key={i} style={{ display: 'flex', gap: 4, alignItems: 'center', padding: '6px 8px', background: 'var(--bg-elevated)', borderRadius: 7, border: '1px solid var(--border)' }}>
-                <div style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--accent-blue)', flexShrink: 0 }} />
-                <select value={a.type} onChange={e => updateAssertion(i, { type: e.target.value, selector: undefined, value: undefined })} style={{ ...selectStyle, flex: 1 }}>
-                  {ASSERTION_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
-                </select>
-                {NEEDS_SELECTOR.includes(a.type) && (
-                  <input value={a.selector || ''} onChange={e => updateAssertion(i, { selector: e.target.value })} placeholder="CSS selector" style={{ ...inputStyle, flex: 1.2, padding: '4px 8px', fontSize: 11, marginBottom: 0 }} />
-                )}
-                {NEEDS_VALUE.includes(a.type) && (
-                  <input value={a.value || ''} onChange={e => updateAssertion(i, { value: e.target.value })} placeholder="expected value" style={{ ...inputStyle, flex: 1.2, padding: '4px 8px', fontSize: 11, marginBottom: 0 }} />
-                )}
-                <button onClick={() => removeAssertion(i)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: '2px', borderRadius: 3, display: 'flex', flexShrink: 0 }}>
-                  <X size={11} />
-                </button>
+        {/* Card Body */}
+        <div className="new-verification-body-container">
+          <div className="new-verification-form-wrapper">
+            {/* Target URL */}
+            <div className="form-group">
+              <label className="field-label" htmlFor="verification-url">Target URL *</label>
+              <div className="input-with-icon">
+                <div className="input-icon-wrapper">
+                  <Globe size={14} />
+                </div>
+                <input
+                  id="verification-url"
+                  value={url}
+                  onChange={e => setUrl(e.target.value)}
+                  placeholder="https://example.com"
+                  className="form-input-premium"
+                  aria-invalid={error === 'Target URL is required'}
+                  onKeyDown={e => e.key === 'Enter' && submit()}
+                />
               </div>
-            ))}
+              <p className="form-field-helper">The destination URL of the application to run assertions against.</p>
+            </div>
+
+            {/* Task Description */}
+            <div className="form-group">
+              <label className="field-label" htmlFor="verification-task">Task / Intent Description</label>
+              <div className="input-with-icon">
+                <div className="input-icon-wrapper">
+                  <FileText size={14} />
+                </div>
+                <input 
+                  id="verification-task" 
+                  value={task} 
+                  onChange={e => setTask(e.target.value)} 
+                  placeholder="Verify the authentication flow works and displays the landing dashboard" 
+                  className="form-input-premium" 
+                />
+              </div>
+              <p className="form-field-helper">Describe the user objective or features to evaluate.</p>
+            </div>
+
+            {/* Mode Selection */}
+            <div className="form-group" style={{ marginBottom: 16 }}>
+              <label className="field-label">Verification Mode</label>
+              <div className="mode-grid" role="radiogroup" aria-label="Verification mode">
+                {/* Smoke Mode */}
+                <div 
+                  className="mode-card" 
+                  data-selected={mode === 'smoke'} 
+                  onClick={() => setMode('smoke')}
+                  role="radio"
+                  aria-checked={mode === 'smoke'}
+                >
+                  <div className="mode-card-icon">
+                    <Zap size={14} />
+                  </div>
+                  <div className="mode-card-text">
+                    <span className="mode-card-title">Smoke Test</span>
+                    <span className="mode-card-description">Verify page loads and checking for console errors.</span>
+                  </div>
+                </div>
+
+                {/* Strict Mode */}
+                <div 
+                  className="mode-card" 
+                  data-selected={mode === 'strict'} 
+                  onClick={() => setMode('strict')}
+                  role="radio"
+                  aria-checked={mode === 'strict'}
+                >
+                  <div className="mode-card-icon">
+                    <CheckSquare size={14} />
+                  </div>
+                  <div className="mode-card-text">
+                    <span className="mode-card-title">Strict</span>
+                    <span className="mode-card-description">Verify user actions and assertions sequentially.</span>
+                  </div>
+                </div>
+
+                {/* Assisted Mode */}
+                <div 
+                  className="mode-card" 
+                  data-selected={mode === 'assisted'} 
+                  onClick={() => setMode('assisted')}
+                  role="radio"
+                  aria-checked={mode === 'assisted'}
+                >
+                  <div className="mode-card-icon">
+                    <Activity size={14} />
+                  </div>
+                  <div className="mode-card-text">
+                    <span className="mode-card-title">AI-Assisted</span>
+                    <span className="mode-card-description">Allow guided fallbacks for dynamic elements.</span>
+                  </div>
+                </div>
+
+                {/* Exploratory Mode */}
+                <div 
+                  className="mode-card" 
+                  data-selected={mode === 'exploratory'} 
+                  onClick={() => setMode('exploratory')}
+                  role="radio"
+                  aria-checked={mode === 'exploratory'}
+                >
+                  <div className="mode-card-icon">
+                    <Compass size={14} />
+                  </div>
+                  <div className="mode-card-text">
+                    <span className="mode-card-title">Exploratory</span>
+                    <span className="mode-card-description">Autonomously browse site to fulfill task intent.</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Dynamic Mode Helper Alert */}
+              <div className="mode-helper-alert" data-mode={mode}>
+                <div className="mode-helper-icon">
+                  {mode === 'smoke' && <Zap size={13} />}
+                  {mode === 'strict' && <CheckSquare size={13} />}
+                  {mode === 'assisted' && <Activity size={13} />}
+                  {mode === 'exploratory' && <Compass size={13} />}
+                </div>
+                <div className="mode-helper-content">
+                  <strong>{mode === 'smoke' ? 'Smoke Test Mode' : mode === 'strict' ? 'Strict Mode' : mode === 'assisted' ? 'AI-Assisted Mode' : 'Exploratory Mode'}</strong> — {
+                    mode === 'smoke' ? 'Verifies if target site loads completely, checking for TLS issues, network timeouts, and critical console errors. Best for rapid availability checks.' :
+                    mode === 'strict' ? 'Executes assertion checklist and step sequences in exact chronological order. Ideal for regression test cases and formal login/signup scripts.' :
+                    mode === 'assisted' ? 'Maintains strict step validations but automatically attempts selectors fallbacks and semantic matching if standard selectors change.' :
+                    'Deploys a browser agent to autonomously explore paths to accomplish your specified Intent/Task Description. Useful for discovery testing.'
+                  }
+                </div>
+              </div>
+            </div>
+
+            {mode === 'exploratory' ? (
+              <div className="panel-section" style={{ marginBottom: 18, padding: '16px', background: 'rgba(155,108,255,0.06)', border: '1px solid rgba(155,108,255,0.2)' }}>
+                <p style={{ fontSize: 13, color: 'var(--accent-purple)', fontWeight: 800, marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Sparkles size={14} aria-hidden="true" /> Autonomous Agent Active
+                </p>
+                <p style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+                  Custom assertions and step flows are disabled. The AI agent will navigate freely to achieve your specified Task Intent.
+                </p>
+              </div>
+            ) : (
+              <>
+                {/* Assertions */}
+                <div className="form-group" style={{ marginBottom: 20 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, flexWrap: 'wrap', gap: 10 }}>
+                    <label className="field-label" style={{ marginBottom: 0 }}>Assertions / Verification Checks</label>
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                      {QUICK_PRESETS.map(p => (
+                        <button 
+                          key={p.label} 
+                          type="button" 
+                          onClick={() => applyPreset(p)} 
+                          className="preset-tag"
+                        >
+                          {p.label}
+                        </button>
+                      ))}
+                      <button 
+                        type="button" 
+                        onClick={addAssertion} 
+                        className="preset-tag" 
+                        style={{ color: 'var(--accent-blue)', borderColor: 'rgba(79,140,255,0.3)', background: 'rgba(79,140,255,0.04)' }}
+                      >
+                        <Plus size={10} style={{ marginRight: 2 }} aria-hidden="true" /> Add Custom
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="assertions-list-container">
+                    {assertions.length === 0 ? (
+                      <div style={{ padding: '16px', textAlign: 'center', border: '1px dashed var(--border)', borderRadius: 8, color: 'var(--text-muted)', fontSize: 12 }}>
+                        No checks defined. Click "Add Custom" to create verification assertions.
+                      </div>
+                    ) : (
+                      assertions.map((a, i) => (
+                        <div key={i} className="assertion-row-card">
+                          <div className="assertion-indicator-dot" />
+                          <select 
+                            aria-label={`Assertion ${i + 1} type`} 
+                            value={a.type} 
+                            onChange={e => updateAssertion(i, { type: e.target.value, selector: undefined, value: undefined })} 
+                            className="inline-row-select" 
+                            style={{ flex: 1.2 }}
+                          >
+                            {ASSERTION_TYPES.map(t => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}
+                          </select>
+                          {NEEDS_SELECTOR.includes(a.type) && (
+                            <input 
+                              aria-label={`Assertion ${i + 1} CSS selector`} 
+                              value={a.selector || ''} 
+                              onChange={e => updateAssertion(i, { selector: e.target.value })} 
+                              placeholder="CSS selector (.btn-submit)" 
+                              className="inline-row-input" 
+                              style={{ flex: 1.5 }} 
+                            />
+                          )}
+                          {NEEDS_VALUE.includes(a.type) && (
+                            <input 
+                              aria-label={`Assertion ${i + 1} expected value`} 
+                              value={a.value || ''} 
+                              onChange={e => updateAssertion(i, { value: e.target.value })} 
+                              placeholder="Expected content text" 
+                              className="inline-row-input" 
+                              style={{ flex: 1.5 }} 
+                            />
+                          )}
+                          <button 
+                            type="button" 
+                            onClick={() => removeAssertion(i)} 
+                            className="icon-button" 
+                            aria-label={`Remove assertion ${i + 1}`} 
+                            style={{ width: 34, height: 34, flexShrink: 0, borderRadius: 6, color: 'var(--accent-red)', borderColor: 'transparent', background: 'transparent' }}
+                          >
+                            <Trash2 size={13} aria-hidden="true" />
+                          </button>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+
+                {/* Flow Steps collapsible */}
+                <div style={{ marginBottom: 14 }}>
+                  <button 
+                    type="button" 
+                    onClick={() => setShowFlows(v => !v)} 
+                    className="collapsible-trigger-button" 
+                    aria-expanded={showFlows}
+                  >
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <Settings2 size={14} aria-hidden="true" /> 
+                      <span>Pre-Execution Actions {steps.length > 0 ? `(${steps.length})` : '(Optional)'}</span>
+                    </span>
+                    {showFlows ? <ChevronUp size={14} aria-hidden="true" /> : <ChevronDown size={14} aria-hidden="true" />}
+                  </button>
+
+                  {showFlows && (
+                    <div className="collapsible-content-panel">
+                      <p style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                        Define sequence steps (clicks, typing, navigations) to perform before assertions run.
+                      </p>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                        {steps.map((s, i) => (
+                          <div key={i} className="step-row-card">
+                            <span className="step-index-badge">#{i + 1}</span>
+                            <select 
+                              aria-label={`Flow step ${i + 1} action`} 
+                              value={s.action} 
+                              onChange={e => updateStep(i, { action: e.target.value })} 
+                              className="inline-row-select" 
+                              style={{ width: 140 }}
+                            >
+                              {['click', 'type', 'navigate', 'wait_for_selector'].map(a => <option key={a} value={a}>{a.replace(/_/g, ' ')}</option>)}
+                            </select>
+                            <input 
+                              aria-label={`Flow step ${i + 1} target`} 
+                              value={s.testId || ''} 
+                              onChange={e => updateStep(i, { testId: e.target.value })} 
+                              placeholder="Selector or data-testid" 
+                              className="inline-row-input" 
+                              style={{ flex: 1.2 }} 
+                            />
+                            {s.action === 'type' && (
+                              <input 
+                                aria-label={`Flow step ${i + 1} text value`} 
+                                value={s.value || ''} 
+                                onChange={e => updateStep(i, { value: e.target.value })} 
+                                placeholder="Text value" 
+                                className="inline-row-input" 
+                                style={{ flex: 0.8 }} 
+                              />
+                            )}
+                            <button 
+                              type="button" 
+                              onClick={() => removeStep(i)} 
+                              className="icon-button" 
+                              aria-label={`Remove flow step ${i + 1}`} 
+                              style={{ width: 34, height: 34, flexShrink: 0, borderRadius: 6, color: 'var(--accent-red)', borderColor: 'transparent', background: 'transparent' }}
+                            >
+                              <Trash2 size={13} aria-hidden="true" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                      <button 
+                        type="button" 
+                        onClick={addStep} 
+                        className="add-step-button"
+                      >
+                        <Plus size={12} style={{ marginRight: 2 }} aria-hidden="true" /> Add Step Action
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+
+            {error && (
+              <div 
+                role="alert" 
+                style={{ 
+                  marginTop: 16, 
+                  padding: '10px 14px', 
+                  background: 'rgba(255,107,107,0.06)', 
+                  border: '1px solid rgba(255,107,107,0.25)', 
+                  borderRadius: 8, 
+                  fontSize: 12, 
+                  color: 'var(--accent-red)', 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  gap: 8 
+                }}
+              >
+                <AlertTriangle size={14} aria-hidden="true" />
+                <span>{error}</span>
+              </div>
+            )}
           </div>
         </div>
 
-        {/* Flow Steps collapsible */}
-        <div style={{ marginBottom: 4 }}>
-          <button onClick={() => setShowFlows(v => !v)} style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '7px 10px', background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 7, cursor: 'pointer', color: 'var(--text-secondary)', fontSize: 12, fontWeight: 600, fontFamily: 'inherit' }}>
-            <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <Settings2 size={12} /> Flow Steps {steps.length > 0 ? `(${steps.length})` : '— optional'}
-            </span>
-            {showFlows ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+        {/* Card Footer */}
+        <div style={{ padding: '16px 40px', borderTop: '1px solid var(--border)', background: 'var(--bg-surface)', display: 'flex', justifyContent: 'flex-end' }}>
+          <button
+            type="button"
+            onClick={submit}
+            disabled={loading}
+            className="primary-button"
+            style={{ minWidth: 240, minHeight: 40, gap: 8, borderRadius: 8, fontSize: 13 }}
+          >
+            {loading ? (
+              <>
+                <span style={{ display: 'inline-block', width: 12, height: 12, border: '2px solid rgba(255,255,255,0.35)', borderTopColor: 'white', borderRadius: '50%', animation: 'spin 0.6s linear infinite' }} /> 
+                <span>Submitting agent verification run...</span>
+              </>
+            ) : (
+              <>
+                <Play size={13} fill="currentColor" aria-hidden="true" /> 
+                <span>Launch Verification Run</span>
+              </>
+            )}
           </button>
-
-          {showFlows && (
-            <div style={{ marginTop: 6, padding: '10px', background: 'var(--bg-elevated)', borderRadius: 7, border: '1px solid var(--border)' }}>
-              <p style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 8 }}>Steps execute before assertions. Use data-testid for reliable targeting.</p>
-              {steps.map((s, i) => (
-                <div key={i} style={{ display: 'flex', gap: 4, marginBottom: 4, alignItems: 'center' }}>
-                  <select value={s.action} onChange={e => updateStep(i, { action: e.target.value })} style={{ ...selectStyle, width: 92 }}>
-                    {['click','type','navigate','wait_for_selector'].map(a => <option key={a} value={a}>{a}</option>)}
-                  </select>
-                  <input value={s.testId || ''} onChange={e => updateStep(i, { testId: e.target.value })} placeholder="data-testid" style={{ ...inputStyle, flex: 1, padding: '4px 7px', fontSize: 11, marginBottom: 0 }} />
-                  {s.action === 'type' && (
-                    <input value={s.value || ''} onChange={e => updateStep(i, { value: e.target.value })} placeholder="text" style={{ ...inputStyle, flex: 0.8, padding: '4px 7px', fontSize: 11, marginBottom: 0 }} />
-                  )}
-                  <button onClick={() => removeStep(i)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 2, display: 'flex' }}>
-                    <X size={11} />
-                  </button>
-                </div>
-              ))}
-                  <button onClick={addStep} style={{ width: '100%', padding: '5px', background: 'none', border: '1px dashed var(--border)', borderRadius: 5, color: 'var(--text-muted)', cursor: 'pointer', fontSize: 11, fontFamily: 'inherit', marginTop: 2 }}>
-                    + Add step
-                  </button>
-                </div>
-              )}
-            </div>
-          </>
-        )}
-
-        {error && (
-          <div style={{ marginTop: 10, padding: '8px 10px', background: 'rgba(248,113,113,0.1)', border: '1px solid rgba(248,113,113,0.3)', borderRadius: 6, fontSize: 12, color: 'var(--accent-red)' }}>
-            {error}
-          </div>
-        )}
-      </div>
-
-      {/* Footer */}
-      <div style={{ padding: '12px 16px', borderTop: '1px solid var(--border)', flexShrink: 0 }}>
-        <button
-          onClick={submit}
-          disabled={loading}
-          style={{ width: '100%', padding: '9px', borderRadius: 8, border: 'none', background: loading ? 'var(--bg-elevated)' : 'var(--gradient-brand)', color: loading ? 'var(--text-muted)' : 'white', fontWeight: 700, fontSize: 13, cursor: loading ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7, transition: 'opacity 0.15s', fontFamily: 'inherit' }}
-        >
-          {loading
-            ? <><span style={{ display: 'inline-block', width: 12, height: 12, border: '2px solid var(--text-muted)', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 0.6s linear infinite' }} /> Submitting...</>
-            : <><Play size={13} fill="white" /> Run Verification</>}
-        </button>
+        </div>
       </div>
     </div>
   );
 }
-
-const labelStyle: React.CSSProperties = { display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 5 };
-const inputStyle: React.CSSProperties = { width: '100%', padding: '8px 10px', background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-primary)', fontSize: 12, marginBottom: 0 };
-const selectStyle: React.CSSProperties = { padding: '5px 6px', background: 'var(--bg-base)', border: '1px solid var(--border)', borderRadius: 5, color: 'var(--text-primary)', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' };

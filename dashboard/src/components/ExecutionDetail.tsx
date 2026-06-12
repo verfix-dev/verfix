@@ -2,6 +2,7 @@
 import { Execution, ExecutionEvent } from '@/app/page';
 import { useState } from 'react';
 import { Activity, CheckCircle2, XCircle, Clock, Image, FileText, Network, Terminal, AlertTriangle, Download, Copy, Loader2, Sparkles, Play, Brain, Globe } from 'lucide-react';
+import { useWorkspace } from '@/context/WorkspaceContext';
 
 type Tab = 'assertions' | 'console' | 'network' | 'artifacts' | 'ai' | 'replay' | 'exploration';
 
@@ -12,6 +13,10 @@ export default function ExecutionDetail({ execution: e, apiBase, loadingDetail }
 }) {
   const [tab, setTab] = useState<Tab>('assertions');
   const [copied, setCopied] = useState(false);
+  const { flakyUrls } = useWorkspace();
+
+  const isFlaky = flakyUrls?.some(f => f.url === e.url);
+  const flakyDetails = flakyUrls?.find(f => f.url === e.url);
 
   const isLive = e.status === 'running' || e.status === 'queued';
   const color = statusColor(e.status, e.passed);
@@ -89,6 +94,29 @@ export default function ExecutionDetail({ execution: e, apiBase, loadingDetail }
           <div style={{ marginTop: 10, padding: '8px 12px', background: 'rgba(248,113,113,0.07)', borderRadius: 7, border: '1px solid rgba(248,113,113,0.2)', display: 'flex', gap: 8, alignItems: 'flex-start' }}>
             <AlertTriangle size={12} color="var(--accent-red)" style={{ marginTop: 1, flexShrink: 0 }} />
             <span style={{ fontSize: 11, color: 'var(--accent-red)', fontFamily: 'JetBrains Mono, monospace', wordBreak: 'break-all' }}>{e.error}</span>
+          </div>
+        )}
+
+        {/* Flaky Target URL Diagnostics */}
+        {isFlaky && flakyDetails && (
+          <div style={{ marginTop: 10, padding: '10px 14px', background: 'rgba(230,169,61,0.06)', borderRadius: 8, border: '1px solid rgba(230,169,61,0.25)', display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--accent-yellow)' }}>
+              <AlertTriangle size={13} aria-hidden="true" />
+              <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Unstable Target Diagnostics</span>
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.4 }}>
+              This target URL has shown inconsistent success rates (flakiness) across runs.
+            </div>
+            <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+              <StatPill label="Flake Rate" value={`${flakyDetails.flake_rate.toFixed(0)}%`} color="var(--accent-yellow)" />
+              <StatPill label="Total Runs" value={flakyDetails.total_runs} color="var(--accent-blue)" />
+              <StatPill label="Passed" value={flakyDetails.pass_count} color="var(--accent-green)" />
+              <StatPill label="Failed" value={flakyDetails.fail_count} color="var(--accent-red)" />
+              <StatPill label="Avg Duration" value={`${Math.round(flakyDetails.avg_duration_ms)}ms`} color="var(--accent-cyan)" />
+            </div>
+            <div style={{ marginTop: 4, height: 4, background: 'var(--bg-elevated)', borderRadius: 2, overflow: 'hidden' }}>
+              <div style={{ height: '100%', width: `${100 - flakyDetails.flake_rate}%`, background: 'var(--accent-green)', borderRadius: 2 }} />
+            </div>
           </div>
         )}
       </div>
@@ -405,7 +433,7 @@ function AITab({ execution: e }: { execution: Execution }) {
 
 function ExplorationTab({ execution: e }: { execution: Execution }) {
   const exploration = (e.assertions || []).find(a => a.type === 'exploration_result');
-  const log = (exploration?.details as any)?.log as string[] | undefined;
+  const log = (exploration?.details as { log?: string[] } | undefined)?.log;
 
   if (!log || log.length === 0) {
     return <Empty icon={<Brain size={18} />} text="No exploration reasoning captured" />;

@@ -1,137 +1,208 @@
 'use client';
-import { useState } from 'react';
-import { Execution } from '@/app/page';
-import { CheckCircle2, XCircle, Clock, Loader2, Search, Filter, RefreshCw } from 'lucide-react';
 
-type FilterStatus = 'all' | 'passed' | 'failed' | 'running';
+import { useMemo, useState } from 'react';
+import { CheckCircle2, Clock, Loader2, RefreshCw, Search, XCircle, AlertTriangle } from 'lucide-react';
+import { useWorkspace } from '@/context/WorkspaceContext';
+import { Execution } from '@/types';
 
-export default function ExecutionList({ executions, selected, onSelect, onRefresh }: {
-  executions: Execution[];
-  selected: Execution | null;
-  onSelect: (e: Execution) => void;
-  onRefresh: () => void;
-}) {
+type FilterStatus = 'all' | 'running' | 'passed' | 'failed' | 'flaky';
+
+const FILTERS: FilterStatus[] = ['all', 'running', 'passed', 'failed', 'flaky'];
+
+export default function ExecutionList() {
+  const {
+    executions,
+    selected,
+    selectExecution,
+    fetchList,
+    flakyUrls,
+  } = useWorkspace();
+
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<FilterStatus>('all');
 
-  const filtered = executions.filter(e => {
-    const matchSearch = !search || e.task.toLowerCase().includes(search.toLowerCase()) || e.url.toLowerCase().includes(search.toLowerCase());
-    const matchFilter =
-      filter === 'all' ? true :
-      filter === 'passed' ? e.passed && e.status === 'completed' :
-      filter === 'failed' ? (!e.passed && (e.status === 'completed' || e.status === 'failed')) :
-      e.status === 'running' || e.status === 'queued';
-    return matchSearch && matchFilter;
-  });
+  const counts = useMemo(() => {
+    const flakySet = new Set((flakyUrls || []).map(f => f.url));
+    return {
+      all: executions.length,
+      running: executions.filter(e => e.status === 'running' || e.status === 'queued').length,
+      passed: executions.filter(e => e.passed && e.status === 'completed').length,
+      failed: executions.filter(e => !e.passed && (e.status === 'completed' || e.status === 'failed')).length,
+      flaky: executions.filter(e => flakySet.has(e.url)).length,
+    };
+  }, [executions, flakyUrls]);
 
-  const counts = {
-    all: executions.length,
-    running: executions.filter(e => e.status === 'running' || e.status === 'queued').length,
-    passed: executions.filter(e => e.passed && e.status === 'completed').length,
-    failed: executions.filter(e => !e.passed && (e.status === 'completed' || e.status === 'failed')).length,
-  };
+  const filtered = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    const flakySet = new Set((flakyUrls || []).map(f => f.url));
+    return executions.filter(e => {
+      const matchSearch = !query || e.task.toLowerCase().includes(query) || e.url.toLowerCase().includes(query) || e.executionId.toLowerCase().includes(query);
+      const matchFilter =
+        filter === 'all' ? true :
+        filter === 'passed' ? e.passed && e.status === 'completed' :
+        filter === 'failed' ? !e.passed && (e.status === 'completed' || e.status === 'failed') :
+        filter === 'flaky' ? flakySet.has(e.url) :
+        e.status === 'running' || e.status === 'queued';
+      return matchSearch && matchFilter;
+    });
+  }, [executions, filter, search, flakyUrls]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
-      {/* Header */}
-      <div style={{ padding: '12px 14px 10px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-          <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>History</span>
-          <button onClick={onRefresh} title="Refresh" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 2, borderRadius: 4, display: 'flex' }}>
-            <RefreshCw size={12} />
+      <div style={{ padding: 14, borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 800, color: 'var(--text-primary)' }}>Run history</div>
+            <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{executions.length} executions tracked</div>
+          </div>
+          <button className="icon-button" type="button" onClick={fetchList} aria-label="Refresh executions" title="Refresh executions">
+            <RefreshCw size={14} aria-hidden="true" />
           </button>
         </div>
 
-        {/* Search */}
-        <div style={{ position: 'relative', marginBottom: 8 }}>
-          <Search size={11} style={{ position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)', pointerEvents: 'none' }} />
+        <div style={{ position: 'relative', marginBottom: 10 }}>
+          <Search size={13} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)', pointerEvents: 'none' }} aria-hidden="true" />
           <input
+            aria-label="Search executions"
+            className="control-input"
             value={search}
             onChange={e => setSearch(e.target.value)}
-            placeholder="Search by task or URL..."
-            style={{ width: '100%', padding: '6px 8px 6px 26px', background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-primary)', fontSize: 11, outline: 'none' }}
+            placeholder="Search task, URL, or ID"
+            style={{ paddingLeft: 30 }}
           />
         </div>
 
-        {/* Filter tabs */}
-        <div style={{ display: 'flex', gap: 4 }}>
-          {(['all','running','passed','failed'] as FilterStatus[]).map(f => (
-            <button key={f} onClick={() => setFilter(f)} style={{ flex: 1, padding: '4px 2px', borderRadius: 5, border: '1px solid', fontSize: 10, fontWeight: 600, cursor: 'pointer', textTransform: 'capitalize', transition: 'all 0.1s', fontFamily: 'inherit', borderColor: filter === f ? filterColor(f) : 'var(--border)', background: filter === f ? `${filterColor(f)}15` : 'transparent', color: filter === f ? filterColor(f) : 'var(--text-muted)' }}>
-              {f} {counts[f] > 0 && <span style={{ opacity: 0.7 }}>({counts[f]})</span>}
+        <div className="filter-pill-list" role="tablist" aria-label="Filter executions">
+          {FILTERS.map(f => (
+            <button
+              key={f}
+              type="button"
+              role="tab"
+              aria-selected={filter === f}
+              onClick={() => setFilter(f)}
+              className="filter-pill"
+              data-active={filter === f}
+              data-type={f}
+            >
+              <span>{f}</span>
+              {counts[f] > 0 && (
+                <span className="filter-pill-count">
+                  {counts[f]}
+                </span>
+              )}
             </button>
           ))}
         </div>
       </div>
 
-      {/* List */}
-      <div style={{ flex: 1, overflow: 'auto' }}>
+      <div style={{ flex: 1, overflow: 'auto' }} aria-live="polite">
         {filtered.length === 0 && (
-          <div style={{ padding: '30px 14px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>
-            {search || filter !== 'all' ? 'No matching executions' : 'No executions yet. Start a new verification!'}
+          <div style={{ padding: '34px 18px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>
+            {search || filter !== 'all' ? 'No executions match this view.' : 'No executions yet. Start a verification to populate history.'}
           </div>
         )}
         {filtered.map(e => (
-          <ExecutionRow key={e.executionId} execution={e} isSelected={selected?.executionId === e.executionId} onClick={() => onSelect(e)} />
+          <ExecutionRow 
+            key={e.executionId} 
+            execution={e} 
+            isSelected={selected?.executionId === e.executionId} 
+            onSelect={() => selectExecution(e)}
+            isFlaky={(flakyUrls || []).some(f => f.url === e.url)}
+          />
         ))}
       </div>
     </div>
   );
 }
 
-function ExecutionRow({ execution: e, isSelected, onClick }: { execution: Execution; isSelected: boolean; onClick: () => void }) {
+function ExecutionRow({ 
+  execution: e, 
+  isSelected, 
+  onSelect,
+  isFlaky
+}: { 
+  execution: Execution; 
+  isSelected: boolean; 
+  onSelect: () => void;
+  isFlaky: boolean;
+}) {
   const color = statusColor(e.status, e.passed);
   const isLive = e.status === 'running' || e.status === 'queued';
+  const passedAssertions = (e.assertions || []).filter(a => a.passed).length;
 
   return (
-    <div
-      onClick={onClick}
-      style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)', cursor: 'pointer', background: isSelected ? 'var(--bg-highlight)' : 'transparent', borderLeft: `2px solid ${isSelected ? 'var(--accent-blue)' : 'transparent'}`, transition: 'all 0.1s', animation: 'slide-in 0.15s ease' }}
+    <button
+      type="button"
+      onClick={onSelect}
+      aria-current={isSelected ? 'true' : undefined}
+      style={{
+        width: '100%',
+        display: 'block',
+        textAlign: 'left',
+        padding: '11px 14px',
+        border: 0,
+        borderBottom: '1px solid var(--border)',
+        borderLeft: `3px solid ${isSelected ? color : 'transparent'}`,
+        cursor: 'pointer',
+        background: isSelected ? 'var(--bg-highlight)' : 'transparent',
+        color: 'var(--text-primary)',
+        animation: 'fade-in 120ms ease',
+      }}
     >
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-        <div style={{ marginTop: 1, flexShrink: 0 }}>
-          <StatusIcon status={e.status} passed={e.passed} size={13} />
+      <div style={{ display: 'grid', gridTemplateColumns: '18px minmax(0, 1fr)', gap: 9 }}>
+        <div style={{ paddingTop: 2 }}>
+          <StatusIcon status={e.status} passed={e.passed} size={14} />
         </div>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginBottom: 2 }}>
-            {e.task || 'Untitled'}
+        <div style={{ minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.task || 'Untitled verification'}</div>
+            <span className="mono" style={{ fontSize: 10, color: 'var(--text-muted)', flexShrink: 0 }}>{relativeTime(e.created_at)}</span>
           </div>
-          <div style={{ fontSize: 10, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: 'JetBrains Mono, monospace' }}>
-            {e.url || '—'}
+          <div className="mono" style={{ fontSize: 10, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 2 }}>
+            {e.url || 'No target URL'}
           </div>
         </div>
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 6 }}>
-        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-          <span style={{ fontSize: 9, fontWeight: 700, padding: '1px 6px', borderRadius: 3, background: `${color}15`, color, border: `1px solid ${color}30` }}>
-            {isLive ? (e.status === 'running' ? '● running' : '⏳ queued') : e.passed ? '✓ pass' : '✗ fail'}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginTop: 8 }}>
+        <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', alignItems: 'center' }}>
+          <span style={{ fontSize: 10, fontWeight: 800, padding: '2px 7px', borderRadius: 999, background: colorMix(color, 14), color, border: `1px solid ${colorMix(color, 34)}` }}>
+            {isLive ? e.status : e.passed ? 'passed' : 'failed'}
           </span>
-          {e.mode && <span style={{ fontSize: 9, padding: '1px 6px', borderRadius: 3, background: 'var(--bg-elevated)', color: 'var(--text-muted)', border: '1px solid var(--border)' }}>{e.mode}</span>}
+          {isFlaky && (
+            <span 
+              style={{ 
+                fontSize: 9, 
+                fontWeight: 800, 
+                padding: '2px 6px', 
+                borderRadius: 999, 
+                background: 'rgba(230, 169, 61, 0.12)', 
+                color: 'var(--accent-yellow)', 
+                border: '1px solid rgba(230, 169, 61, 0.3)',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 3
+              }}
+              title="URL has flaky history"
+            >
+              <AlertTriangle size={8} aria-hidden="true" /> flaky
+            </span>
+          )}
+          {e.mode && <span style={{ fontSize: 10, fontWeight: 650, padding: '2px 7px', borderRadius: 999, background: 'var(--bg-elevated)', color: 'var(--text-muted)', border: '1px solid var(--border)' }}>{e.mode}</span>}
+          {e.assertions?.length > 0 && <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{passedAssertions}/{e.assertions.length} checks</span>}
         </div>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          {e.duration_ms > 0 && <span style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'JetBrains Mono, monospace' }}>{e.duration_ms}ms</span>}
-          <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{relativeTime(e.created_at)}</span>
-        </div>
+        {e.duration_ms > 0 && <span className="mono" style={{ fontSize: 10, color: 'var(--text-muted)' }}>{e.duration_ms}ms</span>}
       </div>
-
-      {/* Assertion mini bar */}
-      {e.assertions && e.assertions.length > 0 && (e.status === 'completed' || e.status === 'failed') && (
-        <div style={{ display: 'flex', gap: 2, marginTop: 6 }}>
-          {e.assertions.map((a, i) => (
-            <div key={i} title={`${a.type}: ${a.passed ? 'passed' : 'failed'}`} style={{ flex: 1, height: 3, borderRadius: 2, background: a.passed ? 'var(--accent-green)' : 'var(--accent-red)', opacity: 0.7 }} />
-          ))}
-        </div>
-      )}
-    </div>
+    </button>
   );
 }
 
 function StatusIcon({ status, passed, size }: { status: string; passed: boolean; size: number }) {
   const color = statusColor(status, passed);
-  if (status === 'running') return <Loader2 size={size} color={color} style={{ animation: 'spin 1s linear infinite' }} />;
-  if (status === 'queued') return <Clock size={size} color={color} />;
-  if (passed) return <CheckCircle2 size={size} color={color} />;
-  return <XCircle size={size} color={color} />;
+  if (status === 'running') return <Loader2 size={size} color={color} style={{ animation: 'spin 1s linear infinite' }} aria-hidden="true" />;
+  if (status === 'queued') return <Clock size={size} color={color} aria-hidden="true" />;
+  if (passed) return <CheckCircle2 size={size} color={color} aria-hidden="true" />;
+  return <XCircle size={size} color={color} aria-hidden="true" />;
 }
 
 function statusColor(status: string, passed: boolean) {
@@ -141,14 +212,14 @@ function statusColor(status: string, passed: boolean) {
   return 'var(--accent-red)';
 }
 
-function filterColor(f: string) {
-  return f === 'running' ? 'var(--accent-blue)' : f === 'passed' ? 'var(--accent-green)' : f === 'failed' ? 'var(--accent-red)' : 'var(--text-secondary)';
+function colorMix(color: string, amount: number) {
+  return `color-mix(in srgb, ${color} ${amount}%, transparent)`;
 }
 
 function relativeTime(ts: string) {
   const diff = Date.now() - new Date(ts).getTime();
-  if (diff < 60000) return 'just now';
-  if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
-  if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
-  return `${Math.floor(diff / 86400000)}d ago`;
+  if (diff < 60000) return 'now';
+  if (diff < 3600000) return `${Math.floor(diff / 60000)}m`;
+  if (diff < 86400000) return `${Math.floor(diff / 3600000)}h`;
+  return `${Math.floor(diff / 86400000)}d`;
 }
