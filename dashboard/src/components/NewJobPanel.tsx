@@ -122,17 +122,17 @@ export default function NewJobPanel({
     <div className="new-verification-container">
       <div className="new-verification-card">
         {/* Card Header */}
-        <div style={{ padding: '18px 40px', borderBottom: '1px solid var(--border)', background: 'var(--bg-surface)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div>
-            <h2 style={{ fontSize: 16, fontWeight: 800, color: 'var(--text-primary)' }}>Start Verification</h2>
-            <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>Define your target URL and assertion parameters to run.</p>
+        <div style={{ padding: '0 16px', borderBottom: '1px solid var(--border)', background: 'var(--bg-surface)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0, height: 'var(--topbar-height)', minHeight: 'var(--topbar-height)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Play size={13} color="var(--accent-blue)" aria-hidden="true" />
+            <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>New Verification</span>
           </div>
           {onClose && (
             <button 
               className="icon-button" 
               type="button" 
               onClick={onClose} 
-              aria-label="Close new verification panel" 
+              aria-label="Close" 
               style={{ width: 28, height: 28 }}
             >
               <X size={14} aria-hidden="true" />
@@ -160,7 +160,6 @@ export default function NewJobPanel({
                   onKeyDown={e => e.key === 'Enter' && submit()}
                 />
               </div>
-              <p className="form-field-helper">The destination URL of the application to run assertions against.</p>
             </div>
 
             {/* Task Description */}
@@ -178,80 +177,31 @@ export default function NewJobPanel({
                   className="form-input-premium" 
                 />
               </div>
-              <p className="form-field-helper">Describe the user objective or features to evaluate.</p>
             </div>
 
             {/* Mode Selection */}
-            <div className="form-group" style={{ marginBottom: 16 }}>
-              <label className="field-label">Verification Mode</label>
-              <div className="mode-grid" role="radiogroup" aria-label="Verification mode">
-                {/* Smoke Mode */}
-                <div 
-                  className="mode-card" 
-                  data-selected={mode === 'smoke'} 
-                  onClick={() => setMode('smoke')}
-                  role="radio"
-                  aria-checked={mode === 'smoke'}
-                >
-                  <div className="mode-card-icon">
-                    <Zap size={14} />
-                  </div>
-                  <div className="mode-card-text">
-                    <span className="mode-card-title">Smoke Test</span>
-                    <span className="mode-card-description">Verify page loads and checking for console errors.</span>
-                  </div>
-                </div>
-
-                {/* Strict Mode */}
-                <div 
-                  className="mode-card" 
-                  data-selected={mode === 'strict'} 
-                  onClick={() => setMode('strict')}
-                  role="radio"
-                  aria-checked={mode === 'strict'}
-                >
-                  <div className="mode-card-icon">
-                    <CheckSquare size={14} />
-                  </div>
-                  <div className="mode-card-text">
-                    <span className="mode-card-title">Strict</span>
-                    <span className="mode-card-description">Verify user actions and assertions sequentially.</span>
-                  </div>
-                </div>
-
-                {/* Assisted Mode */}
-                <div 
-                  className="mode-card" 
-                  data-selected={mode === 'assisted'} 
-                  onClick={() => setMode('assisted')}
-                  role="radio"
-                  aria-checked={mode === 'assisted'}
-                >
-                  <div className="mode-card-icon">
-                    <Activity size={14} />
-                  </div>
-                  <div className="mode-card-text">
-                    <span className="mode-card-title">AI-Assisted</span>
-                    <span className="mode-card-description">Allow guided fallbacks for dynamic elements.</span>
-                  </div>
-                </div>
-
-                {/* Exploratory Mode */}
-                <div 
-                  className="mode-card" 
-                  data-selected={mode === 'exploratory'} 
-                  onClick={() => setMode('exploratory')}
-                  role="radio"
-                  aria-checked={mode === 'exploratory'}
-                >
-                  <div className="mode-card-icon">
-                    <Compass size={14} />
-                  </div>
-                  <div className="mode-card-text">
-                    <span className="mode-card-title">Exploratory</span>
-                    <span className="mode-card-description">Autonomously browse site to fulfill task intent.</span>
-                  </div>
-                </div>
+            <div className="form-group">
+              <label className="field-label">Mode</label>
+              <div className="mode-tab-row" role="radiogroup" aria-label="Verification mode">
+                {([
+                  { value: 'smoke',       label: 'Smoke',       icon: <Zap size={11} aria-hidden="true" /> },
+                  { value: 'strict',      label: 'Strict',      icon: <CheckSquare size={11} aria-hidden="true" /> },
+                  { value: 'assisted',    label: 'AI-Assisted', icon: <Activity size={11} aria-hidden="true" /> },
+                  { value: 'exploratory', label: 'Exploratory', icon: <Compass size={11} aria-hidden="true" /> },
+                ] as { value: typeof mode; label: string; icon: React.ReactNode }[]).map(({ value, label, icon }) => (
+                  <button
+                    key={value}
+                    type="button"
+                    role="radio"
+                    aria-checked={mode === value}
+                    onClick={() => setMode(value)}
+                    className="mode-tab-btn"
+                    data-active={mode === value}
+                  >
+                    {icon}
+                    <span>{label}</span>
+                  </button>
+                ))}
               </div>
 
               {/* Dynamic Mode Helper Alert */}
@@ -463,23 +413,23 @@ export default function NewJobPanel({
         </div>
 
         {/* Card Footer */}
-        <div style={{ padding: '16px 40px', borderTop: '1px solid var(--border)', background: 'var(--bg-surface)', display: 'flex', justifyContent: 'flex-end' }}>
+        <div style={{ padding: '10px 16px', borderTop: '1px solid var(--border)', background: 'var(--bg-surface)', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8, flexShrink: 0 }}>
           <button
             type="button"
             onClick={submit}
             disabled={loading}
             className="primary-button"
-            style={{ minWidth: 240, minHeight: 40, gap: 8, borderRadius: 8, fontSize: 13 }}
+            style={{ gap: 7, fontSize: 12, minHeight: 34, padding: '0 18px' }}
           >
             {loading ? (
               <>
-                <span style={{ display: 'inline-block', width: 12, height: 12, border: '2px solid rgba(255,255,255,0.35)', borderTopColor: 'white', borderRadius: '50%', animation: 'spin 0.6s linear infinite' }} /> 
-                <span>Submitting agent verification run...</span>
+                <span style={{ display: 'inline-block', width: 11, height: 11, border: '2px solid rgba(255,255,255,0.3)', borderTopColor: 'white', borderRadius: '50%', animation: 'spin 0.6s linear infinite' }} />
+                <span>Submitting…</span>
               </>
             ) : (
               <>
-                <Play size={13} fill="currentColor" aria-hidden="true" /> 
-                <span>Launch Verification Run</span>
+                <Play size={12} fill="currentColor" aria-hidden="true" />
+                <span>Launch Verification</span>
               </>
             )}
           </button>
