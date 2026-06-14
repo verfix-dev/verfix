@@ -537,6 +537,7 @@ program
         warnings,
         passed: failures === 0,
       });
+      scheduleBackgroundCheck(['npm', 'image']);
       process.exit(failures > 0 ? 1 : 0);
     }
 
@@ -550,6 +551,8 @@ program
       if (warnings > 0) console.log(chalk.yellow(`  ${warnings} warning(s)`));
     }
     console.log('');
+    showPendingNotifications();
+    scheduleBackgroundCheck(['npm', 'image']);
     process.exit(failures > 0 ? 1 : 0);
   });
 
@@ -621,6 +624,7 @@ program
         };
       });
       emitJson({ flows: list, total: list.length });
+      scheduleBackgroundCheck(['npm', 'image']);
       return;
     }
 
@@ -647,6 +651,8 @@ program
       console.log(`    ${chalk.gray('Run:')} verfix run --flow ${id} --output json`);
       console.log('');
     }
+    showPendingNotifications();
+    scheduleBackgroundCheck(['npm', 'image']);
   });
 
 // ─── run command ─────────────────────────────────────────────────────────────
@@ -815,6 +821,7 @@ program
         raw: result,
       };
       emitJson(jsonResult);
+      scheduleBackgroundCheck(['npm', 'image']);
       process.exit(jsonResult.exit_code);
     }
 
@@ -861,6 +868,12 @@ program
     }
 
     console.log('');
+    if (!isJsonMode(opts)) {
+      showPendingNotifications();
+      scheduleBackgroundCheck(['npm', 'image']);
+    } else {
+      scheduleBackgroundCheck(['npm', 'image']);
+    }
     process.exit(result.passed ? 0 : 1);
   });
 
@@ -886,6 +899,8 @@ program
         console.log(`    ${icon} ${chalk.gray(e.executionId.slice(0, 20))}...  ${chalk.bold(e.task)}  ${chalk.gray(e.url)}`);
       }
       console.log('');
+      showPendingNotifications();
+      scheduleBackgroundCheck(['npm', 'image']);
     } catch (e: any) {
       console.error(chalk.red('Error: ' + e.message));
     }
