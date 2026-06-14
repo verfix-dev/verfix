@@ -12,8 +12,11 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   const themeScript = `
     try {
-      var theme = localStorage.getItem('verfix-theme') || 'dark';
-      document.documentElement.dataset.theme = theme;
+      var saved = localStorage.getItem('verfix-theme') || 'system';
+      var resolved = saved === 'system'
+        ? (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark')
+        : saved;
+      document.documentElement.dataset.theme = resolved;
     } catch (_) {
       document.documentElement.dataset.theme = 'dark';
     }

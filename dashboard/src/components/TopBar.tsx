@@ -1,41 +1,50 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { CheckCircle2, Moon, Sun, PanelLeft, Plus, X } from 'lucide-react';
+import { useEffect, useState, useCallback } from 'react';
+import { CheckCircle2, Monitor, Moon, Sun, PanelLeft } from 'lucide-react';
 import { useWorkspace } from '@/context/WorkspaceContext';
 
-type Theme = 'dark' | 'light';
+type ThemePref = 'system' | 'dark' | 'light';
+
+const THEME_OPTIONS: { value: ThemePref; icon: React.ReactNode; label: string }[] = [
+  { value: 'system', icon: <Monitor size={13} aria-hidden="true" />, label: 'System' },
+  { value: 'dark',   icon: <Moon size={13} aria-hidden="true" />,    label: 'Dark'   },
+  { value: 'light',  icon: <Sun size={13} aria-hidden="true" />,     label: 'Light'  },
+];
+
+function resolveTheme(pref: ThemePref): 'dark' | 'light' {
+  if (pref === 'system') {
+    return window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+  }
+  return pref;
+}
 
 export default function TopBar() {
-  const {
-    executions,
-    sidebarCollapsed,
-    setSidebarCollapsed,
-    showNewJob,
-    setShowNewJob,
-  } = useWorkspace();
-
-  const [theme, setTheme] = useState<Theme>('dark');
+  const { executions, sidebarCollapsed, setSidebarCollapsed } = useWorkspace();
+  const [pref, setPref] = useState<ThemePref>('system');
 
   useEffect(() => {
-    const syncTheme = setTimeout(() => {
-      const saved = window.localStorage.getItem('verfix-theme');
-      const next: Theme = saved === 'light' ? 'light' : 'dark';
-      document.documentElement.dataset.theme = next;
-      setTheme(next);
-    }, 0);
-
-    return () => clearTimeout(syncTheme);
+    const saved = (localStorage.getItem('verfix-theme') as ThemePref) || 'system';
+    setPref(saved);
+    document.documentElement.dataset.theme = resolveTheme(saved);
   }, []);
 
-  const toggleTheme = () => {
-    const next: Theme = theme === 'dark' ? 'light' : 'dark';
-    document.documentElement.dataset.theme = next;
-    window.localStorage.setItem('verfix-theme', next);
-    setTheme(next);
-  };
+  useEffect(() => {
+    if (pref !== 'system') return;
+    const mq = window.matchMedia('(prefers-color-scheme: light)');
+    const handler = (e: MediaQueryListEvent) => {
+      document.documentElement.dataset.theme = e.matches ? 'light' : 'dark';
+    };
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
+  }, [pref]);
 
-  // Calculate stats directly from workspace context
+  const setThemePref = useCallback((next: ThemePref) => {
+    setPref(next);
+    localStorage.setItem('verfix-theme', next);
+    document.documentElement.dataset.theme = resolveTheme(next);
+  }, []);
+
   const activeCount = executions.filter(e => e.status === 'running' || e.status === 'queued').length;
   const completedExecs = executions.filter(e => e.status === 'completed' || e.status === 'failed');
   const passRate = completedExecs.length > 0
@@ -44,7 +53,6 @@ export default function TopBar() {
 
   return (
     <header className="topbar">
-      {/* Sidebar Toggle Button */}
       <button
         type="button"
         className="icon-button topbar-sidebar-toggle"
@@ -57,7 +65,6 @@ export default function TopBar() {
 
       <div className="topbar-spacer" />
 
-      {/* Toolbar Status & Cluster */}
       <div className="toolbar-cluster" aria-label="Dashboard status">
         {activeCount > 0 && (
           <span className="status-chip">
@@ -71,17 +78,23 @@ export default function TopBar() {
             {passRate}% pass
           </span>
         )}
-        <button 
-          className="icon-button" 
-          type="button" 
-          onClick={toggleTheme} 
-          aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`} 
-          title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`}
-        >
-          {theme === 'dark' ? <Sun size={15} aria-hidden="true" /> : <Moon size={15} aria-hidden="true" />}
-        </button>
 
-
+        <div className="theme-switcher" role="group" aria-label="Theme preference">
+          {THEME_OPTIONS.map(({ value, icon, label }) => (
+            <button
+              key={value}
+              type="button"
+              className="theme-switcher-btn"
+              data-active={pref === value}
+              aria-pressed={pref === value}
+              onClick={() => setThemePref(value)}
+              title={label}
+              aria-label={`${label} theme`}
+            >
+              {icon}
+            </button>
+          ))}
+        </div>
       </div>
     </header>
   );

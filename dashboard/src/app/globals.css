@@ -193,6 +193,38 @@ code, pre, .mono { font-family: 'JetBrains Mono', monospace; }
 
 .toolbar-cluster { display: flex; align-items: center; gap: 8px; }
 
+.theme-switcher {
+  display: flex;
+  align-items: center;
+  background: var(--sidebar-hover);
+  border: 1px solid var(--sidebar-border);
+  border-radius: 8px;
+  padding: 2px;
+  gap: 1px;
+}
+
+.theme-switcher-btn {
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--sidebar-text-muted);
+  cursor: pointer;
+  transition: background 80ms ease, color 80ms ease;
+}
+.theme-switcher-btn[data-active='true'] {
+  background: var(--sidebar-selected);
+  color: var(--sidebar-text);
+}
+.theme-switcher-btn:not([data-active='true']):hover {
+  background: var(--sidebar-hover);
+  color: var(--sidebar-text);
+}
+
 .replay-nav-btn:not(:disabled):hover {
   background: var(--bg-highlight) !important;
   border-color: var(--border-active) !important;
