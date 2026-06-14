@@ -7,9 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **CLI Update Notifications:** Added industry-standard update notification system for both the CLI npm package and the Docker server image.
+  - `verfix start` and `verfix status` now show update banners when a newer version is available.
+  - Checks run in a fully detached background process (`update-checker-worker.ts`) so commands remain instant — zero blocking I/O.
+  - NPM version check queries `registry.npmjs.org` and caches the result for 24 hours.
+  - Docker image digest check compares local and remote GHCR digests without pulling the image.
+  - New module `cli/src/update-check.ts` provides `showPendingNotifications()`, `scheduleBackgroundCheck()`, and `clearImageCache()`.
+
 ### Changed
 - Redesigned the dashboard workspace with a calmer Postman-inspired shell, compact execution history, responsive split panels, and shared light/dark theme tokens.
 - Improved dashboard controls with keyboard-focus styling, ARIA labels, selectable history rows, and clearer new-verification validation feedback.
+- **Flaky Task Display:** Changed from URL-level to execution-level granularity.
+  - Backend `handleFlaky` now returns `failed_execution_ids` so the frontend can mark only the specific failed executions as flaky.
+  - Sidebar flaky tag and detail-view "Unstable Target Diagnostics" now only appear on executions that actually failed, not on all executions sharing the same URL.
+  - Dashboard `WorkspaceContext` maintains a `flakyExecutionIds` Set for O(1) lookup.
+
+### Fixed
+- **Docker Build:** Fixed dashboard build failure caused by `.dockerignore` excluding the `cli/` directory. The CLI source is now copied into the build stage (`Dockerfile.server`) so `next.config.ts` can read `cli/package.json` for version injection.
+- **Database Performance:** Added composite index `idx_executions_url_status_passed` on `(url, status, passed)` to speed up flaky URL queries.
+- **Database Reliability:** Added `defer idRows.Close()` in `handleFlaky` to prevent resource leaks on early returns.
 
 ## [0.2.1] - 2026-06-10
 

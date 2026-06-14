@@ -19,6 +19,7 @@ import {
 import { waitForHealth, isApiHealthy, isDashboardReachable, resolveApiBase } from './health';
 import { buildDashboardBase, getRuntimePorts } from './runtime';
 import { emitJson, emitJsonError, isJsonMode } from './json-output';
+import { showPendingNotifications, scheduleBackgroundCheck, clearImageCache } from './update-check';
 
 // ─── Load Environment Variables ────────────────────────────────────────────────
 const envPath = path.join(process.cwd(), '.verfix', '.env');
@@ -94,6 +95,8 @@ program
         spinner.succeed('Verfix runtime is already running');
         console.log(`    API:       ${chalk.cyan(`http://localhost:${runningPorts.apiPort}`)}`);
         console.log(`    Dashboard: ${chalk.cyan(`http://localhost:${runningPorts.dashboardPort}`)}`);
+        showPendingNotifications();
+        scheduleBackgroundCheck(['npm', 'image']);
         return;
       }
 
@@ -108,6 +111,8 @@ program
       const startedPorts = getRuntimePorts();
       console.log(`    API:       ${chalk.cyan(`http://localhost:${startedPorts.apiPort}`)}`);
       console.log(`    Dashboard: ${chalk.cyan(`http://localhost:${startedPorts.dashboardPort}`)}`);
+      showPendingNotifications();
+      scheduleBackgroundCheck(['npm', 'image']);
     } catch (e: any) {
       spinner.fail(e.message);
       process.exit(2);
@@ -197,6 +202,8 @@ program
       console.log(`  ${chalk.bold('Uptime:')}     ${formatUptime(state.startedAt)}`);
     }
     console.log('');
+    showPendingNotifications();
+    scheduleBackgroundCheck(['npm', 'image']);
   });
 
 // ─── logs command ────────────────────────────────────────────────────────────
@@ -258,6 +265,8 @@ program
       const startedPorts = getRuntimePorts();
       console.log(`    API:       ${chalk.cyan(`http://localhost:${startedPorts.apiPort}`)}`);
       console.log(`    Dashboard: ${chalk.cyan(`http://localhost:${startedPorts.dashboardPort}`)}`);
+      // Clear stale image cache — user just updated, so no banner needed next run
+      clearImageCache();
     } catch (e: any) {
       startSpinner.fail(e.message);
       process.exit(2);
