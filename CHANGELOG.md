@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-06-14
+
 ### Added
 - **CLI Update Notifications:** Added industry-standard update notification system for both the CLI npm package and the Docker server image.
   - `verfix start` and `verfix status` now show update banners when a newer version is available.
