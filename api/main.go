@@ -392,7 +392,7 @@ func handleHealth(c *fiber.Ctx) error {
 
 func handleFlaky(c *fiber.Ctx) error {
 	if db == nil {
-		return c.JSON(fiber.Map{"flaky": []interface{}{}})
+		return c.JSON(fiber.Map{"flaky": []interface{}{}, "failed_execution_ids": []interface{}{}})
 	}
 
 	rows, err := db.Query(`
@@ -434,7 +434,37 @@ func handleFlaky(c *fiber.Ctx) error {
 	if results == nil {
 		results = []FlakyURL{}
 	}
-	return c.JSON(fiber.Map{"flaky": results, "total": len(results)})
+
+	// Return the specific execution IDs that failed for flaky URLs so the
+	// frontend can target individual executions instead of every run sharing
+	// the same URL.
+	var failedIDs []string
+	idRows, err := db.Query(`
+		SELECT DISTINCT id
+		FROM executions
+		WHERE status IN ('completed', 'failed')
+		  AND passed = false
+		  AND url IN (
+			  SELECT url
+			  FROM executions
+			  WHERE status IN ('completed', 'failed')
+			  GROUP BY url
+			  HAVING COUNT(DISTINCT passed) > 1 AND COUNT(*) >= 2
+		  )
+	`)
+	if err == nil {
+		defer idRows.Close()
+		for idRows.Next() {
+			var id string
+			idRows.Scan(&id)
+			failedIDs = append(failedIDs, id)
+		}
+	}
+	if failedIDs == nil {
+		failedIDs = []string{}
+	}
+
+	return c.JSON(fiber.Map{"flaky": results, "total": len(results), "failed_execution_ids": failedIDs})
 }
 
 // ─── DB helpers ───────────────────────────────────────────────────────────────
@@ -458,6 +488,7 @@ func initDB() {
 	CREATE INDEX IF NOT EXISTS idx_executions_status ON executions(status);
 	CREATE INDEX IF NOT EXISTS idx_executions_url ON executions(url);
 	CREATE INDEX IF NOT EXISTS idx_executions_created_at ON executions(created_at DESC);
+	CREATE INDEX IF NOT EXISTS idx_executions_url_status_passed ON executions(url, status, passed);
 
 	CREATE TABLE IF NOT EXISTS assertion_results (
 		id SERIAL PRIMARY KEY,

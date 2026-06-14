@@ -1,137 +1,249 @@
 'use client';
-import { useState } from 'react';
-import { Execution } from '@/app/page';
-import { CheckCircle2, XCircle, Clock, Loader2, Search, Filter, RefreshCw } from 'lucide-react';
 
-type FilterStatus = 'all' | 'passed' | 'failed' | 'running';
+import { useMemo, useState, useRef, useEffect } from 'react';
+import { Search, X, RefreshCw } from 'lucide-react';
+import { useWorkspace } from '@/context/WorkspaceContext';
+import { Execution } from '@/types';
 
-export default function ExecutionList({ executions, selected, onSelect, onRefresh }: {
-  executions: Execution[];
-  selected: Execution | null;
-  onSelect: (e: Execution) => void;
-  onRefresh: () => void;
-}) {
-  const [search, setSearch] = useState('');
-  const [filter, setFilter] = useState<FilterStatus>('all');
+type FilterStatus = 'all' | 'running' | 'passed' | 'failed' | 'flaky';
 
-  const filtered = executions.filter(e => {
-    const matchSearch = !search || e.task.toLowerCase().includes(search.toLowerCase()) || e.url.toLowerCase().includes(search.toLowerCase());
-    const matchFilter =
-      filter === 'all' ? true :
-      filter === 'passed' ? e.passed && e.status === 'completed' :
-      filter === 'failed' ? (!e.passed && (e.status === 'completed' || e.status === 'failed')) :
-      e.status === 'running' || e.status === 'queued';
-    return matchSearch && matchFilter;
+const FILTERS: FilterStatus[] = ['all', 'running', 'passed', 'failed', 'flaky'];
+
+function groupByDate(items: Execution[]): { label: string; items: Execution[] }[] {
+  const startOfToday = new Date();
+  startOfToday.setHours(0, 0, 0, 0);
+  const todayMs = startOfToday.getTime();
+  const yesterdayMs = todayMs - 86400000;
+  const weekMs = todayMs - 7 * 86400000;
+  const groups: { label: string; items: Execution[] }[] = [
+    { label: 'Today', items: [] },
+    { label: 'Yesterday', items: [] },
+    { label: 'Past 7 days', items: [] },
+    { label: 'Earlier', items: [] },
+  ];
+  items.forEach(e => {
+    const t = new Date(e.created_at).getTime();
+    if (t >= todayMs) groups[0].items.push(e);
+    else if (t >= yesterdayMs) groups[1].items.push(e);
+    else if (t >= weekMs) groups[2].items.push(e);
+    else groups[3].items.push(e);
   });
-
-  const counts = {
-    all: executions.length,
-    running: executions.filter(e => e.status === 'running' || e.status === 'queued').length,
-    passed: executions.filter(e => e.passed && e.status === 'completed').length,
-    failed: executions.filter(e => !e.passed && (e.status === 'completed' || e.status === 'failed')).length,
-  };
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
-      {/* Header */}
-      <div style={{ padding: '12px 14px 10px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-          <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>History</span>
-          <button onClick={onRefresh} title="Refresh" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 2, borderRadius: 4, display: 'flex' }}>
-            <RefreshCw size={12} />
-          </button>
-        </div>
-
-        {/* Search */}
-        <div style={{ position: 'relative', marginBottom: 8 }}>
-          <Search size={11} style={{ position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)', pointerEvents: 'none' }} />
-          <input
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            placeholder="Search by task or URL..."
-            style={{ width: '100%', padding: '6px 8px 6px 26px', background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-primary)', fontSize: 11, outline: 'none' }}
-          />
-        </div>
-
-        {/* Filter tabs */}
-        <div style={{ display: 'flex', gap: 4 }}>
-          {(['all','running','passed','failed'] as FilterStatus[]).map(f => (
-            <button key={f} onClick={() => setFilter(f)} style={{ flex: 1, padding: '4px 2px', borderRadius: 5, border: '1px solid', fontSize: 10, fontWeight: 600, cursor: 'pointer', textTransform: 'capitalize', transition: 'all 0.1s', fontFamily: 'inherit', borderColor: filter === f ? filterColor(f) : 'var(--border)', background: filter === f ? `${filterColor(f)}15` : 'transparent', color: filter === f ? filterColor(f) : 'var(--text-muted)' }}>
-              {f} {counts[f] > 0 && <span style={{ opacity: 0.7 }}>({counts[f]})</span>}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* List */}
-      <div style={{ flex: 1, overflow: 'auto' }}>
-        {filtered.length === 0 && (
-          <div style={{ padding: '30px 14px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>
-            {search || filter !== 'all' ? 'No matching executions' : 'No executions yet. Start a new verification!'}
-          </div>
-        )}
-        {filtered.map(e => (
-          <ExecutionRow key={e.executionId} execution={e} isSelected={selected?.executionId === e.executionId} onClick={() => onSelect(e)} />
-        ))}
-      </div>
-    </div>
-  );
+  return groups.filter(g => g.items.length > 0);
 }
 
-function ExecutionRow({ execution: e, isSelected, onClick }: { execution: Execution; isSelected: boolean; onClick: () => void }) {
-  const color = statusColor(e.status, e.passed);
-  const isLive = e.status === 'running' || e.status === 'queued';
+export default function ExecutionList() {
+  const { executions, selected, selectExecution, fetchList, flakyExecutionIds } = useWorkspace();
+  const [search, setSearch] = useState('');
+  const [filter, setFilter] = useState<FilterStatus>('all');
+  const [searchOpen, setSearchOpen] = useState(false);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        setSearchOpen(true);
+      }
+      if (e.key === 'Escape' && searchOpen) {
+        setSearchOpen(false);
+        setSearch('');
+        setFilter('all');
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [searchOpen]);
+
+  useEffect(() => {
+    if (searchOpen) {
+      requestAnimationFrame(() => searchInputRef.current?.focus());
+    } else {
+      setSearch('');
+      setFilter('all');
+    }
+  }, [searchOpen]);
+
+  const flakySet = useMemo(() => flakyExecutionIds || new Set(), [flakyExecutionIds]);
+
+  const filtered = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    return executions.filter(e => {
+      const matchSearch = !query
+        || e.task.toLowerCase().includes(query)
+        || e.url.toLowerCase().includes(query)
+        || e.executionId.toLowerCase().includes(query);
+      const matchFilter =
+        filter === 'all' ? true :
+        filter === 'passed' ? e.passed && e.status === 'completed' :
+        filter === 'failed' ? !e.passed && (e.status === 'completed' || e.status === 'failed') :
+        filter === 'flaky' ? flakySet.has(e.executionId) :
+        e.status === 'running' || e.status === 'queued';
+      return matchSearch && matchFilter;
+    });
+  }, [executions, filter, search, flakySet]);
+
+  const groups = useMemo(() => groupByDate(executions), [executions]);
 
   return (
-    <div
-      onClick={onClick}
-      style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)', cursor: 'pointer', background: isSelected ? 'var(--bg-highlight)' : 'transparent', borderLeft: `2px solid ${isSelected ? 'var(--accent-blue)' : 'transparent'}`, transition: 'all 0.1s', animation: 'slide-in 0.15s ease' }}
-    >
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-        <div style={{ marginTop: 1, flexShrink: 0 }}>
-          <StatusIcon status={e.status} passed={e.passed} size={13} />
-        </div>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginBottom: 2 }}>
-            {e.task || 'Untitled'}
-          </div>
-          <div style={{ fontSize: 10, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: 'JetBrains Mono, monospace' }}>
-            {e.url || '—'}
-          </div>
-        </div>
-      </div>
-
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 6 }}>
-        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-          <span style={{ fontSize: 9, fontWeight: 700, padding: '1px 6px', borderRadius: 3, background: `${color}15`, color, border: `1px solid ${color}30` }}>
-            {isLive ? (e.status === 'running' ? '● running' : '⏳ queued') : e.passed ? '✓ pass' : '✗ fail'}
-          </span>
-          {e.mode && <span style={{ fontSize: 9, padding: '1px 6px', borderRadius: 3, background: 'var(--bg-elevated)', color: 'var(--text-muted)', border: '1px solid var(--border)' }}>{e.mode}</span>}
-        </div>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          {e.duration_ms > 0 && <span style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'JetBrains Mono, monospace' }}>{e.duration_ms}ms</span>}
-          <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{relativeTime(e.created_at)}</span>
+    <div className="sl-root">
+      {/* ── Header ─────────────────────────────────── */}
+      <div className="sl-header">
+        <span className="sl-section-label">History</span>
+        <div style={{ display: 'flex', gap: 2 }}>
+          <button
+            className="sl-icon-btn"
+            onClick={() => setSearchOpen(true)}
+            title="Search (⌘K)"
+            aria-label="Search verifications"
+          >
+            <Search size={13} />
+          </button>
+          <button
+            className="sl-icon-btn"
+            onClick={fetchList}
+            title="Refresh"
+            aria-label="Refresh history"
+          >
+            <RefreshCw size={13} />
+          </button>
         </div>
       </div>
 
-      {/* Assertion mini bar */}
-      {e.assertions && e.assertions.length > 0 && (e.status === 'completed' || e.status === 'failed') && (
-        <div style={{ display: 'flex', gap: 2, marginTop: 6 }}>
-          {e.assertions.map((a, i) => (
-            <div key={i} title={`${a.type}: ${a.passed ? 'passed' : 'failed'}`} style={{ flex: 1, height: 3, borderRadius: 2, background: a.passed ? 'var(--accent-green)' : 'var(--accent-red)', opacity: 0.7 }} />
-          ))}
+      {/* ── Grouped list ───────────────────────────── */}
+      <div className="sl-scroll" aria-live="polite">
+        {executions.length === 0 ? (
+          <div className="sl-empty">No verifications yet.<br />Start one to see history here.</div>
+        ) : (
+          groups.map(({ label, items }) => (
+            <div key={label} className="sl-group">
+              <div className="sl-group-label">{label}</div>
+              {items.map(e => (
+                <ExecRow
+                  key={e.executionId}
+                  execution={e}
+                  isSelected={selected?.executionId === e.executionId}
+                  onSelect={() => selectExecution(e)}
+                  isFlaky={flakySet.has(e.executionId)}
+                />
+              ))}
+            </div>
+          ))
+        )}
+      </div>
+
+      {/* ── Search overlay ─────────────────────────── */}
+      {searchOpen && (
+        <div
+          className="sl-search-overlay"
+          role="dialog"
+          aria-label="Search verifications"
+          aria-modal="true"
+        >
+          <div className="sl-search-header">
+            <div className="sl-search-input-wrap">
+              <Search size={13} className="sl-search-icon" />
+              <input
+                ref={searchInputRef}
+                className="sl-search-input"
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                placeholder="Search tasks, URLs, IDs…"
+                aria-label="Search verifications"
+              />
+              {search && (
+                <button
+                  className="sl-search-clear"
+                  onClick={() => setSearch('')}
+                  aria-label="Clear search"
+                >
+                  <X size={11} />
+                </button>
+              )}
+            </div>
+            <div className="sl-filter-row" role="tablist" aria-label="Filter by status">
+              {FILTERS.map(f => (
+                <button
+                  key={f}
+                  role="tab"
+                  aria-selected={filter === f}
+                  onClick={() => setFilter(f)}
+                  className="sl-filter-chip"
+                  data-active={filter === f}
+                >
+                  {f}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="sl-search-results" aria-live="polite">
+            {filtered.length === 0 ? (
+              <div className="sl-empty">
+                {search || filter !== 'all' ? 'No results found' : 'No verifications yet'}
+              </div>
+            ) : (
+              filtered.map(e => (
+                <ExecRow
+                  key={e.executionId}
+                  execution={e}
+                  isSelected={selected?.executionId === e.executionId}
+                  onSelect={() => { selectExecution(e); setSearchOpen(false); }}
+                  isFlaky={flakySet.has(e.executionId)}
+                />
+              ))
+            )}
+          </div>
+
+          <div className="sl-search-footer">
+            <button className="sl-search-close-btn" onClick={() => setSearchOpen(false)}>
+              <X size={12} /> Close
+            </button>
+            <span className="sl-search-hint">ESC · ⌘K</span>
+          </div>
         </div>
       )}
     </div>
   );
 }
 
-function StatusIcon({ status, passed, size }: { status: string; passed: boolean; size: number }) {
-  const color = statusColor(status, passed);
-  if (status === 'running') return <Loader2 size={size} color={color} style={{ animation: 'spin 1s linear infinite' }} />;
-  if (status === 'queued') return <Clock size={size} color={color} />;
-  if (passed) return <CheckCircle2 size={size} color={color} />;
-  return <XCircle size={size} color={color} />;
+function ExecRow({
+  execution: e,
+  isSelected,
+  onSelect,
+  isFlaky,
+}: {
+  execution: Execution;
+  isSelected: boolean;
+  onSelect: () => void;
+  isFlaky: boolean;
+}) {
+  const color = statusColor(e.status, e.passed);
+  const isLive = e.status === 'running' || e.status === 'queued';
+
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      className="sl-exec-row"
+      data-selected={isSelected}
+      aria-current={isSelected ? 'true' : undefined}
+    >
+      <div className="sl-exec-dot" style={{ background: color }} />
+      <div className="sl-exec-body">
+        <div className="sl-exec-title">{e.task || 'Untitled verification'}</div>
+        <div className="sl-exec-meta">
+          {isLive ? (
+            <><span className="sl-live-dot" />Running</>
+          ) : (
+            e.passed ? 'Passed' : 'Failed'
+          )}
+          {e.duration_ms > 0 && !isLive && ` · ${e.duration_ms}ms`}
+          {isFlaky && <span className="sl-flaky-tag"> · flaky</span>}
+        </div>
+      </div>
+      <span className="sl-exec-time">{relativeTime(e.created_at)}</span>
+    </button>
+  );
 }
 
 function statusColor(status: string, passed: boolean) {
@@ -141,14 +253,10 @@ function statusColor(status: string, passed: boolean) {
   return 'var(--accent-red)';
 }
 
-function filterColor(f: string) {
-  return f === 'running' ? 'var(--accent-blue)' : f === 'passed' ? 'var(--accent-green)' : f === 'failed' ? 'var(--accent-red)' : 'var(--text-secondary)';
-}
-
 function relativeTime(ts: string) {
   const diff = Date.now() - new Date(ts).getTime();
-  if (diff < 60000) return 'just now';
-  if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
-  if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
-  return `${Math.floor(diff / 86400000)}d ago`;
+  if (diff < 60000) return 'now';
+  if (diff < 3600000) return `${Math.floor(diff / 60000)}m`;
+  if (diff < 86400000) return `${Math.floor(diff / 3600000)}h`;
+  return `${Math.floor(diff / 86400000)}d`;
 }
