@@ -144,14 +144,13 @@ code, pre, .mono { font-family: 'JetBrains Mono', monospace; }
 
 .topbar {
   height: var(--topbar-height);
-  background: color-mix(in srgb, var(--bg-surface) 94%, transparent);
+  background: color-mix(in srgb, var(--bg-surface) 94%, var(--accent-blue) 6%);
   border-bottom: 1px solid var(--border);
   display: flex;
   align-items: center;
   gap: 14px;
   padding: 0 16px;
   flex-shrink: 0;
-  backdrop-filter: blur(14px);
 }
 
 /* Sidebar Toggle in Topbar */
@@ -167,6 +166,12 @@ code, pre, .mono { font-family: 'JetBrains Mono', monospace; }
 .topbar-spacer { flex: 1; }
 
 .toolbar-cluster { display: flex; align-items: center; gap: 8px; }
+
+.replay-nav-btn:not(:disabled):hover {
+  background: var(--bg-highlight) !important;
+  border-color: var(--border-active) !important;
+  color: var(--text-primary) !important;
+}
 
 .status-chip {
   display: inline-flex;

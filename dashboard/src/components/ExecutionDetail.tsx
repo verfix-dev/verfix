@@ -1,7 +1,7 @@
 'use client';
 import { Execution, ExecutionEvent } from '@/app/page';
 import { useState } from 'react';
-import { Activity, CheckCircle2, XCircle, Clock, Image, FileText, Network, Terminal, AlertTriangle, Download, Copy, Loader2, Sparkles, Play, Brain, Globe } from 'lucide-react';
+import { Activity, CheckCircle2, XCircle, Clock, Image, FileText, Network, Terminal, AlertTriangle, Download, Copy, Loader2, Sparkles, Play, Brain, Globe, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useWorkspace } from '@/context/WorkspaceContext';
 
 type Tab = 'assertions' | 'console' | 'network' | 'artifacts' | 'ai' | 'replay' | 'exploration';
@@ -34,64 +34,58 @@ export default function ExecutionDetail({ execution: e, apiBase, loadingDetail }
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: 'var(--bg-base)', animation: 'fade-in 0.15s ease' }}>
 
-      {/* ── Execution Header ────────────────────────── */}
-      <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', background: 'var(--bg-surface)', flexShrink: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 10 }}>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            {/* Status + Title */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-              <StatusIcon status={e.status} passed={e.passed} size={15} />
-              <h2 style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.task || 'Untitled'}</h2>
-            </div>
-            {/* URL */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 5, color: 'var(--text-muted)', fontSize: 11 }}>
-              <Globe size={10} />
-              <span style={{ fontFamily: 'JetBrains Mono, monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.url || '—'}</span>
+      {/* ── Execution Header (compact) ────────────────────────── */}
+      <div style={{ padding: '12px 20px', borderBottom: '1px solid var(--border)', background: 'var(--bg-surface)', flexShrink: 0 }}>
+        {/* Title + URL + ID + Status in one row */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+            <StatusIcon status={e.status} passed={e.passed} size={14} />
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 }}>
+              <h2 style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.task || 'Untitled'}</h2>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 5, color: 'var(--text-muted)', fontSize: 10 }}>
+                <Globe size={9} />
+                <span style={{ fontFamily: 'JetBrains Mono, monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.url || '—'}</span>
+                <span style={{ opacity: 0.35 }}>·</span>
+                <span style={{ fontFamily: 'JetBrains Mono, monospace', opacity: 0.7 }}>ID {e.executionId.slice(-8)}</span>
+                <button onClick={copyId} title="Copy ID" style={{ background: 'none', border: 'none', cursor: 'pointer', color: copied ? 'var(--accent-green)' : 'var(--text-muted)', padding: 0, display: 'flex', alignItems: 'center' }}>
+                  <Copy size={9} />
+                </button>
+              </div>
             </div>
           </div>
-          {/* Right badges */}
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6, flexShrink: 0 }}>
-            <span style={{ fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 99, background: `${color}18`, color, border: `1px solid ${color}35` }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+            <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 99, background: `${color}18`, color, border: `1px solid ${color}35` }}>
               {isLive ? (e.status === 'running' ? '● Running' : '⏳ Queued') : e.passed ? '✓ Passed' : '✗ Failed'}
             </span>
             {e.duration_ms > 0 && (
               <span style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'JetBrains Mono, monospace' }}>
-                {e.duration_ms}ms · {e.retry_count} retries
+                {e.duration_ms}ms · {e.retry_count}r
               </span>
             )}
           </div>
         </div>
 
-        {/* Execution ID bar */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 8px', background: 'var(--bg-elevated)', borderRadius: 6, border: '1px solid var(--border)' }}>
-          <span style={{ fontSize: 10, color: 'var(--text-muted)', flexShrink: 0 }}>ID</span>
-          <span style={{ fontSize: 10, color: 'var(--text-secondary)', fontFamily: 'JetBrains Mono, monospace', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.executionId}</span>
-          <button onClick={copyId} title="Copy ID" style={{ background: 'none', border: 'none', cursor: 'pointer', color: copied ? 'var(--accent-green)' : 'var(--text-muted)', padding: 2, display: 'flex', flexShrink: 0 }}>
-            <Copy size={10} />
-          </button>
-        </div>
-
-        {/* Stats row for completed */}
+        {/* Stats row */}
         {!isLive && !loadingDetail && assertCount > 0 && (
-          <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-            <StatPill label="Assertions" value={`${(e.assertions||[]).filter(a=>a.passed).length}/${assertCount}`} color={(e.assertions||[]).every(a=>a.passed) ? 'var(--accent-green)' : 'var(--accent-red)'} />
-            <StatPill label="Console errors" value={errCount} color={errCount > 0 ? 'var(--accent-red)' : 'var(--accent-green)'} />
-            <StatPill label="Requests" value={netCount} color="var(--accent-cyan)" />
-            <StatPill label="Mode" value={e.mode || 'strict'} color="var(--accent-purple)" />
+          <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+            <CompactStat label="Assertions" value={`${(e.assertions||[]).filter(a=>a.passed).length}/${assertCount}`} color={(e.assertions||[]).every(a=>a.passed) ? 'var(--accent-green)' : 'var(--accent-red)'} />
+            <CompactStat label="Errors" value={errCount} color={errCount > 0 ? 'var(--accent-red)' : 'var(--accent-green)'} />
+            <CompactStat label="Requests" value={netCount} color="var(--accent-cyan)" />
+            <CompactStat label="Mode" value={e.mode || 'strict'} color="var(--accent-purple)" />
           </div>
         )}
 
         {/* Live banner */}
         {isLive && (
-          <div style={{ marginTop: 10, padding: '8px 12px', background: 'rgba(92,142,247,0.07)', borderRadius: 7, border: '1px solid rgba(92,142,247,0.18)', display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--accent-blue)', display: 'inline-block', animation: 'pulse-dot 1.5s infinite' }} />
-            <span style={{ fontSize: 12, color: 'var(--accent-blue)' }}>Browser verification in progress — results will appear automatically</span>
+          <div style={{ marginTop: 8, padding: '6px 10px', background: 'rgba(92,142,247,0.07)', borderRadius: 6, border: '1px solid rgba(92,142,247,0.18)', display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--accent-blue)', display: 'inline-block', animation: 'pulse-dot 1.5s infinite' }} />
+            <span style={{ fontSize: 11, color: 'var(--accent-blue)' }}>Browser verification in progress — results will appear automatically</span>
           </div>
         )}
 
         {/* Error banner */}
         {e.error && (
-          <div style={{ marginTop: 10, padding: '8px 12px', background: 'rgba(248,113,113,0.07)', borderRadius: 7, border: '1px solid rgba(248,113,113,0.2)', display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+          <div style={{ marginTop: 8, padding: '6px 10px', background: 'rgba(248,113,113,0.07)', borderRadius: 6, border: '1px solid rgba(248,113,113,0.2)', display: 'flex', gap: 8, alignItems: 'flex-start' }}>
             <AlertTriangle size={12} color="var(--accent-red)" style={{ marginTop: 1, flexShrink: 0 }} />
             <span style={{ fontSize: 11, color: 'var(--accent-red)', fontFamily: 'JetBrains Mono, monospace', wordBreak: 'break-all' }}>{e.error}</span>
           </div>
@@ -99,22 +93,22 @@ export default function ExecutionDetail({ execution: e, apiBase, loadingDetail }
 
         {/* Flaky Target URL Diagnostics */}
         {isFlaky && flakyDetails && (
-          <div style={{ marginTop: 10, padding: '10px 14px', background: 'rgba(230,169,61,0.06)', borderRadius: 8, border: '1px solid rgba(230,169,61,0.25)', display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <div style={{ marginTop: 8, padding: '8px 12px', background: 'rgba(230,169,61,0.06)', borderRadius: 6, border: '1px solid rgba(230,169,61,0.25)', display: 'flex', flexDirection: 'column', gap: 4 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--accent-yellow)' }}>
-              <AlertTriangle size={13} aria-hidden="true" />
-              <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Unstable Target Diagnostics</span>
+              <AlertTriangle size={12} aria-hidden="true" />
+              <span style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Unstable Target Diagnostics</span>
             </div>
-            <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.4 }}>
+            <div style={{ fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.4 }}>
               This target URL has shown inconsistent success rates (flakiness) across runs.
             </div>
-            <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
-              <StatPill label="Flake Rate" value={`${flakyDetails.flake_rate.toFixed(0)}%`} color="var(--accent-yellow)" />
-              <StatPill label="Total Runs" value={flakyDetails.total_runs} color="var(--accent-blue)" />
-              <StatPill label="Passed" value={flakyDetails.pass_count} color="var(--accent-green)" />
-              <StatPill label="Failed" value={flakyDetails.fail_count} color="var(--accent-red)" />
-              <StatPill label="Avg Duration" value={`${Math.round(flakyDetails.avg_duration_ms)}ms`} color="var(--accent-cyan)" />
+            <div style={{ display: 'flex', gap: 6, marginTop: 2 }}>
+              <CompactStat label="Flake Rate" value={`${flakyDetails.flake_rate.toFixed(0)}%`} color="var(--accent-yellow)" />
+              <CompactStat label="Total Runs" value={flakyDetails.total_runs} color="var(--accent-blue)" />
+              <CompactStat label="Passed" value={flakyDetails.pass_count} color="var(--accent-green)" />
+              <CompactStat label="Failed" value={flakyDetails.fail_count} color="var(--accent-red)" />
+              <CompactStat label="Avg Duration" value={`${Math.round(flakyDetails.avg_duration_ms)}ms`} color="var(--accent-cyan)" />
             </div>
-            <div style={{ marginTop: 4, height: 4, background: 'var(--bg-elevated)', borderRadius: 2, overflow: 'hidden' }}>
+            <div style={{ marginTop: 2, height: 3, background: 'var(--bg-elevated)', borderRadius: 2, overflow: 'hidden' }}>
               <div style={{ height: '100%', width: `${100 - flakyDetails.flake_rate}%`, background: 'var(--accent-green)', borderRadius: 2 }} />
             </div>
           </div>
@@ -214,171 +208,172 @@ function ReplayTab({ execution: e, apiBase }: { execution: Execution; apiBase: s
   const screenshotUrl = getScreenshotUrl(activeEvent);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-      <div style={{ padding: '16px 18px', background: 'linear-gradient(135deg, rgba(52,145,255,0.12), rgba(24,28,36,0.9))', borderRadius: 12, border: '1px solid rgba(100,116,139,0.35)', display: 'flex', flexDirection: 'column', gap: 12, boxShadow: '0 12px 40px rgba(15,23,42,0.25)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.12em', color: 'rgba(148,163,184,0.9)' }}>Execution Intelligence Timeline</div>
-            <div style={{ fontSize: 13, color: e.passed ? 'var(--accent-green)' : 'var(--accent-red)', fontWeight: 700 }}>{e.passed ? 'PASS' : 'FAIL'} · {e.duration_ms}ms · {e.retry_count} retries</div>
-          </div>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {/* Compact Intelligence Header */}
+      <div style={{ padding: '10px 14px', background: 'linear-gradient(135deg, color-mix(in srgb, var(--accent-blue) 10%, var(--bg-surface)), var(--bg-surface))', borderRadius: 10, border: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--text-muted)' }}>Execution Intelligence Timeline</div>
+          <div style={{ width: 1, height: 14, background: 'var(--border)' }} />
+          <div style={{ fontSize: 12, color: e.passed ? 'var(--accent-green)' : 'var(--accent-red)', fontWeight: 700 }}>{e.passed ? 'PASS' : 'FAIL'} · {e.duration_ms}ms · {e.retry_count} retries</div>
         </div>
-
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-          <StatPill label="Signals" value={counts.total} color="var(--accent-blue)" />
-          <StatPill label="Captures" value={counts.captures} color="var(--accent-cyan)" />
-          <StatPill label="Failures" value={counts.failures} color={counts.failures > 0 ? 'var(--accent-red)' : 'var(--accent-green)'} />
-          <StatPill label="Retries" value={counts.retries} color={counts.retries > 0 ? 'var(--accent-yellow)' : 'var(--text-muted)'} />
+        <div style={{ display: 'flex', gap: 6 }}>
+          <CompactStat label="Signals" value={counts.total} color="var(--accent-blue)" />
+          <CompactStat label="Captures" value={counts.captures} color="var(--accent-cyan)" />
+          <CompactStat label="Failures" value={counts.failures} color={counts.failures > 0 ? 'var(--accent-red)' : 'var(--accent-green)'} />
+          <CompactStat label="Retries" value={counts.retries} color={counts.retries > 0 ? 'var(--accent-yellow)' : 'var(--text-muted)'} />
         </div>
-
       </div>
 
-      <div style={{ display: 'flex', gap: 0, height: '100%', minHeight: 500, border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden', background: 'var(--bg-surface)' }}>
-          {/* Left: Event Timeline */}
-          <div style={{ width: 280, flexShrink: 0, borderRight: '1px solid var(--border)', overflowY: 'auto', paddingRight: 0 }}>
-            <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-muted)', padding: '10px 12px 8px' }}>
-              Signal Timeline · {events.length} events
-            </div>
-            {events.map((ev, idx) => {
-              const cfg = EVENT_CONFIG[ev.type] || { color: 'var(--text-muted)', icon: ({ size }: { size?: number }) => <Clock size={size} /> };
-              const Ico = cfg.icon;
-              const isActive = idx === activeIdx;
-              const relTime = idx === 0 ? 0 : new Date(ev.timestamp).getTime() - new Date(events[0].timestamp).getTime();
-              return (
-                <button
-                  key={ev.id}
-                  onClick={() => setActiveIdx(idx)}
-                  style={{
-                    display: 'flex', alignItems: 'flex-start', gap: 10, width: '100%', padding: '9px 12px',
-                    background: isActive ? `${cfg.color}18` : 'transparent',
-                    border: 'none', borderLeft: `2px solid ${isActive ? cfg.color : 'transparent'}`,
-                    cursor: 'pointer', textAlign: 'left', transition: 'all 0.1s', fontFamily: 'inherit',
-                  }}
-                >
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', paddingTop: 2, flexShrink: 0 }}>
-                    <div style={{ width: 18, height: 18, borderRadius: '50%', background: `${cfg.color}25`, display: 'flex', alignItems: 'center', justifyContent: 'center', border: `1.5px solid ${isActive ? cfg.color : 'transparent'}` }}>
-                      <Ico size={9} />
-                    </div>
-                    {idx < events.length - 1 && (
-                      <div style={{ width: 1, height: 14, background: 'var(--border)', marginTop: 2 }} />
-                    )}
-                  </div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 11, color: isActive ? 'var(--text-primary)' : 'var(--text-secondary)', fontWeight: isActive ? 600 : 400, lineHeight: 1.3, wordBreak: 'break-word' }}>
-                      {truncate(cleanMessage(ev.message), 90)}
-                    </div>
-                    <div style={{ fontSize: 9, color: cfg.color, marginTop: 2, fontFamily: 'JetBrains Mono, monospace' }}>
-                      +{relTime}ms · {ev.type.replace(/_/g, ' ')}{ev.capture_reason ? ` · capture: ${ev.capture_reason.replace(/_/g, ' ')}` : ''}
-                    </div>
-                  </div>
-                  {ev.screenshot && <div style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--accent-cyan)', flexShrink: 0, marginTop: 6 }} title="Has screenshot" />}
-                </button>
-              );
-            })}
+      <div style={{ display: 'flex', gap: 0, height: '100%', minHeight: 420, border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden', background: 'var(--bg-surface)' }}>
+        {/* Left: Event Timeline */}
+        <div style={{ width: 260, flexShrink: 0, borderRight: '1px solid var(--border)', overflowY: 'auto', background: 'var(--bg-base)' }}>
+          <div style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-muted)', padding: '8px 10px 6px' }}>
+            Signal Timeline · {events.length} events
           </div>
-
-          {/* Right: Active Event Detail */}
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', borderBottom: '1px solid var(--border)', background: 'rgba(15,23,42,0.65)' }}>
+          {events.map((ev, idx) => {
+            const cfg = EVENT_CONFIG[ev.type] || { color: 'var(--text-muted)', icon: ({ size }: { size?: number }) => <Clock size={size} /> };
+            const Ico = cfg.icon;
+            const isActive = idx === activeIdx;
+            const relTime = idx === 0 ? 0 : new Date(ev.timestamp).getTime() - new Date(events[0].timestamp).getTime();
+            return (
               <button
-                onClick={() => setActiveIdx(i => Math.max(0, i - 1))}
-                disabled={activeIdx === 0}
-                style={{ padding: '6px 10px', background: 'rgba(13,17,30,0.85)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-secondary)', cursor: 'pointer', fontSize: 11, fontFamily: 'inherit' }}
+                key={ev.id}
+                onClick={() => setActiveIdx(idx)}
+                style={{
+                  display: 'flex', alignItems: 'flex-start', gap: 8, width: '100%', padding: '7px 10px',
+                  background: isActive ? `${cfg.color}14` : 'transparent',
+                  border: 'none', borderLeft: `2px solid ${isActive ? cfg.color : 'transparent'}`,
+                  cursor: 'pointer', textAlign: 'left', transition: 'all 0.1s', fontFamily: 'inherit',
+                }}
               >
-                ← Prev
-              </button>
-              <button
-                onClick={() => setActiveIdx(i => Math.min(events.length - 1, i + 1))}
-                disabled={activeIdx === events.length - 1}
-                style={{ padding: '6px 10px', background: 'rgba(13,17,30,0.85)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-secondary)', cursor: 'pointer', fontSize: 11, fontFamily: 'inherit' }}
-              >
-                Next →
-              </button>
-              <div style={{ flex: 1, overflowX: 'auto', display: 'flex', gap: 8, padding: '2px 0' }}>
-                {events.map((ev, idx) => {
-                  const cfg = EVENT_CONFIG[ev.type] || { color: 'var(--text-muted)', icon: ({ size }: { size?: number }) => <Clock size={size} /> };
-                  const isActive = idx === activeIdx;
-                  return (
-                    <button
-                      key={`tab_${ev.id}`}
-                      onClick={() => setActiveIdx(idx)}
-                      style={{
-                        display: 'flex', alignItems: 'center', gap: 6, padding: '6px 10px',
-                        borderRadius: 999, border: `1px solid ${isActive ? cfg.color : 'rgba(148,163,184,0.2)'}`,
-                        background: isActive ? `${cfg.color}20` : 'rgba(15,23,42,0.6)',
-                        color: isActive ? cfg.color : 'var(--text-secondary)',
-                        cursor: 'pointer', whiteSpace: 'nowrap', fontSize: 10,
-                      }}
-                    >
-                      <span style={{ fontWeight: 700 }}>#{idx + 1}</span>
-                      <span>{truncate(cleanMessage(ev.message), 40)}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-            <div style={{ flex: 1, overflow: 'hidden', position: 'relative', background: 'var(--bg-elevated)' }}>
-              {screenshotUrl ? (
-                <img
-                  src={screenshotUrl}
-                  alt="Step screenshot"
-                  style={{ width: '100%', height: '100%', objectFit: 'contain', objectPosition: 'top', display: 'block' }}
-                  onError={(ev) => { (ev.target as HTMLImageElement).style.display = 'none'; }}
-                />
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: 12, color: 'var(--text-muted)' }}>
-                  {activeEvent?.type === 'ai_reasoning' ? (
-                    <>
-                      <Brain size={28} color="var(--accent-purple)" style={{ opacity: 0.6 }} />
-                      <div style={{ maxWidth: 520, fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.6, textAlign: 'left', padding: '0 24px', whiteSpace: 'pre-wrap' }}>
-                        <strong style={{ color: 'var(--accent-purple)', display: 'block', marginBottom: 8 }}>AI Reasoning Summary</strong>
-                        {activeEvent.summary || (activeEvent.metadata?.summary as string) || cleanMessage(activeEvent.message)}
-                      </div>
-                    </>
-                  ) : (
-                    <>
-                      <Play size={24} style={{ opacity: 0.3 }} />
-                      <span style={{ fontSize: 12 }}>No screenshot for this event</span>
-                    </>
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', paddingTop: 2, flexShrink: 0 }}>
+                  <div style={{ width: 16, height: 16, borderRadius: '50%', background: `${cfg.color}20`, display: 'flex', alignItems: 'center', justifyContent: 'center', border: `1.5px solid ${isActive ? cfg.color : 'transparent'}` }}>
+                    <Ico size={8} />
+                  </div>
+                  {idx < events.length - 1 && (
+                    <div style={{ width: 1, height: 12, background: 'var(--border)', marginTop: 2 }} />
                   )}
                 </div>
-              )}
-
-              {activeEvent && (
-                <div style={{ position: 'absolute', top: 10, left: 10, display: 'flex', alignItems: 'center', gap: 6, padding: '4px 10px', borderRadius: 99, background: 'rgba(13,17,30,0.85)', backdropFilter: 'blur(6px)', border: '1px solid var(--border)' }}>
-                  <span style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: (EVENT_CONFIG[activeEvent.type]?.color || 'var(--text-muted)') }}>
-                    {activeEvent.type.replace(/_/g, ' ')}
-                  </span>
-                  <span style={{ fontSize: 9, color: 'var(--text-muted)', fontFamily: 'JetBrains Mono, monospace' }}>
-                    #{activeIdx + 1}/{events.length}
-                  </span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 10, color: isActive ? 'var(--text-primary)' : 'var(--text-secondary)', fontWeight: isActive ? 600 : 400, lineHeight: 1.3, wordBreak: 'break-word' }}>
+                    {truncate(cleanMessage(ev.message), 85)}
+                  </div>
+                  <div style={{ fontSize: 8, color: cfg.color, marginTop: 2, fontFamily: 'JetBrains Mono, monospace' }}>
+                    +{relTime}ms · {ev.type.replace(/_/g, ' ')}{ev.capture_reason ? ` · capture: ${ev.capture_reason.replace(/_/g, ' ')}` : ''}
+                  </div>
                 </div>
-              )}
+                {ev.screenshot && <div style={{ width: 4, height: 4, borderRadius: '50%', background: 'var(--accent-cyan)', flexShrink: 0, marginTop: 5 }} title="Has screenshot" />}
+              </button>
+            );
+          })}
+        </div>
 
-            </div>
-
-            <div style={{ height: 180, borderTop: '1px solid var(--border)', display: 'flex', overflow: 'hidden' }}>
-              <div style={{ flex: 1, borderRight: '1px solid var(--border)', overflowY: 'auto', padding: '8px 12px' }}>
-                <div style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-muted)', marginBottom: 6 }}>Console at this step ({windowLogs.length})</div>
-                {windowLogs.length === 0 ? (
-                  <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>—</span>
-                ) : windowLogs.map((l, i) => (
-                  <div key={i} style={{ fontSize: 10, fontFamily: 'JetBrains Mono, monospace', color: l.type === 'error' ? 'var(--accent-red)' : 'var(--text-secondary)', padding: '2px 0', borderBottom: '1px solid var(--border)', lineHeight: 1.5 }}>
-                    <span style={{ opacity: 0.5 }}>[{l.type}]</span> {l.text.slice(0, 120)}
-                  </div>
-                ))}
-              </div>
-              <div style={{ flex: 1, overflowY: 'auto', padding: '8px 12px' }}>
-                <div style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-muted)', marginBottom: 6 }}>Network at this step ({windowNet.length})</div>
-                {windowNet.length === 0 ? (
-                  <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>—</span>
-                ) : windowNet.map((r, i) => (
-                  <div key={i} style={{ fontSize: 10, fontFamily: 'JetBrains Mono, monospace', color: r.status >= 400 ? 'var(--accent-red)' : 'var(--text-secondary)', padding: '2px 0', borderBottom: '1px solid var(--border)', lineHeight: 1.5 }}>
-                    <span style={{ fontWeight: 700 }}>{r.status}</span> {r.method} {r.url.slice(0, 60)}
-                  </div>
-                ))}
-              </div>
+        {/* Right: Active Event Detail */}
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: 'linear-gradient(180deg, color-mix(in srgb, var(--accent-blue) 4%, var(--bg-surface)), var(--bg-surface))' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderBottom: '1px solid var(--border)', background: 'var(--bg-surface)', flexShrink: 0 }}>
+            <button
+              onClick={() => setActiveIdx(i => Math.max(0, i - 1))}
+              disabled={activeIdx === 0}
+              className="replay-nav-btn"
+              style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '5px 10px', background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 6, color: activeIdx === 0 ? 'var(--text-muted)' : 'var(--text-secondary)', cursor: activeIdx === 0 ? 'not-allowed' : 'pointer', fontSize: 11, fontFamily: 'inherit', fontWeight: 600, opacity: activeIdx === 0 ? 0.5 : 1, transition: 'all 0.15s' }}
+            >
+              <ChevronLeft size={13} />
+              <span>Prev</span>
+            </button>
+            <button
+              onClick={() => setActiveIdx(i => Math.min(events.length - 1, i + 1))}
+              disabled={activeIdx === events.length - 1}
+              className="replay-nav-btn"
+              style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '5px 10px', background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 6, color: activeIdx === events.length - 1 ? 'var(--text-muted)' : 'var(--text-secondary)', cursor: activeIdx === events.length - 1 ? 'not-allowed' : 'pointer', fontSize: 11, fontFamily: 'inherit', fontWeight: 600, opacity: activeIdx === events.length - 1 ? 0.5 : 1, transition: 'all 0.15s' }}
+            >
+              <span>Next</span>
+              <ChevronRight size={13} />
+            </button>
+            <div style={{ flex: 1, overflowX: 'auto', display: 'flex', gap: 6, padding: '2px 0' }}>
+              {events.map((ev, idx) => {
+                const cfg = EVENT_CONFIG[ev.type] || { color: 'var(--text-muted)', icon: ({ size }: { size?: number }) => <Clock size={size} /> };
+                const isActive = idx === activeIdx;
+                return (
+                  <button
+                    key={`tab_${ev.id}`}
+                    onClick={() => setActiveIdx(idx)}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 5, padding: '4px 8px',
+                      borderRadius: 999, border: `1px solid ${isActive ? cfg.color : 'var(--border)'}`,
+                      background: isActive ? `${cfg.color}18` : 'var(--bg-elevated)',
+                      color: isActive ? cfg.color : 'var(--text-secondary)',
+                      cursor: 'pointer', whiteSpace: 'nowrap', fontSize: 10, fontWeight: isActive ? 600 : 500,
+                    }}
+                  >
+                    <span style={{ fontWeight: 700 }}>#{idx + 1}</span>
+                    <span>{truncate(cleanMessage(ev.message), 35)}</span>
+                  </button>
+                );
+              })}
             </div>
           </div>
+          <div style={{ flex: 1, overflow: 'hidden', position: 'relative', background: 'var(--bg-elevated)' }}>
+            {screenshotUrl ? (
+              <img
+                src={screenshotUrl}
+                alt="Step screenshot"
+                style={{ width: '100%', height: '100%', objectFit: 'contain', objectPosition: 'top', display: 'block' }}
+                onError={(ev) => { (ev.target as HTMLImageElement).style.display = 'none'; }}
+              />
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: 10, color: 'var(--text-muted)' }}>
+                {activeEvent?.type === 'ai_reasoning' ? (
+                  <>
+                    <Brain size={24} color="var(--accent-purple)" style={{ opacity: 0.5 }} />
+                    <div style={{ maxWidth: 480, fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.6, textAlign: 'left', padding: '0 20px', whiteSpace: 'pre-wrap' }}>
+                      <strong style={{ color: 'var(--accent-purple)', display: 'block', marginBottom: 6 }}>AI Reasoning Summary</strong>
+                      {activeEvent.summary || (activeEvent.metadata?.summary as string) || cleanMessage(activeEvent.message)}
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <Play size={20} style={{ opacity: 0.25 }} />
+                    <span style={{ fontSize: 11 }}>No screenshot for this event</span>
+                  </>
+                )}
+              </div>
+            )}
+
+            {activeEvent && (
+              <div style={{ position: 'absolute', top: 8, left: 8, display: 'flex', alignItems: 'center', gap: 6, padding: '3px 8px', borderRadius: 99, background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
+                <span style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: (EVENT_CONFIG[activeEvent.type]?.color || 'var(--text-muted)') }}>
+                  {activeEvent.type.replace(/_/g, ' ')}
+                </span>
+                <span style={{ fontSize: 9, color: 'var(--text-muted)', fontFamily: 'JetBrains Mono, monospace' }}>
+                  #{activeIdx + 1}/{events.length}
+                </span>
+              </div>
+            )}
+          </div>
+
+          <div style={{ height: 140, borderTop: '1px solid var(--border)', display: 'flex', overflow: 'hidden', flexShrink: 0 }}>
+            <div style={{ flex: 1, borderRight: '1px solid var(--border)', overflowY: 'auto', padding: '6px 10px' }}>
+              <div style={{ fontSize: 8, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-muted)', marginBottom: 4 }}>Console at this step ({windowLogs.length})</div>
+              {windowLogs.length === 0 ? (
+                <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>—</span>
+              ) : windowLogs.map((l, i) => (
+                <div key={i} style={{ fontSize: 9, fontFamily: 'JetBrains Mono, monospace', color: l.type === 'error' ? 'var(--accent-red)' : 'var(--text-secondary)', padding: '2px 0', borderBottom: '1px solid var(--border)', lineHeight: 1.5 }}>
+                  <span style={{ opacity: 0.5 }}>[{l.type}]</span> {l.text.slice(0, 120)}
+                </div>
+              ))}
+            </div>
+            <div style={{ flex: 1, overflowY: 'auto', padding: '6px 10px' }}>
+              <div style={{ fontSize: 8, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-muted)', marginBottom: 4 }}>Network at this step ({windowNet.length})</div>
+              {windowNet.length === 0 ? (
+                <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>—</span>
+              ) : windowNet.map((r, i) => (
+                <div key={i} style={{ fontSize: 9, fontFamily: 'JetBrains Mono, monospace', color: r.status >= 400 ? 'var(--accent-red)' : 'var(--text-secondary)', padding: '2px 0', borderBottom: '1px solid var(--border)', lineHeight: 1.5 }}>
+                  <span style={{ fontWeight: 700 }}>{r.status}</span> {r.method} {r.url.slice(0, 60)}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -649,6 +644,15 @@ function StatPill({ label, value, color }: { label: string; value: string | numb
     <div style={{ flex: 1, padding: '7px 10px', background: 'var(--bg-elevated)', borderRadius: 7, border: '1px solid var(--border)' }}>
       <div style={{ fontSize: 9, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 3 }}>{label}</div>
       <div style={{ fontSize: 13, fontWeight: 700, color }}>{value}</div>
+    </div>
+  );
+}
+
+function CompactStat({ label, value, color }: { label: string; value: string | number; color: string }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '2px 8px', background: 'var(--bg-elevated)', borderRadius: 5, border: '1px solid var(--border)' }}>
+      <div style={{ fontSize: 8, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{label}</div>
+      <div style={{ fontSize: 11, fontWeight: 700, color }}>{value}</div>
     </div>
   );
 }
