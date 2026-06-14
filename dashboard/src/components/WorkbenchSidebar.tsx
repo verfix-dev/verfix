@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { BarChart2, Plus, Zap } from 'lucide-react';
+import { BarChart2, Plus } from 'lucide-react';
 import { useWorkspace } from '@/context/WorkspaceContext';
 import ExecutionList from './ExecutionList';
 
@@ -38,9 +38,7 @@ export default function WorkbenchSidebar() {
       {/* Brand Header */}
       <div className="sidebar-brand-header">
         <Link href="/" className="sidebar-brand-link" onClick={handleBrandClick}>
-          <div className="brand-mark">
-            <Zap size={14} aria-hidden="true" />
-          </div>
+          <img src="/logo.png" alt="Verfix" className="brand-mark" style={{ objectFit: 'contain' }} />
           <div className="brand-text-container">
             <div className="brand-name">Verfix</div>
             <div className="brand-subtitle">Verification runtime</div>

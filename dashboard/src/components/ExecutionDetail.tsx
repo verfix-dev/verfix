@@ -208,22 +208,7 @@ function ReplayTab({ execution: e, apiBase }: { execution: Execution; apiBase: s
   const screenshotUrl = getScreenshotUrl(activeEvent);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-      {/* Compact Intelligence Header */}
-      <div style={{ padding: '10px 14px', background: 'linear-gradient(135deg, color-mix(in srgb, var(--accent-blue) 10%, var(--bg-surface)), var(--bg-surface))', borderRadius: 10, border: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--text-muted)' }}>Execution Intelligence Timeline</div>
-          <div style={{ width: 1, height: 14, background: 'var(--border)' }} />
-          <div style={{ fontSize: 12, color: e.passed ? 'var(--accent-green)' : 'var(--accent-red)', fontWeight: 700 }}>{e.passed ? 'PASS' : 'FAIL'} · {e.duration_ms}ms · {e.retry_count} retries</div>
-        </div>
-        <div style={{ display: 'flex', gap: 6 }}>
-          <CompactStat label="Signals" value={counts.total} color="var(--accent-blue)" />
-          <CompactStat label="Captures" value={counts.captures} color="var(--accent-cyan)" />
-          <CompactStat label="Failures" value={counts.failures} color={counts.failures > 0 ? 'var(--accent-red)' : 'var(--accent-green)'} />
-          <CompactStat label="Retries" value={counts.retries} color={counts.retries > 0 ? 'var(--accent-yellow)' : 'var(--text-muted)'} />
-        </div>
-      </div>
-
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
       <div style={{ display: 'flex', gap: 0, height: '100%', minHeight: 420, border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden', background: 'var(--bg-surface)' }}>
         {/* Left: Event Timeline */}
         <div style={{ width: 260, flexShrink: 0, borderRight: '1px solid var(--border)', overflowY: 'auto', background: 'var(--bg-base)' }}>
