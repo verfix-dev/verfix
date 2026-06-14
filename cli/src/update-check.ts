@@ -59,16 +59,77 @@ function isCacheExpired(lastCheck: number): boolean {
   return Date.now() - lastCheck > CHECK_INTERVAL_MS;
 }
 
+function clearNpmCache(): void {
+  try { fs.unlinkSync(NPM_CACHE_FILE); } catch { /* ignore */ }
+}
+
+/** Read the actually-installed CLI version from package.json (dist/ -> ../package.json). */
+function getCurrentVersion(): string {
+  try {
+    const pkgPath = path.join(__dirname, '..', 'package.json');
+    const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
+    return pkg.version || '0.0.0';
+  } catch {
+    return '0.0.0';
+  }
+}
+
+/** Simple semver comparison: returns true if `a` is strictly newer than `b`. */
+function isNewerVersion(a: string, b: string): boolean {
+  const pa = a.split('.').map(Number);
+  const pb = b.split('.').map(Number);
+  for (let i = 0; i < 3; i++) {
+    const diff = (pa[i] || 0) - (pb[i] || 0);
+    if (diff > 0) return true;
+    if (diff < 0) return false;
+  }
+  return false;
+}
+
+/** Strip a `repo@sha256:...` reference down to the bare digest. */
+function extractDigest(digest: string): string {
+  return digest.includes('@') ? digest.split('@')[1] : digest;
+}
+
+/**
+ * Get the local image digest using `docker inspect`.
+ * Returns null if Docker is unavailable or the image isn't pulled.
+ */
+function getLocalImageDigest(image: string): string | null {
+  try {
+    const out: string = spawnSync(
+      'docker',
+      ['inspect', '--format', '{{index .RepoDigests 0}}', image],
+      { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 5000 }
+    ).stdout?.trim();
+    return out || null;
+  } catch {
+    return null;
+  }
+}
+
+const DOCKER_IMAGE = 'ghcr.io/verfix-dev/verfix-server:latest';
+
 // ─── Banner rendering ─────────────────────────────────────────────────────────
 
+/** Length of a string ignoring ANSI color escape codes (the visible width). */
+function visibleLength(s: string): number {
+  // eslint-disable-next-line no-control-regex
+  return s.replace(/\x1b\[[0-9;]*m/g, '').length;
+}
+
 function printBanner(lines: string[]): void {
-  const width = Math.max(...lines.map((l) => l.length)) + 4;
-  const border = chalk.yellow('─'.repeat(width));
+  const PAD = 2; // spaces of padding on each side of the content
+  const contentWidth = Math.max(...lines.map(visibleLength));
+  const innerWidth = contentWidth + PAD * 2;
+  const border = chalk.yellow('─'.repeat(innerWidth));
   console.log('');
   console.log(chalk.yellow('┌') + border + chalk.yellow('┐'));
   for (const line of lines) {
-    const padding = ' '.repeat(width - line.length - 2);
-    console.log(chalk.yellow('│') + '  ' + line + padding + chalk.yellow('│'));
+    const rightPad = ' '.repeat(contentWidth - visibleLength(line));
+    console.log(
+      chalk.yellow('│') + ' '.repeat(PAD) + line + rightPad + ' '.repeat(PAD) + chalk.yellow('│')
+    );
   }
   console.log(chalk.yellow('└') + border + chalk.yellow('┘'));
 }
@@ -81,22 +142,45 @@ function printBanner(lines: string[]): void {
  * Call this just before the command finishes its normal output.
  */
 export function showPendingNotifications(): void {
-  // NPM / CLI update notification
+  // NPM / CLI update notification.
+  // Always validate the cached `latestVersion` against the version that is
+  // ACTUALLY installed right now — not the `currentVersion` recorded when the
+  // cache was written. Otherwise, after the user upgrades (e.g. `npm i -g
+  // verfix`) the still-fresh cache (<24h old) keeps showing a stale
+  // "update available" banner until it expires.
   const npmCache = readCache<NpmCache>(NPM_CACHE_FILE);
-  if (npmCache && npmCache.hasUpdate && npmCache.latestVersion && npmCache.currentVersion) {
-    printBanner([
-      chalk.bold('Update available:') + ` ${chalk.gray(npmCache.currentVersion)} → ${chalk.cyan(npmCache.latestVersion)}`,
-      `Run ${chalk.cyan('npm i -g verfix')} to update`,
-    ]);
+  if (npmCache && npmCache.latestVersion) {
+    const installedVersion = getCurrentVersion();
+    if (isNewerVersion(npmCache.latestVersion, installedVersion)) {
+      printBanner([
+        chalk.bold('Update available:') + ` ${chalk.gray(installedVersion)} → ${chalk.cyan(npmCache.latestVersion)}`,
+        `Run ${chalk.cyan('npm i -g verfix')} to update`,
+      ]);
+    } else if (npmCache.hasUpdate) {
+      // We've already caught up to (or passed) the cached latest version.
+      // Drop the stale cache so the next background check re-fetches.
+      clearNpmCache();
+    }
   }
 
-  // Docker image update notification
+  // Docker image update notification.
+  // Validate against the CURRENT local digest: if the local image already
+  // matches the cached remote digest, the update was applied and the banner
+  // is stale.
   const imageCache = readCache<ImageCache>(IMAGE_CACHE_FILE);
-  if (imageCache && imageCache.hasUpdate) {
-    printBanner([
-      chalk.bold('A new server image is available.'),
-      `Run ${chalk.cyan('verfix update')} to get the latest`,
-    ]);
+  if (imageCache && imageCache.hasUpdate && imageCache.remoteDigest) {
+    const localDigest = getLocalImageDigest(DOCKER_IMAGE);
+    const localClean = localDigest ? extractDigest(localDigest) : null;
+    const remoteClean = extractDigest(imageCache.remoteDigest);
+    if (localClean && localClean === remoteClean) {
+      // Local image already matches the latest remote digest — stale cache.
+      clearImageCache();
+    } else {
+      printBanner([
+        chalk.bold('A new server image is available.'),
+        `Run ${chalk.cyan('verfix update')} to get the latest`,
+      ]);
+    }
   }
 }
 
