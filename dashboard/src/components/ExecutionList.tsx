@@ -32,7 +32,7 @@ function groupByDate(items: Execution[]): { label: string; items: Execution[] }[
 }
 
 export default function ExecutionList() {
-  const { executions, selected, selectExecution, fetchList, flakyUrls } = useWorkspace();
+  const { executions, selected, selectExecution, fetchList, flakyExecutionIds } = useWorkspace();
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<FilterStatus>('all');
   const [searchOpen, setSearchOpen] = useState(false);
@@ -63,7 +63,7 @@ export default function ExecutionList() {
     }
   }, [searchOpen]);
 
-  const flakySet = useMemo(() => new Set((flakyUrls || []).map(f => f.url)), [flakyUrls]);
+  const flakySet = useMemo(() => flakyExecutionIds || new Set(), [flakyExecutionIds]);
 
   const filtered = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -76,7 +76,7 @@ export default function ExecutionList() {
         filter === 'all' ? true :
         filter === 'passed' ? e.passed && e.status === 'completed' :
         filter === 'failed' ? !e.passed && (e.status === 'completed' || e.status === 'failed') :
-        filter === 'flaky' ? flakySet.has(e.url) :
+        filter === 'flaky' ? flakySet.has(e.executionId) :
         e.status === 'running' || e.status === 'queued';
       return matchSearch && matchFilter;
     });
@@ -123,7 +123,7 @@ export default function ExecutionList() {
                   execution={e}
                   isSelected={selected?.executionId === e.executionId}
                   onSelect={() => selectExecution(e)}
-                  isFlaky={flakySet.has(e.url)}
+                  isFlaky={flakySet.has(e.executionId)}
                 />
               ))}
             </div>
@@ -188,7 +188,7 @@ export default function ExecutionList() {
                   execution={e}
                   isSelected={selected?.executionId === e.executionId}
                   onSelect={() => { selectExecution(e); setSearchOpen(false); }}
-                  isFlaky={flakySet.has(e.url)}
+                  isFlaky={flakySet.has(e.executionId)}
                 />
               ))
             )}

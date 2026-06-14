@@ -13,9 +13,9 @@ export default function ExecutionDetail({ execution: e, apiBase, loadingDetail }
 }) {
   const [tab, setTab] = useState<Tab>('assertions');
   const [copied, setCopied] = useState(false);
-  const { flakyUrls } = useWorkspace();
+  const { flakyUrls, flakyExecutionIds } = useWorkspace();
 
-  const isFlaky = flakyUrls?.some(f => f.url === e.url);
+  const isFlaky = flakyExecutionIds?.has(e.executionId);
   const flakyDetails = flakyUrls?.find(f => f.url === e.url);
 
   const isLive = e.status === 'running' || e.status === 'queued';

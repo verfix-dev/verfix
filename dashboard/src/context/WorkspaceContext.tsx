@@ -19,6 +19,7 @@ interface WorkspaceContextProps {
   loadingDetail: boolean;
   setLoadingDetail: (b: boolean) => void;
   flakyUrls: FlakyURL[];
+  flakyExecutionIds: Set<string>;
   fetchList: () => Promise<void>;
   fetchDetail: (id: string) => Promise<Execution | null>;
   startPolling: (id: string) => void;
@@ -37,6 +38,7 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [flakyUrls, setFlakyUrls] = useState<FlakyURL[]>([]);
+  const [flakyExecutionIds, setFlakyExecutionIds] = useState<Set<string>>(new Set());
 
   const pollingRef = useRef<Set<string>>(new Set());
   const intervalsRef = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map());
@@ -81,6 +83,9 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
 
       if (flakyRes && flakyRes.flaky) {
         setFlakyUrls(flakyRes.flaky);
+      }
+      if (flakyRes && Array.isArray(flakyRes.failed_execution_ids)) {
+        setFlakyExecutionIds(new Set(flakyRes.failed_execution_ids));
       }
 
       if (listRes && listRes.executions) {
@@ -194,6 +199,7 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
         loadingDetail,
         setLoadingDetail,
         flakyUrls,
+        flakyExecutionIds,
         fetchList,
         fetchDetail,
         startPolling,
