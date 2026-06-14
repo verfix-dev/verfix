@@ -90,7 +90,7 @@ function HomeInner() {
       ) : (
         <div className="detail-panel canvas-grid">
           {selected ? (
-            <ExecutionDetail execution={selected} apiBase={apiBase} loadingDetail={loadingDetail} />
+            <ExecutionDetail key={selected.executionId} execution={selected} apiBase={apiBase} loadingDetail={loadingDetail} />
           ) : (
             <EmptyState onNew={() => setShowNewJob(true)} />
           )}
