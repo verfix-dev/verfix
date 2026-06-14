@@ -63,6 +63,7 @@ export type ConsoleLine = { type: string; text: string; timestamp: string };
 export type NetworkRequest = { url: string; method: string; status: number; timing_ms: number; timestamp: string };
 
 export type FlakyURL = {
+  task: string;
   url: string;
   total_runs: number;
   pass_count: number;

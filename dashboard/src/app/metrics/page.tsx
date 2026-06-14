@@ -18,7 +18,7 @@ type Metrics = {
   total_queued: number;
   executions_last_24h: number;
   avg_retries_per_run: number;
-  flaky_url_count: number;
+  unstable_flow_count: number;
 };
 
 type DayTrend = { day: string; total: number; passed: number; avg_ms: number };
@@ -140,7 +140,7 @@ export default function MetricsPage() {
             <MetricCard label="Fail Rate" value={`${metrics.fail_rate.toFixed(1)}%`} icon={<XCircle size={16} />} color="var(--accent-red)" sub={`${metrics.total_failed} failed`} />
             <MetricCard label="Avg Duration" value={`${Math.round(metrics.avg_duration_ms)}ms`} icon={<Clock size={16} />} color="var(--accent-cyan)" sub={`p95: ${Math.round(metrics.p95_duration_ms)}ms`} />
             <MetricCard label="Last 24h" value={metrics.executions_last_24h} icon={<Zap size={16} />} color="var(--accent-purple)" />
-            <MetricCard label="Flaky URLs" value={metrics.flaky_url_count} icon={<AlertTriangle size={16} />} color="var(--accent-yellow)" sub="inconsistent results" />
+            <MetricCard label="Unstable Flows" value={metrics.unstable_flow_count} icon={<AlertTriangle size={16} />} color="var(--accent-yellow)" sub="unreliable results" />
             <MetricCard label="Avg Retries" value={metrics.avg_retries_per_run.toFixed(2)} icon={<RefreshCw size={16} />} color="var(--accent-blue)" />
             <MetricCard label="Running" value={metrics.total_running} icon={<Activity size={16} />} color={metrics.total_running > 0 ? 'var(--accent-blue)' : 'var(--text-muted)'} sub={`${metrics.total_queued} queued`} />
           </div>

@@ -7,6 +7,14 @@ import { Execution } from '@/types';
 
 type FilterStatus = 'all' | 'running' | 'passed' | 'failed' | 'flaky';
 
+const FILTER_LABELS: Record<FilterStatus, string> = {
+  all: 'all',
+  running: 'running',
+  passed: 'passed',
+  failed: 'failed',
+  flaky: 'unstable',
+};
+
 const FILTERS: FilterStatus[] = ['all', 'running', 'passed', 'failed', 'flaky'];
 
 function groupByDate(items: Execution[]): { label: string; items: Execution[] }[] {
@@ -169,8 +177,9 @@ export default function ExecutionList() {
                   onClick={() => setFilter(f)}
                   className="sl-filter-chip"
                   data-active={filter === f}
+                  title={f === 'flaky' ? 'Verification flows that pass sometimes and fail with different errors other times — results you can\'t rely on' : undefined}
                 >
-                  {f}
+                  {FILTER_LABELS[f]}
                 </button>
               ))}
             </div>
@@ -238,7 +247,7 @@ function ExecRow({
             e.passed ? 'Passed' : 'Failed'
           )}
           {e.duration_ms > 0 && !isLive && ` · ${e.duration_ms}ms`}
-          {isFlaky && <span className="sl-flaky-tag"> · flaky</span>}
+          {isFlaky && <span className="sl-flaky-tag" title="This verification flow gives different results each time — it passes sometimes and fails with different errors other times"> · unstable</span>}
         </div>
       </div>
       <span className="sl-exec-time">{relativeTime(e.created_at)}</span>

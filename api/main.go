@@ -269,7 +269,7 @@ func handleMetrics(c *fiber.Ctx) error {
 		TotalQueued       int     `json:"total_queued"`
 		Last24h           int     `json:"executions_last_24h"`
 		AvgRetriesPerRun  float64 `json:"avg_retries_per_run"`
-		FlakyURLCount     int     `json:"flaky_url_count"`
+		UnstableFlowCount int     `json:"unstable_flow_count"`
 	}
 
 	var m Metrics
@@ -293,14 +293,14 @@ func handleMetrics(c *fiber.Ctx) error {
 		m.FailRate = float64(m.TotalFailed) / float64(completed) * 100
 	}
 
-	// Flaky: URLs that have both pass and fail results
+	// Unstable: flows (task+url) that have both pass and fail results
 	db.QueryRow(`
-		SELECT COUNT(DISTINCT url) FROM (
-			SELECT url FROM executions WHERE status IN ('completed','failed')
-			GROUP BY url
+		SELECT COUNT(*) FROM (
+			SELECT task, url FROM executions WHERE status IN ('completed','failed')
+			GROUP BY task, url
 			HAVING COUNT(DISTINCT passed) > 1
 		) sub
-	`).Scan(&m.FlakyURLCount)
+	`).Scan(&m.UnstableFlowCount)
 
 	// Daily trend (last 7 days)
 	trendRows, _ := db.Query(`
@@ -395,17 +395,51 @@ func handleFlaky(c *fiber.Ctx) error {
 		return c.JSON(fiber.Map{"flaky": []interface{}{}, "failed_execution_ids": []interface{}{}})
 	}
 
+	// Flakiness is scoped to a FLOW, not a bare URL.
+	//
+	// A flow is the (task, url) pair — the same verification instructions run
+	// against the same target.  Two different tasks on the same URL are
+	// independent flows with independent stability profiles.
+	//
+	// A flow is truly "unstable" only when:
+	//   1. The same (task, url) has both passing AND failing runs, AND
+	//   2. Its failures show diverse error signatures (more than one distinct
+	//      error_message among the failed runs).
+	//
+	// If every failure for a flow has the exact same error_message, it is a
+	// deterministic failure (e.g. server always returning ERR_CONNECTION_REFUSED)
+	// and should NOT be labeled unstable.
+	//
+	// NULL error_message (assertion-only failures without a crash) is normalized
+	// to a sentinel so it compares distinctly against crash error strings.
 	rows, err := db.Query(`
-		SELECT url,
+		WITH mixed_flows AS (
+			SELECT task, url
+			FROM executions
+			WHERE status IN ('completed', 'failed')
+			GROUP BY task, url
+			HAVING COUNT(DISTINCT passed) > 1 AND COUNT(*) >= 2
+		),
+		unstable_flows AS (
+			SELECT task, url
+			FROM executions
+			WHERE status IN ('completed', 'failed')
+			  AND passed = false
+			  AND (task, url) IN (SELECT task, url FROM mixed_flows)
+			GROUP BY task, url
+			HAVING COUNT(DISTINCT COALESCE(error_message, '__assertion_failure__')) > 1
+		)
+		SELECT e.task,
+		       e.url,
 		       COUNT(*) as total_runs,
-		       SUM(CASE WHEN passed=true THEN 1 ELSE 0 END) as pass_count,
-		       SUM(CASE WHEN passed=false THEN 1 ELSE 0 END) as fail_count,
-		       COALESCE(AVG(duration_ms),0) as avg_duration_ms,
-		       MAX(created_at) as last_run
-		FROM executions
-		WHERE status IN ('completed', 'failed')
-		GROUP BY url
-		HAVING COUNT(DISTINCT passed) > 1 AND COUNT(*) >= 2
+		       SUM(CASE WHEN e.passed=true THEN 1 ELSE 0 END) as pass_count,
+		       SUM(CASE WHEN e.passed=false THEN 1 ELSE 0 END) as fail_count,
+		       COALESCE(AVG(e.duration_ms),0) as avg_duration_ms,
+		       MAX(e.created_at) as last_run
+		FROM executions e
+		WHERE e.status IN ('completed', 'failed')
+		  AND (e.task, e.url) IN (SELECT task, url FROM unstable_flows)
+		GROUP BY e.task, e.url
 		ORDER BY fail_count DESC
 		LIMIT 20
 	`)
@@ -414,7 +448,8 @@ func handleFlaky(c *fiber.Ctx) error {
 	}
 	defer rows.Close()
 
-	type FlakyURL struct {
+	type FlakyFlow struct {
+		Task        string    `json:"task"`
 		URL         string    `json:"url"`
 		TotalRuns   int       `json:"total_runs"`
 		PassCount   int       `json:"pass_count"`
@@ -424,33 +459,42 @@ func handleFlaky(c *fiber.Ctx) error {
 		LastRun     time.Time `json:"last_run"`
 	}
 
-	var results []FlakyURL
+	var results []FlakyFlow
 	for rows.Next() {
-		var f FlakyURL
-		rows.Scan(&f.URL, &f.TotalRuns, &f.PassCount, &f.FailCount, &f.AvgDuration, &f.LastRun)
+		var f FlakyFlow
+		rows.Scan(&f.Task, &f.URL, &f.TotalRuns, &f.PassCount, &f.FailCount, &f.AvgDuration, &f.LastRun)
 		f.FlakeRate = float64(f.FailCount) / float64(f.TotalRuns) * 100
 		results = append(results, f)
 	}
 	if results == nil {
-		results = []FlakyURL{}
+		results = []FlakyFlow{}
 	}
 
-	// Return the specific execution IDs that failed for flaky URLs so the
-	// frontend can target individual executions instead of every run sharing
-	// the same URL.
+	// Return the specific execution IDs that failed for truly-unstable flows
+	// so the frontend can tag individual executions.
 	var failedIDs []string
 	idRows, err := db.Query(`
+		WITH mixed_flows AS (
+			SELECT task, url
+			FROM executions
+			WHERE status IN ('completed', 'failed')
+			GROUP BY task, url
+			HAVING COUNT(DISTINCT passed) > 1 AND COUNT(*) >= 2
+		),
+		unstable_flows AS (
+			SELECT task, url
+			FROM executions
+			WHERE status IN ('completed', 'failed')
+			  AND passed = false
+			  AND (task, url) IN (SELECT task, url FROM mixed_flows)
+			GROUP BY task, url
+			HAVING COUNT(DISTINCT COALESCE(error_message, '__assertion_failure__')) > 1
+		)
 		SELECT DISTINCT id
 		FROM executions
 		WHERE status IN ('completed', 'failed')
 		  AND passed = false
-		  AND url IN (
-			  SELECT url
-			  FROM executions
-			  WHERE status IN ('completed', 'failed')
-			  GROUP BY url
-			  HAVING COUNT(DISTINCT passed) > 1 AND COUNT(*) >= 2
-		  )
+		  AND (task, url) IN (SELECT task, url FROM unstable_flows)
 	`)
 	if err == nil {
 		defer idRows.Close()

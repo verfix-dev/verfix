@@ -16,7 +16,7 @@ export default function ExecutionDetail({ execution: e, apiBase, loadingDetail }
   const { flakyUrls, flakyExecutionIds } = useWorkspace();
 
   const isFlaky = flakyExecutionIds?.has(e.executionId);
-  const flakyDetails = flakyUrls?.find(f => f.url === e.url);
+  const flakyDetails = flakyUrls?.find(f => f.url === e.url && f.task === e.task);
 
   const isLive = e.status === 'running' || e.status === 'queued';
   const color = statusColor(e.status, e.passed);
@@ -91,18 +91,18 @@ export default function ExecutionDetail({ execution: e, apiBase, loadingDetail }
           </div>
         )}
 
-        {/* Flaky Target URL Diagnostics */}
+        {/* Unstable Target Diagnostics */}
         {isFlaky && flakyDetails && (
           <div style={{ marginTop: 8, padding: '8px 12px', background: 'rgba(230,169,61,0.06)', borderRadius: 6, border: '1px solid rgba(230,169,61,0.25)', display: 'flex', flexDirection: 'column', gap: 4 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--accent-yellow)' }}>
               <AlertTriangle size={12} aria-hidden="true" />
-              <span style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Unstable Target Diagnostics</span>
+              <span style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Unstable Results Detected</span>
             </div>
             <div style={{ fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.4 }}>
-              This target URL has shown inconsistent success rates (flakiness) across runs.
+              This verification flow gives <strong>different results each time</strong> it runs — it passes sometimes and fails with different errors other times. This usually means something about this specific check is unreliable, not that every test on this website is broken.
             </div>
             <div style={{ display: 'flex', gap: 6, marginTop: 2 }}>
-              <CompactStat label="Flake Rate" value={`${flakyDetails.flake_rate.toFixed(0)}%`} color="var(--accent-yellow)" />
+              <CompactStat label="Failure Rate" value={`${flakyDetails.flake_rate.toFixed(0)}%`} color="var(--accent-yellow)" />
               <CompactStat label="Total Runs" value={flakyDetails.total_runs} color="var(--accent-blue)" />
               <CompactStat label="Passed" value={flakyDetails.pass_count} color="var(--accent-green)" />
               <CompactStat label="Failed" value={flakyDetails.fail_count} color="var(--accent-red)" />
