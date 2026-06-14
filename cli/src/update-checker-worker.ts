@@ -146,7 +146,7 @@ async function getRemoteDigest(): Promise<string | null> {
           timeout: TIMEOUT_MS,
           headers: {
             Authorization: `Bearer ${token}`,
-            Accept: 'application/vnd.docker.distribution.manifest.v2+json',
+            Accept: 'application/vnd.docker.distribution.manifest.v2+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.oci.image.index.v1+json',
           },
         },
         (res) => {
@@ -155,13 +155,28 @@ async function getRemoteDigest(): Promise<string | null> {
           res.resume(); // Drain the body
         }
       );
-      req.on('error', () => resolve(null));
-      req.on('timeout', () => { req.destroy(); resolve(null); });
+      req.on('error', (err) => {
+        console.error('Manifest request error:', err);
+        resolve(null);
+      });
+      req.on('timeout', () => {
+        console.error('Manifest request timeout');
+        req.destroy();
+        resolve(null);
+      });
       req.end();
     });
-  } catch {
+  } catch (err) {
+    console.error('getRemoteDigest error:', err);
     return null;
   }
+}
+
+function extractDigest(digest: string): string {
+  if (digest.includes('@')) {
+    return digest.split('@')[1];
+  }
+  return digest;
 }
 
 async function checkDockerImage(): Promise<void> {
@@ -174,14 +189,17 @@ async function checkDockerImage(): Promise<void> {
 
   try {
     const remoteDigest = await getRemoteDigest();
-    const hasUpdate = remoteDigest !== null && remoteDigest !== localDigest;
+    const remoteDigestClean = remoteDigest ? extractDigest(remoteDigest) : null;
+    const localDigestClean = extractDigest(localDigest);
+    const hasUpdate = remoteDigestClean !== null && remoteDigestClean !== localDigestClean;
     writeCache(IMAGE_CACHE_FILE, {
       localDigest,
       remoteDigest,
       hasUpdate,
       lastCheck: Date.now(),
     });
-  } catch {
+  } catch (err) {
+    console.error('checkDockerImage error:', err);
     // Network failed — cache hasUpdate:false to avoid spamming on every run
     writeCache(IMAGE_CACHE_FILE, {
       localDigest,
