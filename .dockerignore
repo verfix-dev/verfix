@@ -39,8 +39,9 @@ workers/artifacts
 # SDK (not part of the server image)
 sdk/
 
-# CLI (not part of the server image)
-cli/
+# CLI — needed in build context so dashboard can read package.json for version
+# (only source files are included; node_modules/dist are excluded above)
+# cli/
 
 # Top-level docs only (don't exclude package READMEs in subdirs)
 PHASES.md

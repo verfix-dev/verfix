@@ -25,6 +25,7 @@ WORKDIR /build/dashboard
 COPY dashboard/package*.json ./
 RUN npm ci --ignore-scripts || npm ci --ignore-scripts || npm ci --ignore-scripts
 
+COPY cli/ /build/cli/
 COPY dashboard/ ./
 
 # Inject output:'standalone' into next.config.ts if not already present.
