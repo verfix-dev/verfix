@@ -9,6 +9,7 @@ import * as path from 'path';
 import { JobPayload, ExecutionResult, ConsoleLine, NetworkRequest, AssertionDefinition } from './assertions/types';
 import { runAssertions } from './assertions/engine';
 import { collectArtifacts } from './artifacts/collector';
+import { startArtifactCleanup } from './artifacts/cleanup';
 import { EventTracker } from './artifacts/event-tracker';
 import { executeFlow } from './browser/flow-executor';
 import { withRetry, waitForStableDOM } from './reliability/retry';
@@ -61,6 +62,11 @@ const adapterConnection = new Redis({
   port: parseInt(process.env.REDIS_PORT || '6379'),
 });
 
+// Without these listeners, an emitted Redis `error` becomes an unhandled
+// exception that can crash the worker process.
+connection.on('error', err => console.error(`⚠ Redis (worker) error: ${err.message}`));
+adapterConnection.on('error', err => console.error(`⚠ Redis (adapter) error: ${err.message}`));
+
 // ─── Artifacts directory ──────────────────────────────────────────────────────
 
 // Use env var or fallback to cwd/artifacts.
@@ -70,6 +76,12 @@ const artifactsDir = process.env.ARTIFACTS_DIR || path.join(process.cwd(), 'arti
 if (!fs.existsSync(artifactsDir)) {
   fs.mkdirSync(artifactsDir, { recursive: true });
 }
+
+// Bound how many console/network entries we retain per job. A chatty page can
+// otherwise grow these arrays without limit, bloating worker memory and the
+// JSON payload persisted to Redis. We keep the most recent entries.
+const MAX_CONSOLE_LOGS = parseInt(process.env.MAX_CONSOLE_LOGS || '2000');
+const MAX_NETWORK_REQUESTS = parseInt(process.env.MAX_NETWORK_REQUESTS || '2000');
 
 // ─── Queue ────────────────────────────────────────────────────────────────────
 
@@ -100,9 +112,7 @@ async function adapterLoop() {
 
 // ─── Worker ───────────────────────────────────────────────────────────────────
 
-const worker = new Worker(
-  'verify-jobs',
-  async (job: Job<JobPayload>) => {
+async function processJob(job: Job<JobPayload>): Promise<ExecutionResult> {
     const data = job.data;
     const startTime = Date.now();
 
@@ -148,6 +158,7 @@ const worker = new Worker(
 
       page.on('console', msg => {
         const ts = new Date().toISOString();
+        if (consoleLogs.length >= MAX_CONSOLE_LOGS) consoleLogs.shift();
         consoleLogs.push({ type: msg.type(), text: msg.text(), timestamp: ts });
       });
       page.on('request', request => {
@@ -159,6 +170,7 @@ const worker = new Worker(
         const start = requestStartTimes.get(request);
         const timingMs = start ? Math.max(0, Date.now() - start) : 0;
         requestStartTimes.delete(request);
+        if (networkRequests.length >= MAX_NETWORK_REQUESTS) networkRequests.shift();
         networkRequests.push({
           url: response.url(),
           method: request.method(),
@@ -277,6 +289,12 @@ const worker = new Worker(
           context.close(),
           new Promise((_, reject) => setTimeout(() => reject(new Error('context.close timeout')), 3000))
         ]);
+        // recordHar only flushes the HAR file to disk once the context closes,
+        // so it must be picked up here rather than during artifact collection.
+        const harPath = path.join(artifactsDir, `${data.id}.har`);
+        if (fs.existsSync(harPath)) {
+          executionResult.artifacts.har = harPath;
+        }
       } catch (e: any) {
         console.warn(`⚠ Could not gracefully close context: ${e.message}`);
       }
@@ -321,11 +339,38 @@ const worker = new Worker(
           executionResult.ai_summary = summary;
           await setResult(data.id, executionResult);
         }
+      }).catch(err => {
+        // Detached, best-effort enrichment — never let it surface as an
+        // unhandled rejection or block job completion.
+        console.warn(`⚠ Failed to generate/persist AI summary for ${data.id}: ${err.message}`);
       });
     }
 
     return executionResult;
-  },
+}
+
+// Hard wall-clock guard so a hung navigation, flow, or AI exploration can never
+// pin a worker slot forever. On timeout the job rejects, BullMQ retries it, and
+// once retries are exhausted the `failed` handler reconciles the status.
+function runJobWithTimeout(job: Job<JobPayload>): Promise<ExecutionResult> {
+  const base = job.data.timeout || 15000;
+  const hardTimeoutMs = Math.max(base * 4, 60000);
+  let timer: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`Job exceeded hard timeout of ${hardTimeoutMs}ms`)),
+      hardTimeoutMs,
+    );
+  });
+  return Promise.race([processJob(job), timeout]).finally(() => clearTimeout(timer));
+}
+
+// NOTE: this concurrency is the primary in-flight limiter. The BrowserPool is
+// configured with the same MAX_CONCURRENCY, so under normal operation its
+// semaphore never actually blocks — it exists purely as a defensive backstop.
+const worker = new Worker(
+  'verify-jobs',
+  (job: Job<JobPayload>) => runJobWithTimeout(job),
   {
     connection,
     concurrency: parseInt(process.env.MAX_CONCURRENCY || '3'),
@@ -340,7 +385,54 @@ async function setResult(id: string, result: Partial<ExecutionResult>): Promise<
 }
 
 worker.on('completed', job => console.log(`✔ Job ${job.id} done`));
-worker.on('failed', (job, err) => console.error(`✘ Job ${job?.id} failed: ${err.message}`));
+worker.on('failed', async (job, err) => {
+  console.error(`✘ Job ${job?.id} failed: ${err.message}`);
+  if (!job) return;
+
+  // Only mark the execution terminally failed once BullMQ has exhausted all
+  // retries. Otherwise the job will be retried and may still succeed.
+  const maxAttempts = job.opts.attempts ?? 1;
+  if (job.attemptsMade < maxAttempts) return;
+
+  const data = job.data as JobPayload;
+  if (!data?.id) return;
+
+  // The job may have died before its own try/catch ran (process crash, OOM,
+  // browser pool failure, stalled job), leaving the result stuck at 'running'.
+  // Reconcile it to 'failed' so the task does not stay in running mode forever.
+  try {
+    const existingRaw = await connection.get(`exec_result_${data.id}`);
+    if (existingRaw) {
+      const existing = JSON.parse(existingRaw) as ExecutionResult;
+      if (existing.status === 'completed' || existing.status === 'failed') {
+        return; // already reconciled by the job body
+      }
+    }
+
+    const nowIso = new Date().toISOString();
+    const existing = existingRaw ? (JSON.parse(existingRaw) as Partial<ExecutionResult>) : {};
+    await setResult(data.id, {
+      executionId: data.id,
+      status: 'failed',
+      task: data.task,
+      url: data.url,
+      passed: false,
+      duration_ms: existing.duration_ms ?? 0,
+      retry_count: job.attemptsMade,
+      events: existing.events ?? [],
+      assertions: existing.assertions ?? [],
+      artifacts: existing.artifacts ?? {},
+      console_logs: existing.console_logs ?? [],
+      network_requests: existing.network_requests ?? [],
+      error: err.message || 'Worker failed to process job',
+      created_at: existing.created_at ?? nowIso,
+      completed_at: nowIso,
+    });
+    console.error(`   ↳ Marked execution ${data.id} as failed (worker failure)`);
+  } catch (e: any) {
+    console.error(`   ↳ Failed to reconcile execution ${data?.id} status: ${e.message}`);
+  }
+});
 
 // ─── Graceful shutdown ────────────────────────────────────────────────────────
 
@@ -354,7 +446,18 @@ async function shutdown() {
 process.on('SIGTERM', shutdown);
 process.on('SIGINT', shutdown);
 
+// Keep the worker alive on stray async errors (e.g. floating promises in the
+// event tracker or detached AI summarization). Crashing the process would
+// abandon every in-flight job and strand their results in 'running'.
+process.on('unhandledRejection', reason => {
+  console.error('⚠ Unhandled promise rejection:', reason);
+});
+process.on('uncaughtException', err => {
+  console.error('💥 Uncaught exception:', err);
+});
+
 // ─── Boot ─────────────────────────────────────────────────────────────────────
 
 adapterLoop();
+startArtifactCleanup(artifactsDir);
 console.log('⚡ Worker is running and waiting for jobs...\n');

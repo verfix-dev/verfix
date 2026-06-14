@@ -74,11 +74,9 @@ export async function collectArtifacts(
     console.warn('Could not write network log:', e);
   }
 
-  // HAR path is set at context creation time
-  const harPath = path.join(artifactsDir, `${executionId}.har`);
-  if (fs.existsSync(harPath)) {
-    artifacts.har = harPath;
-  }
+  // HAR is intentionally not collected here: recordHar only flushes the file
+  // to disk when the BrowserContext closes, which happens after this runs.
+  // The caller assigns artifacts.har once the context has been closed.
 
   return artifacts;
 }
