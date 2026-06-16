@@ -721,8 +721,9 @@ program
     const baseUrl = opts.url || config.baseUrl || config.url;
     // Rewrite localhost → host.docker.internal so Playwright inside the
     // container can reach the user's app running on the host machine.
-    const resolved = resolveJobUrl(baseUrl);
+    const resolved = await resolveJobUrl(baseUrl);
     const targetUrl = resolved.url;
+    const activeProxy = resolved.proxy;
     if (resolved.rewritten && !isJsonMode(opts)) {
       console.log(chalk.gray(`  ℹ  Target URL: ${baseUrl} → ${targetUrl} (host.docker.internal)`));
     }
@@ -744,6 +745,7 @@ program
         emitJsonError({ error: 'missing_url', message: '--url is required (or set baseUrl in config file)', hint: 'Pass --url <url> or add baseUrl to your config.' });
       }
       console.error(chalk.red('Error: --url is required (or set baseUrl in config file)'));
+      if (activeProxy) activeProxy.close();
       process.exit(2);
     }
 
@@ -771,6 +773,7 @@ program
         emitJsonError({ error: 'submit_failed', message: e.message, hint: 'Check that the runtime is running: verfix status' });
       }
       console.error(chalk.red(e.message));
+      if (activeProxy) activeProxy.close();
       process.exit(2);
     }
 
@@ -804,6 +807,7 @@ program
       }
       console.error(chalk.yellow('⚠ Timed out waiting for result. Job may still be running.'));
       console.log(`  Run: verfix status ${executionId}`);
+      if (activeProxy) activeProxy.close();
       process.exit(2);
     }
 
@@ -822,6 +826,7 @@ program
       };
       emitJson(jsonResult);
       scheduleBackgroundCheck(['npm', 'image']);
+      if (activeProxy) activeProxy.close();
       process.exit(jsonResult.exit_code);
     }
 
@@ -874,6 +879,7 @@ program
     } else {
       scheduleBackgroundCheck(['npm', 'image']);
     }
+    if (activeProxy) activeProxy.close();
     process.exit(result.passed ? 0 : 1);
   });
 
@@ -922,16 +928,38 @@ function sleep(ms: number) {
  * real host. We rewrite to host.docker.internal which is injected by
  * Docker Desktop and by our --add-host flag.
  */
-function resolveJobUrl(url: string): { url: string; rewritten: boolean } {
+async function resolveJobUrl(url: string): Promise<{ url: string; rewritten: boolean; proxy?: import('./proxy').LocalProxy }> {
   if (!url) return { url, rewritten: false };
   // Host network mode (Linux): localhost resolves correctly inside container.
   if (isHostNetworkMode()) return { url, rewritten: false };
-  // Bridge mode (Mac/Windows): must point Playwright at host.docker.internal.
-  const rewritten = url.replace(
-    /\/\/(localhost|127\.0\.0\.1)(:\d+)?/g,
-    '//host.docker.internal$2',
-  );
-  return { url: rewritten, rewritten: rewritten !== url };
+  
+  // Bridge mode (Mac/Windows): intercept localhost / 127.0.0.1
+  const match = url.match(/^(https?:\/\/)(localhost|127\.0\.0\.1)(:\d+)?(.*)$/);
+  if (match) {
+    const protocol = match[1];
+    const host = match[2];
+    const portStr = match[3];
+    const path = match[4];
+    
+    const port = portStr ? parseInt(portStr.substring(1), 10) : (protocol === 'https://' ? 443 : 80);
+    
+    const { LocalProxy } = await import('./proxy');
+    const proxy = new LocalProxy();
+    try {
+      const proxyPort = await proxy.start(host, port);
+      const rewritten = `${protocol}host.docker.internal:${proxyPort}${path}`;
+      return { url: rewritten, rewritten: true, proxy };
+    } catch (e) {
+      // Fallback if proxy fails to bind for some reason
+      const rewritten = url.replace(
+        /\/\/(localhost|127\.0\.0\.1)(:\d+)?/g,
+        '//host.docker.internal$2',
+      );
+      return { url: rewritten, rewritten: rewritten !== url };
+    }
+  }
+
+  return { url, rewritten: false };
 }
 
 function buildTimelineUrl(base: string, executionId: string): string {

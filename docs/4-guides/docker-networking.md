@@ -59,15 +59,17 @@ docker run -d \
 
 ---
 
-### Mac / Windows — Bridge + `host.docker.internal`
+### Mac / Windows — Bridge + CLI Local Proxy
 
-Docker Desktop automatically injects a DNS alias `host.docker.internal` that
-resolves to the host machine's IP from inside any container.
+Docker Desktop runs containers inside a Linux VM, so `--network=host` doesn't reach the real host.
+To bypass common issues like strict IPv6 (`::1`) bindings or Windows Firewall blocking Docker's virtual network adapter, Verfix uses a transparent **CLI-managed local proxy**.
 
-The CLI passes `--add-host=host.docker.internal:host-gateway` (a no-op on
-Docker Desktop but required for plain Linux bridge mode) and rewrites all
-`localhost`/`127.0.0.1` references in job URLs to `host.docker.internal`
-before submitting to the API.
+When you run a job targeting `localhost` or `127.0.0.1`:
+1. The Verfix CLI starts a lightweight TCP proxy on the host machine bound to `0.0.0.0` at a random port.
+2. It forwards this proxy directly to your target localhost server.
+3. The CLI rewrites the container's target URL to point to `host.docker.internal:<proxy_port>`.
+
+This ensures perfect compatibility regardless of whether your app binds to IPv4 or IPv6, without requiring any changes to your app's code or firewall rules.
 
 ```bash
 # What the CLI produces on Mac/Windows:
@@ -266,6 +268,17 @@ npx ts-node cli/src/index.ts run --url http://localhost:3002 --output json
 ---
 
 ## Frequently Asked Questions
+
+**Q: Next.js shows a warning: `Cross origin request detected from host.docker.internal`**
+
+This happens because the Playwright browser inside Docker accesses your app via `http://host.docker.internal:<port>`, but the Next.js dev server strictly expects `localhost`. 
+- **Currently:** It is just a warning and does not affect Verfix or your tests.
+- **In the future:** If Next.js blocks these requests, Verfix won't be able to load your CSS/JS. You will need to allow it in your `next.config.ts`/`next.config.js`:
+```js
+const nextConfig = {
+  allowedDevOrigins: ['host.docker.internal'],
+};
+```
 
 **Q: My app is running on `::1:3002` and the test fails with `ERR_CONNECTION_REFUSED`.**
 

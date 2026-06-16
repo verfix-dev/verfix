@@ -188,7 +188,14 @@ async function processJob(job: Job<JobPayload>): Promise<ExecutionResult> {
       }
 
       console.log(`\n🌐 Navigating to ${targetUrl}...`);
-      await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout });
+      try {
+        await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout });
+      } catch (err: any) {
+        if ((err.message.includes('ERR_CONNECTION_REFUSED') || err.message.includes('ERR_CONNECTION_RESET') || err.message.includes('ERR_EMPTY_RESPONSE')) && targetUrl.includes('host.docker.internal')) {
+          throw new Error(`Verfix could not reach your local server from inside Docker. Ensure your app is running and your Windows/Mac Firewall is not blocking Docker connections. Original error: ${err.message}`);
+        }
+        throw err;
+      }
       await waitForStableDOM(page, 400, 8000);
       const navEvent = tracker.pushEvent('navigation', `navigate ${targetUrl}`, { url: targetUrl }, { category: 'info' });
       await tracker.captureStateSync(page, navEvent.id, 'step');
