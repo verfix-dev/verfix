@@ -59,15 +59,17 @@ docker run -d \
 
 ---
 
-### Mac / Windows — Bridge + `host.docker.internal`
+### Mac / Windows — Bridge + CLI Local Proxy
 
-Docker Desktop automatically injects a DNS alias `host.docker.internal` that
-resolves to the host machine's IP from inside any container.
+Docker Desktop runs containers inside a Linux VM, so `--network=host` doesn't reach the real host.
+To bypass common issues like strict IPv6 (`::1`) bindings or Windows Firewall blocking Docker's virtual network adapter, Verfix uses a transparent **CLI-managed local proxy**.
 
-The CLI passes `--add-host=host.docker.internal:host-gateway` (a no-op on
-Docker Desktop but required for plain Linux bridge mode) and rewrites all
-`localhost`/`127.0.0.1` references in job URLs to `host.docker.internal`
-before submitting to the API.
+When you run a job targeting `localhost` or `127.0.0.1`:
+1. The Verfix CLI starts a lightweight TCP proxy on the host machine bound to `0.0.0.0` at a random port.
+2. It forwards this proxy directly to your target localhost server.
+3. The CLI rewrites the container's target URL to point to `host.docker.internal:<proxy_port>`.
+
+This ensures perfect compatibility regardless of whether your app binds to IPv4 or IPv6, without requiring any changes to your app's code or firewall rules.
 
 ```bash
 # What the CLI produces on Mac/Windows:
