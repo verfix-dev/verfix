@@ -67,6 +67,18 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo "  Starting PostgreSQL 15..."
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
+# Ensure correct ownership and permissions for the data volume
+echo "⚙  Configuring permissions for Postgres data directory..."
+mkdir -p "${PG_DATA}" || { echo "❌ Failed to create Postgres data directory" >&2; exit 1; }
+chown -R postgres:postgres "${PG_DATA}" || { echo "❌ Failed to set Postgres data directory ownership" >&2; exit 1; }
+chmod 700 "${PG_DATA}" || { echo "❌ Failed to set Postgres data directory permissions" >&2; exit 1; }
+
+# Clean up any stale postmaster.pid lock file if it exists (e.g. from an abrupt container stop)
+if [ -f "${PG_DATA}/postmaster.pid" ]; then
+  echo "🧹 Removing stale PostgreSQL pid file..."
+  rm -f "${PG_DATA}/postmaster.pid"
+fi
+
 # If the data dir was wiped (fresh volume), re-initialise
 if [ ! -f "${PG_DATA}/PG_VERSION" ]; then
   echo "⚙  Re-initialising Postgres data directory..."
@@ -90,6 +102,11 @@ while [ "$retries" -gt 0 ]; do
   retries=$((retries - 1))
   sleep 1
 done
+
+if [ "$retries" -eq 0 ]; then
+  echo "❌ PostgreSQL failed to start" >&2
+  exit 1
+fi
 
 # ── 2. Redis ──────────────────────────────────────────────────────────────────
 echo ""
