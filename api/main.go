@@ -192,7 +192,7 @@ func handleGetExecution(c *fiber.Ctx) error {
 	// Fallback to Postgres
 	if db != nil {
 		row := db.QueryRow(
-			`SELECT id, task, url, mode, status, passed, duration_ms, retry_count, error_message, created_at, completed_at FROM executions WHERE id=$1`, id,
+			`SELECT id, task, url, mode, status, passed, duration_ms, retry_count, error_message, created_at, completed_at, payload FROM executions WHERE id=$1`, id,
 		)
 		var e executionRow
 		if err := scanExecution(row, &e); err == nil {
@@ -545,7 +545,8 @@ func initDB() {
 		retry_count INTEGER DEFAULT 0,
 		error_message TEXT,
 		created_at TIMESTAMPTZ DEFAULT NOW(),
-		completed_at TIMESTAMPTZ
+		completed_at TIMESTAMPTZ,
+		payload JSONB
 	);
 	CREATE INDEX IF NOT EXISTS idx_executions_status ON executions(status);
 	CREATE INDEX IF NOT EXISTS idx_executions_url ON executions(url);
@@ -575,6 +576,11 @@ func initDB() {
 	if _, err := db.Exec(schema); err != nil {
 		log.Printf("Schema init warning: %v", err)
 	}
+
+	// Migrate database: add payload column if not exists
+	if _, err := db.Exec(`ALTER TABLE executions ADD COLUMN IF NOT EXISTS payload JSONB;`); err != nil {
+		log.Printf("DB migration warning: failed to add payload column: %v", err)
+	}
 }
 
 type executionRow struct {
@@ -589,13 +595,21 @@ type executionRow struct {
 	ErrorMsg    sql.NullString
 	CreatedAt   time.Time
 	CompletedAt sql.NullTime
+	Payload     sql.NullString
 }
 
 func scanExecution(row *sql.Row, e *executionRow) error {
-	return row.Scan(&e.ID, &e.Task, &e.URL, &e.Mode, &e.Status, &e.Passed, &e.DurationMs, &e.RetryCount, &e.ErrorMsg, &e.CreatedAt, &e.CompletedAt)
+	return row.Scan(&e.ID, &e.Task, &e.URL, &e.Mode, &e.Status, &e.Passed, &e.DurationMs, &e.RetryCount, &e.ErrorMsg, &e.CreatedAt, &e.CompletedAt, &e.Payload)
 }
 
 func (e *executionRow) toMap() map[string]interface{} {
+	if e.Payload.Valid && e.Payload.String != "" {
+		var result map[string]interface{}
+		if err := json.Unmarshal([]byte(e.Payload.String), &result); err == nil {
+			result["executionId"] = e.ID
+			return result
+		}
+	}
 	m := map[string]interface{}{
 		"executionId": e.ID, "task": e.Task, "url": e.URL, "mode": e.Mode,
 		"status": e.Status, "passed": e.Passed.Bool, "duration_ms": e.DurationMs.Int64,
@@ -623,11 +637,17 @@ func syncExecutionFromRedis(id string, result map[string]interface{}) {
 	durationMs, _ := result["duration_ms"].(float64)
 	errMsg, _ := result["error"].(string)
 
+	payloadJSON, err := json.Marshal(result)
+	var payload interface{} = nil
+	if err == nil {
+		payload = string(payloadJSON)
+	}
+
 	db.Exec(`
 		UPDATE executions
-		SET status=$1, passed=$2, duration_ms=$3, error_message=$4, completed_at=$5
-		WHERE id=$6 AND (status='queued' OR status='running')
-	`, status, passed, int(durationMs), nullStr(errMsg), time.Now(), id)
+		SET status=$1, passed=$2, duration_ms=$3, error_message=$4, completed_at=$5, payload=$6
+		WHERE id=$7 AND (status='queued' OR status='running')
+	`, status, passed, int(durationMs), nullStr(errMsg), time.Now(), payload, id)
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
