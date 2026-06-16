@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.5] - 2026-06-16
+
+### Added
+- **CLI Local Proxy:** Added transparent TCP proxy (`cli/src/proxy.ts`) for Docker networking on Windows/macOS. Automatically starts a proxy on the host machine when targeting `localhost` or `127.0.0.1` from inside Docker containers.
+
+### Fixed
+- **Docker Networking (Windows):** Fixed connection issues when running verification jobs against localhost services on Windows and macOS. The CLI now spawns a local proxy that forwards traffic from the container to the host machine, bypassing Windows Firewall and IPv6 binding restrictions that previously caused `ERR_CONNECTION_REFUSED` errors.
+- **Worker Connection Errors:** Improved error messages for connection failures in workers to clearly indicate when host server connectivity issues occur.
+
 ## [0.2.2] - 2026-06-14
 
 ### Added
