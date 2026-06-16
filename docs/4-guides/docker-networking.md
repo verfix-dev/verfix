@@ -269,6 +269,17 @@ npx ts-node cli/src/index.ts run --url http://localhost:3002 --output json
 
 ## Frequently Asked Questions
 
+**Q: Next.js shows a warning: `Cross origin request detected from host.docker.internal`**
+
+This happens because the Playwright browser inside Docker accesses your app via `http://host.docker.internal:<port>`, but the Next.js dev server strictly expects `localhost`. 
+- **Currently:** It is just a warning and does not affect Verfix or your tests.
+- **In the future:** If Next.js blocks these requests, Verfix won't be able to load your CSS/JS. You will need to allow it in your `next.config.ts`/`next.config.js`:
+```js
+const nextConfig = {
+  allowedDevOrigins: ['host.docker.internal'],
+};
+```
+
 **Q: My app is running on `::1:3002` and the test fails with `ERR_CONNECTION_REFUSED`.**
 
 You are on Linux and the container was started manually without `--network=host`.
