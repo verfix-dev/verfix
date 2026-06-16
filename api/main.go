@@ -93,6 +93,11 @@ func main() {
 		log.Fatalf("Fatal: DB ping failed: %v", err)
 	}
 
+	// NOTE: Go's database/sql package maintains an internal connection pool and
+	// automatically handles transient reconnects under the hood if the database goes down
+	// and comes back up during runtime.
+	// TODO: For a higher-availability production setup, consider adding an explicit
+	// application-level health monitoring/alerting loop or direct crash-restart triggers.
 	initDB()
 	log.Println("✅ Postgres connected")
 

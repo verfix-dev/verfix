@@ -69,9 +69,9 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 
 # Ensure correct ownership and permissions for the data volume
 echo "⚙  Configuring permissions for Postgres data directory..."
-mkdir -p "${PG_DATA}"
-chown -R postgres:postgres "${PG_DATA}"
-chmod 700 "${PG_DATA}"
+mkdir -p "${PG_DATA}" || { echo "❌ Failed to create Postgres data directory" >&2; exit 1; }
+chown -R postgres:postgres "${PG_DATA}" || { echo "❌ Failed to set Postgres data directory ownership" >&2; exit 1; }
+chmod 700 "${PG_DATA}" || { echo "❌ Failed to set Postgres data directory permissions" >&2; exit 1; }
 
 # Clean up any stale postmaster.pid lock file if it exists (e.g. from an abrupt container stop)
 if [ -f "${PG_DATA}/postmaster.pid" ]; then
