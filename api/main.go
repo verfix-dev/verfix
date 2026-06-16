@@ -76,14 +76,25 @@ func main() {
 	var err error
 	db, err = sql.Open("postgres", dsn)
 	if err != nil {
-		log.Printf("Warning: DB open failed: %v", err)
-	} else if err = db.Ping(); err != nil {
-		log.Printf("Warning: DB ping failed: %v — running without DB", err)
-		db = nil
-	} else {
-		initDB()
-		log.Println("✅ Postgres connected")
+		log.Fatalf("Fatal: DB open failed: %v", err)
 	}
+
+	// Retry database ping for up to 15 seconds to allow Postgres to finish starting
+	for i := 0; i < 15; i++ {
+		err = db.Ping()
+		if err == nil {
+			break
+		}
+		log.Printf("Waiting for Postgres to be ready... (%d/15): %v", i+1, err)
+		time.Sleep(1 * time.Second)
+	}
+
+	if err != nil {
+		log.Fatalf("Fatal: DB ping failed: %v", err)
+	}
+
+	initDB()
+	log.Println("✅ Postgres connected")
 
 	app := fiber.New(fiber.Config{AppName: "Verfix"})
 	app.Use(logger.New())
@@ -376,11 +387,13 @@ func handleHealth(c *fiber.Ctx) error {
 	activeWorkers, _ := rdb.SCard(ctx, "bull:verify-jobs:active").Result()
 
 	status := "healthy"
+	statusCode := 200
 	if !redisOk || !dbOk {
 		status = "degraded"
+		statusCode = 503
 	}
 
-	return c.JSON(fiber.Map{
+	return c.Status(statusCode).JSON(fiber.Map{
 		"status":          status,
 		"redis":           boolStatus(redisOk),
 		"database":        boolStatus(dbOk),

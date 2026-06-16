@@ -113,14 +113,14 @@ function test_detect_provider_from_model() {
 
 function test_is_valid_model() {
   // OpenAI has a curated list
-  assert.ok(isValidModel('openai', 'gpt-4o-mini'), 'gpt-4o-mini should be valid for openai');
-  assert.ok(isValidModel('openai', 'gpt-4.1-mini'), 'gpt-4.1-mini should be valid for openai');
-  assert.ok(!isValidModel('openai', 'claude-3-5-haiku'), 'claude model should NOT be valid for openai');
-  assert.ok(!isValidModel('openai', 'gemini-2.5-pro'), 'gemini model should NOT be valid for openai');
+  assert.ok(isValidModel('openai', 'gpt-5.4-mini'), 'gpt-5.4-mini should be valid for openai');
+  assert.ok(isValidModel('openai', 'gpt-5.5'), 'gpt-5.5 should be valid for openai');
+  assert.ok(!isValidModel('openai', 'claude-sonnet-4-6'), 'claude model should NOT be valid for openai');
+  assert.ok(!isValidModel('openai', 'gemini-3.5-pro'), 'gemini model should NOT be valid for openai');
 
   // Anthropic has a curated list
-  assert.ok(isValidModel('anthropic', 'claude-sonnet-4-5'), 'claude-sonnet-4-5 valid for anthropic');
-  assert.ok(!isValidModel('anthropic', 'gpt-4o'), 'gpt-4o should NOT be valid for anthropic');
+  assert.ok(isValidModel('anthropic', 'claude-sonnet-4-6'), 'claude-sonnet-4-6 valid for anthropic');
+  assert.ok(!isValidModel('anthropic', 'gpt-5.5'), 'gpt-5.5 should NOT be valid for anthropic');
 
   // OpenRouter is freeform — any model is valid
   assert.ok(isValidModel('openrouter', 'openai/gpt-4o-mini'), 'any model valid for openrouter');
