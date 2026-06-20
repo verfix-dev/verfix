@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.7] - 2026-06-20
+
+### Added
+- **Anonymous Telemetry & Analytics:** Integrated privacy-first telemetry with PostHog to track usage metrics for CLI initialization, diagnostic checking, container startups, and verification runs.
+  - Automatically respects standard `DO_NOT_TRACK` and `VERFIX_TELEMETRY=off` environment variables.
+  - Uses an anonymous tracking identifier generated once and stored in `~/.verfix/.machine-id` (no PII, hostname, or system paths collected).
+  - Shows a clear, transparent, one-time privacy notice on the first execution.
+  - Telemetry works completely asynchronously on lazy-loaded paths, ensuring zero execution block.
+- **Telemetry Documentation:** Added a comprehensive Telemetry & Privacy developer documentation guide.
+
+## [0.2.6] - 2026-06-20
+
 ### Added
 - **Non-Interactive Setup Wizard Mode (`--yes` / `-y`):** Added support to `verfix init` for unattended execution using flags or environment variables. Particularly useful for automated environments, CI/CD pipelines, and AI coding agents.
 - **Provider Auto-Detection:** Automatically detect AI providers (OpenAI, Anthropic, Gemini, OpenRouter) based on the format of the provided API key.
