@@ -367,7 +367,7 @@ program
       if (configFound) {
         printCheck(chalk.green('✓'), `${DEFAULT_CONFIG} found`);
       } else {
-        printCheck(chalk.red('✗'), `${DEFAULT_CONFIG} not found`, 'Run: verfix init');
+        printCheck(chalk.red('✗'), `${DEFAULT_CONFIG} not found`, 'Run: verfix init (or verfix init --yes for non-interactive)');
       }
     }
     if (!configFound) failures++;
@@ -379,7 +379,7 @@ program
       if (agentsMdFound) {
         printCheck(chalk.green('✓'), 'AGENTS.md found');
       } else {
-        printCheck(chalk.red('✗'), 'AGENTS.md not found', 'Run: verfix init');
+        printCheck(chalk.red('✗'), 'AGENTS.md not found', 'Run: verfix init (or verfix init --yes for non-interactive)');
       }
     }
     if (!agentsMdFound) failures++;
@@ -556,17 +556,77 @@ program
     process.exit(failures > 0 ? 1 : 0);
   });
 
+// ─── agent-setup command ─────────────────────────────────────────────────────
 
-// ─── init command (interactive wizard) ───────────────────────────────────────
+program
+  .command('agent-setup')
+  .description('Print machine-readable setup instructions for AI coding agents')
+  .action(() => {
+    const configExists = fs.existsSync(path.resolve(process.cwd(), DEFAULT_CONFIG));
+    const agentsMdExists = fs.existsSync(path.resolve(process.cwd(), 'AGENTS.md'));
+
+    const output = {
+      initialized: configExists,
+      agents_md_exists: agentsMdExists,
+      bootstrap: {
+        description: 'Run this command to initialize Verfix non-interactively',
+        command: 'npx verfix init --yes',
+        required_flags: {
+          '--ai-key': 'API key (or set VERFIX_AI_KEY / OPENAI_API_KEY / ANTHROPIC_API_KEY / GEMINI_API_KEY env var)',
+        },
+        optional_flags: {
+          '--ai-provider': 'openai | anthropic | gemini | openrouter (auto-detected from key format if omitted)',
+          '--ai-model': 'Model ID (uses provider default if omitted)',
+          '--base-url': 'App URL (default: http://localhost:3000)',
+          '--mode': 'strict | assisted | exploratory (default: assisted)',
+          '--skip-runtime': 'Skip Docker container startup',
+          '--skip-agent-files': 'Skip writing .cursorrules/CLAUDE.md/CODEX.md',
+          '--dry-run': 'Preview without writing files',
+        },
+        env_var_fallbacks: {
+          'VERFIX_AI_PROVIDER': '--ai-provider',
+          'VERFIX_AI_MODEL': '--ai-model',
+          'VERFIX_AI_KEY': '--ai-key',
+          'VERFIX_BASE_URL': '--base-url',
+          'VERFIX_MODE': '--mode',
+        },
+        provider_env_vars: ['OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'GEMINI_API_KEY', 'OPENROUTER_API_KEY'],
+        examples: [
+          'npx verfix init --yes --ai-key $OPENAI_API_KEY --skip-runtime',
+          'VERFIX_AI_KEY=$ANTHROPIC_API_KEY npx verfix init --yes',
+          'npx verfix init --yes --ai-provider openai --ai-model gpt-5.4-mini --ai-key sk-... --base-url http://localhost:3000',
+        ],
+      },
+    };
+
+    console.log(JSON.stringify(output, null, 2));
+  });
+
+// ─── init command (interactive wizard + non-interactive mode) ────────────────
 
 program
   .command('init')
-  .description('Interactive setup wizard — configure runtime, flows, and AGENTS.md')
+  .description('Setup wizard — configure runtime, flows, and AGENTS.md')
   .option('-f, --force', 'Overwrite existing files without prompting')
-  .action(async () => {
-    // Dynamic import to keep the main entry lean
-    const { runInitWizard } = await import('./init-wizard');
-    await runInitWizard();
+  .option('-y, --yes', 'Non-interactive mode (for CI and AI agents)')
+  .option('--ai-provider <id>', 'AI provider: openai | anthropic | gemini | openrouter')
+  .option('--ai-model <name>', 'Model ID (e.g. gpt-5.4-mini, claude-sonnet-4-6)')
+  .option('--ai-key <key>', 'API key string')
+  .option('--base-url <url>', 'App URL (e.g. http://localhost:3000)')
+  .option('--mode <mode>', 'Verification mode: strict | assisted | exploratory')
+  .option('--skip-runtime', 'Don\'t start Docker container')
+  .option('--skip-agent-files', 'Don\'t write .cursorrules/CLAUDE.md/CODEX.md')
+  .option('--dry-run', 'Preview what would happen, don\'t write anything')
+  .action(async (opts) => {
+    if (opts.yes || opts.dryRun) {
+      // Non-interactive mode
+      const { runNonInteractiveInit } = await import('./init-noninteractive');
+      await runNonInteractiveInit(opts);
+    } else {
+      // Interactive wizard (unchanged)
+      const { runInitWizard } = await import('./init-wizard');
+      await runInitWizard();
+    }
   });
 
 // ─── flows command ───────────────────────────────────────────────────────────
@@ -583,10 +643,10 @@ program
 
     if (!fs.existsSync(configPath)) {
       if (isJsonMode(opts)) {
-        emitJsonError({ error: 'config_not_found', message: `Config file not found: ${configPath}`, hint: 'Run: verfix init' });
+        emitJsonError({ error: 'config_not_found', message: `Config file not found: ${configPath}`, hint: 'Run: verfix init --yes (non-interactive) or verfix init (interactive)' });
       }
       console.error(chalk.red(`Config file not found: ${configPath}`));
-      console.error(chalk.gray('Run: verfix init'));
+      console.error(chalk.gray('Run: verfix init --yes (non-interactive) or verfix init (interactive)'));
       process.exit(2);
     }
 
@@ -686,7 +746,7 @@ program
       didLoadConfig = true;
     } else if (opts.config) {
       if (isJsonMode(opts)) {
-        emitJsonError({ error: 'config_not_found', message: `Config file not found: ${configPath}`, hint: 'Run: verfix init' });
+        emitJsonError({ error: 'config_not_found', message: `Config file not found: ${configPath}`, hint: 'Run: verfix init --yes (non-interactive) or verfix init (interactive)' });
       }
       console.error(chalk.red(`Config file not found: ${configPath}`));
       process.exit(2);
