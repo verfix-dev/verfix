@@ -145,7 +145,8 @@ Each flow can override the global `mode` — stable flows can use `strict`, new 
 ## CLI Reference
 
 ```bash
-npx verfix init              # Interactive setup wizard
+npx verfix init              # Interactive setup wizard (run with --yes for non-interactive mode)
+npx verfix agent-setup       # Output machine-readable bootstrap instructions for AI agents
 npx verfix flows             # List all flows in verfix.config.json
 npx verfix run               # Run all flows
 npx verfix run --flow <id>   # Run a specific flow
@@ -158,6 +159,32 @@ npx verfix update            # Pull latest runtime image
 ```
 
 Run any command with `--help` for full option details.
+
+### Non-Interactive Bootstrapping (for CI/CD & AI Agents)
+
+For non-interactive environments, you can pass the `--yes` (or `-y`) flag to bypass interactive prompts:
+
+```bash
+npx verfix init --yes \
+  --ai-provider anthropic \
+  --ai-model claude-3-5-sonnet-latest \
+  --ai-key $ANTHROPIC_API_KEY \
+  --base-url http://localhost:3000
+```
+
+Alternatively, you can use environment variables:
+
+```bash
+export VERFIX_AI_KEY="your-api-key"
+export VERFIX_AI_PROVIDER="anthropic" # Optional, auto-detected from key if omitted
+npx verfix init --yes
+```
+
+#### Dry-run Mode
+You can preview the generated configuration as JSON without writing any files to disk by passing the `--dry-run` flag:
+```bash
+npx verfix init --yes --ai-key sk-ant-... --dry-run
+```
 
 ---
 

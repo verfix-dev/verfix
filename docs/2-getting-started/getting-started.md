@@ -10,6 +10,8 @@ The easiest way to get started is using the Verfix CLI to initialize your projec
 npx verfix init
 ```
 
+> **Tip:** For non-interactive environments, CI/CD pipelines, or AI coding agents, pass the `--yes` (or `-y`) flag: `npx verfix init --yes`. See the main README for all available configuration flags and environment variables.
+
 This command will:
 1. Create a `verfix.config.json` file for your configuration.
 2. Generate an `AGENTS.md` file as a single source of truth for humans and AI agents.
@@ -24,7 +26,7 @@ npx verfix start
 ```
 
 Or run the interactive setup wizard which pulls the image, starts the runtime,
-and walks you through config:
+and walks you through config (or bypass with `--yes`):
 
 ```bash
 npx verfix init

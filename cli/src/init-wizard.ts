@@ -241,11 +241,11 @@ async function runProviderFlow(cwd: string): Promise<{
 
   if (def.freeformModel) {
     // OpenRouter: freeform input
-    console.log(chalk.gray(`  ℹ OpenRouter supports any model. Enter the model ID (e.g. openai/gpt-4o-mini)`));
+    console.log(chalk.gray(`  ℹ OpenRouter supports any model. Enter the model ID (e.g. openrouter/auto)`));
     console.log('');
     model = await input({
       message: 'Model ID',
-      default: 'openai/gpt-4o-mini',
+      default: 'openrouter/auto',
     });
   } else {
     // Curated model list

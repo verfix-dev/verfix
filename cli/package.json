@@ -7,9 +7,10 @@
     "build": "tsc -p tsconfig.json",
     "dev": "ts-node src/index.ts",
     "prepublishOnly": "npm run build",
-    "test": "npm run test:providers && npm run test:migration",
+    "test": "npm run test:providers && npm run test:migration && npm run test:noninteractive",
     "test:providers": "ts-node test/providers.test.ts",
-    "test:migration": "ts-node test/config-migration.test.ts"
+    "test:migration": "ts-node test/config-migration.test.ts",
+    "test:noninteractive": "ts-node test/noninteractive.test.ts"
   },
   "bin": {
     "verfix": "dist/index.js"

@@ -18,6 +18,25 @@ export function generateAgentsSection(
 
   return `## Verfix — Browser Verification
 
+### Verfix Setup (for AI agents)
+
+> If \`verfix.config.json\` doesn't exist in the project root, Verfix hasn't been
+> initialized yet. Run the following to bootstrap non-interactively:
+>
+> \`\`\`bash
+> npx verfix init --yes --ai-provider openai --ai-model gpt-5.4-mini --ai-key "$OPENAI_API_KEY" --base-url http://localhost:3000
+> \`\`\`
+>
+> **Flags:** \`--ai-provider\` (openai|anthropic|gemini|openrouter), \`--ai-model\`,
+> \`--ai-key\`, \`--base-url\`, \`--mode\` (strict|assisted|exploratory),
+> \`--skip-runtime\`, \`--skip-agent-files\`, \`--dry-run\`.
+>
+> **Env var fallbacks:** \`VERFIX_AI_PROVIDER\`, \`VERFIX_AI_MODEL\`, \`VERFIX_AI_KEY\`,
+> \`VERFIX_BASE_URL\`, \`VERFIX_MODE\`. Provider-specific keys (\`OPENAI_API_KEY\`,
+> \`ANTHROPIC_API_KEY\`, etc.) are also detected automatically.
+>
+> Ask the user for their API key if not already set in the environment.
+
 Verfix is a local browser-verification runtime. After editing any UI
 component, form, route, or page — **you must verify browser behavior**
 before considering the task done.

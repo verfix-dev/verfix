@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Non-Interactive Setup Wizard Mode (`--yes` / `-y`):** Added support to `verfix init` for unattended execution using flags or environment variables. Particularly useful for automated environments, CI/CD pipelines, and AI coding agents.
+- **Provider Auto-Detection:** Automatically detect AI providers (OpenAI, Anthropic, Gemini, OpenRouter) based on the format of the provided API key.
+- **Agent Setup Command (`verfix agent-setup`):** A new command outputting machine-readable JSON instructions for AI coding agents to bootstrap Verfix.
+- **Graceful Docker Degradation:** Init wizard will warn and continue configuring if Docker is not installed or running, instead of hard failing.
+- **Dry-run Mode (`--dry-run`):** Validate settings and preview the generated configurations as JSON without writing files.
+
 ## [0.2.5] - 2026-06-16
 
 ### Added
