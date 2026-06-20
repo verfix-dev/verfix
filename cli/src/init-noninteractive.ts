@@ -3,13 +3,9 @@ import path from 'path';
 import chalk from 'chalk';
 import ora from 'ora';
 import { DEFAULT_CONFIG } from './constants';
-import {
-  generateAgentsSection,
-  generateCursorRules,
-  generateClaudeSection,
-  generateCodexInstructions,
-} from './agents-md';
-import { detectAllAgentPlatforms, getAgentFilePath } from './agent-platform';
+import { generateAgentsSection } from './agents-md';
+import { detectAllAgentPlatforms } from './agent-platform';
+import { writeAgentsMd, writePlatformAgentFiles } from './agent-writer';
 import {
   isDockerInstalled, isDockerRunning, pullImage, startContainer,
   getContainerState, syncRuntimePortsFromContainer,
@@ -48,19 +44,27 @@ interface ResolvedConfig {
 
 const VALID_PROVIDERS: ProviderId[] = ['openai', 'anthropic', 'gemini', 'openrouter'];
 
-function detectProviderFromKey(key: string): ProviderId | null {
-  // Order matters: sk-ant-* must be checked before sk-*
+export function maskApiKey(key: string): string {
+  if (key.startsWith('sk-ant-')) return `sk-ant-****${key.slice(-4)}`;
+  if (key.startsWith('sk-or-')) return `sk-or-****${key.slice(-4)}`;
+  if (key.startsWith('sk-')) return `sk-****${key.slice(-4)}`;
+  if (key.startsWith('gemini-')) return `gemini-****${key.slice(-4)}`;
+  if (key.length <= 8) return '****';
+  return `${key.slice(0, 4)}****${key.slice(-4)}`;
+}
+
+export function detectProviderFromKey(key: string): ProviderId | null {
+  // Order matters: prefixes must be checked specifically first
   if (key.startsWith('sk-ant-')) return 'anthropic';
-  if (key.startsWith('sk-')) return 'openai';
-  if (key.startsWith('AIza') || key.startsWith('AQ')) return 'gemini';
-  // We can't auto-detect openrouter — it uses sk-or- prefix
   if (key.startsWith('sk-or-')) return 'openrouter';
+  if (key.startsWith('sk-')) return 'openai';
+  if (key.startsWith('gemini-') || key.startsWith('AIza') || key.startsWith('AQ')) return 'gemini';
   return null;
 }
 
-function getDefaultModel(provider: ProviderId): string {
+export function getDefaultModel(provider: ProviderId): string {
   const def = PROVIDER_REGISTRY[provider];
-  if (def.freeformModel) return 'openai/gpt-4o-mini';
+  if (provider === 'openrouter') return 'openrouter/auto';
   const recommended = def.models.find(m => m.recommended);
   return recommended?.id ?? def.models[0]?.id ?? 'gpt-4o-mini';
 }
@@ -96,7 +100,13 @@ function resolveConfig(opts: NonInteractiveOptions): ResolvedConfig {
   const apiKey = resolveApiKey(opts);
 
   if (!apiKey && !opts.dryRun) {
-    console.error(chalk.red('✗ API key required. Pass --ai-key or set VERFIX_AI_KEY (or provider-specific env var like OPENAI_API_KEY)'));
+    console.error(chalk.red('\n✗ Error: AI API key is required to bootstrap Verfix in non-interactive mode.'));
+    console.error(chalk.gray('\nYou can supply it in one of these ways:'));
+    console.error(`  1. CLI Flag:          ${chalk.cyan('--ai-key <your-key>')}`);
+    console.error(`  2. Generic Env Var:   ${chalk.cyan('export VERFIX_AI_KEY="your-key"')}`);
+    console.error(`  3. Provider Env Var:  ${chalk.cyan('export ANTHROPIC_API_KEY="..."')}, ${chalk.cyan('OPENAI_API_KEY="..."')}, etc.`);
+    console.error(chalk.gray('\nFor more information, see the Non-Interactive Setup documentation in:'));
+    console.error(`  ${chalk.underline('https://github.com/verfix-dev/verfix#non-interactive-bootstrapping-for-cicd--ai-agents')}\n`);
     process.exit(1);
   }
 
@@ -177,7 +187,7 @@ export async function runNonInteractiveInit(opts: NonInteractiveOptions): Promis
       mode: 'dry-run',
       provider: config.provider,
       model: config.model,
-      apiKey: config.apiKey ? `${config.apiKey.slice(0, 8)}${'*'.repeat(Math.max(0, config.apiKey.length - 8))}` : '(none)',
+      apiKey: config.apiKey ? maskApiKey(config.apiKey) : '(none)',
       baseUrl: config.baseUrl,
       verificationMode: config.mode,
       skipRuntime: config.skipRuntime,
@@ -260,79 +270,24 @@ export async function runNonInteractiveInit(opts: NonInteractiveOptions): Promis
   console.log(chalk.green('  ✓ verfix.config.json created'));
 
   // ── Step 6: Write AGENTS.md ──
-  const agentsPath = path.join(cwd, 'AGENTS.md');
   const flowSummaries: { id: string }[] = [];
   const runtimePorts = getRuntimePorts();
   const verfixSection = generateAgentsSection(flowSummaries, config.mode, config.baseUrl, runtimePorts);
 
-  if (!fs.existsSync(agentsPath)) {
-    fs.writeFileSync(agentsPath, verfixSection + '\n', 'utf-8');
+  const createdAgentsMd = writeAgentsMd(cwd, verfixSection);
+  if (createdAgentsMd) {
     console.log(chalk.green('  ✓ AGENTS.md created'));
   } else {
-    const existing = fs.readFileSync(agentsPath, 'utf-8');
-    const sectionRegex = /## Verfix — Browser Verification[\s\S]*?(?=\n## [^V]|\n## $|$)/;
-
-    if (sectionRegex.test(existing)) {
-      const updated = existing.replace(sectionRegex, verfixSection);
-      fs.writeFileSync(agentsPath, updated, 'utf-8');
-      console.log(chalk.green('  ✓ AGENTS.md Verfix section updated'));
-    } else {
-      const separator = existing.endsWith('\n') ? '\n' : '\n\n';
-      fs.writeFileSync(agentsPath, existing + separator + verfixSection + '\n', 'utf-8');
-      console.log(chalk.green('  ✓ AGENTS.md updated (Verfix section appended)'));
-    }
+    console.log(chalk.green('  ✓ AGENTS.md Verfix section updated'));
   }
 
   // ── Step 7: Write platform-specific agent files ──
   if (!config.skipAgentFiles) {
     const detectedPlatforms = detectAllAgentPlatforms(cwd);
-    // In non-interactive mode, write files for all detected platforms
     const platformsToWrite = detectedPlatforms.length > 0 ? detectedPlatforms : [];
-
-    for (const platform of platformsToWrite) {
-      const platformPath = getAgentFilePath(platform, cwd);
-      const platformFileName = path.basename(platformPath);
-      let platformContent = '';
-
-      if (platform === 'cursor') {
-        platformContent = generateCursorRules(flowSummaries, config.mode, config.baseUrl, runtimePorts);
-      } else if (platform === 'claude') {
-        platformContent = generateClaudeSection(flowSummaries, config.mode, config.baseUrl, runtimePorts);
-      } else if (platform === 'codex') {
-        platformContent = generateCodexInstructions(flowSummaries, config.mode, config.baseUrl, runtimePorts);
-      }
-
-      if (!platformContent) continue;
-
-      if (!fs.existsSync(platformPath)) {
-        fs.writeFileSync(platformPath, platformContent + '\n', 'utf-8');
-        console.log(chalk.green(`  ✓ ${platformFileName} created`));
-      } else {
-        // In non-interactive mode, overwrite existing platform files
-        const existingPlatform = fs.readFileSync(platformPath, 'utf-8');
-
-        if (platform === 'cursor') {
-          const startMarker = 'You are working in a project that uses Verfix';
-          if (existingPlatform.includes(startMarker)) {
-            const index = existingPlatform.indexOf(startMarker);
-            const baseContent = existingPlatform.substring(0, index);
-            fs.writeFileSync(platformPath, baseContent + platformContent + '\n', 'utf-8');
-          } else {
-            const separator = existingPlatform.endsWith('\n') ? '\n' : '\n\n';
-            fs.writeFileSync(platformPath, existingPlatform + separator + platformContent + '\n', 'utf-8');
-          }
-        } else {
-          const regex = /## Verfix[\s\S]*?(?=\n## |$)/;
-          if (regex.test(existingPlatform)) {
-            const updated = existingPlatform.replace(regex, platformContent.trim());
-            fs.writeFileSync(platformPath, updated, 'utf-8');
-          } else {
-            const separator = existingPlatform.endsWith('\n') ? '\n' : '\n\n';
-            fs.writeFileSync(platformPath, existingPlatform + separator + platformContent + '\n', 'utf-8');
-          }
-        }
-        console.log(chalk.green(`  ✓ ${platformFileName} updated`));
-      }
+    const written = writePlatformAgentFiles(cwd, platformsToWrite, config.mode, config.baseUrl);
+    for (const file of written) {
+      console.log(chalk.green(`  ✓ ${file} created/updated`));
     }
   } else {
     console.log(chalk.gray('  ⏭ Skipping agent files (--skip-agent-files)'));
