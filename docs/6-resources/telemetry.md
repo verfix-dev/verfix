@@ -2,13 +2,13 @@
 
 Verfix CLI collects anonymous usage telemetry. This metadata helps us distinguish real developer usage and active continuous integration (CI) flows from bots, curiosity-driven registry downloads, and package mirrors.
 
-Telemetry is fully open-source and can be reviewed in [cli/src/telemetry.ts](file:///home/aditya/projects/verfix/cli/src/telemetry.ts).
+Telemetry is fully open-source and can be reviewed in [cli/src/telemetry.ts](../../cli/src/telemetry.ts).
 
 ---
 
 ## Privacy-First Architecture
 
-* **Anonymous Identifiers:** We generate a deterministic SHA-256 hash derived from local machine parameters (hostname + username + home directory). The raw values never leave your device.
+* **Anonymous Identifiers:** We generate a completely random UUID on first execution and store it locally at `~/.verfix/.machine-id`. This acts as an anonymous tracking ID that doesn't reveal any details about your local system.
 * **No Secrets or PII:** Verfix never collects API keys, file system paths, code contents, local application URLs, or task descriptions.
 * **Non-Blocking Performance:** Telemetry operations run asynchronously on a lazy-loaded worker path. If telemetry times out or fails, it will fail silently and will never block CLI execution.
 * **One-Time Notice:** On first invocation, a single-line message transparently alerts the developer to the anonymous telemetry collection.

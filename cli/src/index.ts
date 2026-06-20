@@ -648,7 +648,6 @@ program
   .option('--skip-agent-files', 'Don\'t write .cursorrules/CLAUDE.md/CODEX.md')
   .option('--dry-run', 'Preview what would happen, don\'t write anything')
   .action(async (opts) => {
-    const originalExit = process.exit;
     let telemetryCaptured = false;
 
     const captureTelemetry = async (exitCode: number, errorMsg?: string) => {
@@ -682,16 +681,6 @@ program
       await flushTelemetry();
     };
 
-    // Override process.exit so that sub-modules calling process.exit will yield to flush telemetry
-    process.exit = ((code?: number) => {
-      const exitCode = code ?? 0;
-      captureTelemetry(exitCode).then(() => {
-        originalExit(exitCode);
-      }).catch(() => {
-        originalExit(exitCode);
-      });
-    }) as any;
-
     try {
       if (opts.yes || opts.dryRun) {
         // Non-interactive mode
@@ -706,10 +695,9 @@ program
       await captureTelemetry(0);
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);
+      console.error(chalk.red(`\n✗ Error: ${errorMsg}`));
       await captureTelemetry(1, errorMsg);
-      throw err;
-    } finally {
-      process.exit = originalExit;
+      process.exit(1);
     }
   });
 

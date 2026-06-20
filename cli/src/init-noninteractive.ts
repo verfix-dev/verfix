@@ -93,21 +93,12 @@ function resolveApiKey(opts: NonInteractiveOptions): string | null {
   return null;
 }
 
-// ─── Resolve all config values ───────────────────────────────────────────────
-
 function resolveConfig(opts: NonInteractiveOptions): ResolvedConfig {
   // Resolve API key
   const apiKey = resolveApiKey(opts);
 
   if (!apiKey && !opts.dryRun) {
-    console.error(chalk.red('\n✗ Error: AI API key is required to bootstrap Verfix in non-interactive mode.'));
-    console.error(chalk.gray('\nYou can supply it in one of these ways:'));
-    console.error(`  1. CLI Flag:          ${chalk.cyan('--ai-key <your-key>')}`);
-    console.error(`  2. Generic Env Var:   ${chalk.cyan('export VERFIX_AI_KEY="your-key"')}`);
-    console.error(`  3. Provider Env Var:  ${chalk.cyan('export ANTHROPIC_API_KEY="..."')}, ${chalk.cyan('OPENAI_API_KEY="..."')}, etc.`);
-    console.error(chalk.gray('\nFor more information, see the Non-Interactive Setup documentation in:'));
-    console.error(`  ${chalk.underline('https://github.com/verfix-dev/verfix#non-interactive-bootstrapping-for-cicd--ai-agents')}\n`);
-    process.exit(1);
+    throw new Error('AI API key is required to bootstrap Verfix in non-interactive mode. Supply it via --ai-key CLI flag or VERFIX_AI_KEY environment variable.');
   }
 
   // Resolve provider
@@ -117,8 +108,7 @@ function resolveConfig(opts: NonInteractiveOptions): ResolvedConfig {
   const cliProvider = opts.aiProvider || process.env.VERFIX_AI_PROVIDER;
   if (cliProvider) {
     if (!VALID_PROVIDERS.includes(cliProvider as ProviderId)) {
-      console.error(chalk.red(`✗ Invalid provider: '${cliProvider}'. Valid providers: ${VALID_PROVIDERS.join(', ')}`));
-      process.exit(1);
+      throw new Error(`Invalid provider: '${cliProvider}'. Valid providers: ${VALID_PROVIDERS.join(', ')}`);
     }
     provider = cliProvider as ProviderId;
   }
@@ -129,8 +119,7 @@ function resolveConfig(opts: NonInteractiveOptions): ResolvedConfig {
     if (detected) {
       provider = detected;
     } else if (!opts.aiProvider && !process.env.VERFIX_AI_PROVIDER) {
-      console.error(chalk.red('✗ Cannot auto-detect provider from key format. Pass --ai-provider explicitly.'));
-      process.exit(1);
+      throw new Error('Cannot auto-detect provider from key format. Pass --ai-provider explicitly.');
     }
   }
 
@@ -153,8 +142,7 @@ function resolveConfig(opts: NonInteractiveOptions): ResolvedConfig {
   const modeValue = opts.mode || process.env.VERFIX_MODE || 'assisted';
   const validModes = ['strict', 'assisted', 'exploratory'];
   if (!validModes.includes(modeValue)) {
-    console.error(chalk.red(`✗ Invalid mode: '${modeValue}'. Valid modes: ${validModes.join(', ')}`));
-    process.exit(1);
+    throw new Error(`Invalid mode: '${modeValue}'. Valid modes: ${validModes.join(', ')}`);
   }
 
   return {
@@ -208,7 +196,7 @@ export async function runNonInteractiveInit(opts: NonInteractiveOptions): Promis
     console.log('');
     console.log(JSON.stringify(dryRunOutput, null, 2));
     console.log('');
-    process.exit(0);
+    return;
   }
 
   // ── Step 3: Save AI config to .verfix/.env ──

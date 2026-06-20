@@ -56,18 +56,35 @@ function isCI(): boolean {
 }
 
 // ─── Anonymous machine ID ───────────────────────────────────────────────────
-// SHA-256 of hostname + username + homedir, truncated to 16 hex chars.
-// Deterministic per machine, impossible to reverse into PII.
+// Salted UUID generated once per user and stored in ~/.verfix/.machine-id
+// Truly non-PII, distinct across devices without revealing system details.
 
 let _machineId: string | null = null;
+const MACHINE_ID_FILE = path.join(os.homedir(), '.verfix', '.machine-id');
 
 function getMachineId(): string {
   if (_machineId) return _machineId;
   try {
-    const raw = `${os.hostname()}:${os.userInfo().username}:${os.homedir()}`;
-    _machineId = crypto.createHash('sha256').update(raw).digest('hex').slice(0, 16);
+    if (fs.existsSync(MACHINE_ID_FILE)) {
+      const stored = fs.readFileSync(MACHINE_ID_FILE, 'utf-8').trim();
+      if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(stored)) {
+        _machineId = stored;
+        return _machineId;
+      }
+    }
   } catch {
-    _machineId = 'anonymous';
+    // Ignore error, regenerate
+  }
+
+  try {
+    const generated = crypto.randomUUID();
+    const dir = path.dirname(MACHINE_ID_FILE);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(MACHINE_ID_FILE, generated, 'utf-8');
+    _machineId = generated;
+  } catch {
+    // Fallback to in-memory random UUID if write fails
+    _machineId = crypto.randomUUID();
   }
   return _machineId;
 }
@@ -124,6 +141,9 @@ function getClient(): any {
 
   if (!_client) {
     try {
+      // Show notice once when configuring telemetry on client initialization
+      showNoticeOnce();
+
       // eslint-disable-next-line @typescript-eslint/no-var-requires
       const { PostHog } = require('posthog-node');
       _client = new PostHog(POSTHOG_API_KEY, {
@@ -164,8 +184,6 @@ export function trackEvent(event: string, properties: Record<string, unknown> = 
     const client = getClient();
     if (!client) return;
 
-    showNoticeOnce();
-
     const distinctId = getMachineId();
 
     client.capture({
@@ -174,18 +192,6 @@ export function trackEvent(event: string, properties: Record<string, unknown> = 
       properties: {
         ...commonProperties(),
         ...properties,
-      },
-    });
-
-    // Set person properties so PostHog can segment users
-    client.identify({
-      distinctId,
-      properties: {
-        os_platform: os.platform(),
-        os_arch: os.arch(),
-        node_version: process.version.replace(/^v/, ''),
-        cli_version: getCliVersion(),
-        is_ci: isCI(),
       },
     });
   } catch {

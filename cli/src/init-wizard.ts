@@ -334,7 +334,7 @@ export async function runInitWizard(): Promise<void> {
   const dockerSpinner = ora('Checking Docker...').start();
   if (!isDockerRunning()) {
     dockerSpinner.fail('Docker is not running. Start Docker Desktop and re-run verfix init.');
-    process.exit(1);
+    throw new Error('Docker is not running');
   }
   dockerSpinner.succeed('Docker is running');
   console.log('');
@@ -369,7 +369,7 @@ export async function runInitWizard(): Promise<void> {
       pullSpinner.succeed('Image pulled');
     } catch (e: any) {
       pullSpinner.fail(`Failed to pull image: ${e.message}`);
-      process.exit(1);
+      throw new Error(`Failed to pull image: ${e.message}`);
     }
 
     const startSpinner = ora('Starting runtime...').start();
@@ -379,12 +379,12 @@ export async function runInitWizard(): Promise<void> {
       const healthy = await waitForHealth();
       if (!healthy) {
         startSpinner.fail('Runtime started but health check failed after 30s');
-        process.exit(1);
+        throw new Error('Runtime started but health check failed');
       }
       startSpinner.succeed('Runtime started and healthy');
     } catch (e: any) {
       startSpinner.fail(`Failed to start runtime: ${e.message}`);
-      process.exit(1);
+      throw new Error(`Failed to start runtime: ${e.message}`);
     }
   }
 
