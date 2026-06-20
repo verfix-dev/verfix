@@ -20,6 +20,8 @@ import { waitForHealth, isApiHealthy, isDashboardReachable, resolveApiBase } fro
 import { buildDashboardBase, getRuntimePorts } from './runtime';
 import { emitJson, emitJsonError, isJsonMode } from './json-output';
 import { showPendingNotifications, scheduleBackgroundCheck, clearImageCache } from './update-check';
+import { trackEvent, flushTelemetry } from './telemetry';
+
 
 // ─── Load Environment Variables ────────────────────────────────────────────────
 const envPath = path.join(process.cwd(), '.verfix', '.env');
@@ -74,12 +76,15 @@ program
   .command('start')
   .description('Start the Verfix runtime container')
   .action(async () => {
+    trackEvent('cli_start', { status: 'attempted' });
     if (!isDockerInstalled()) {
       console.error(chalk.red('✗ Docker is not installed. Install Docker from https://docker.com'));
+      await flushTelemetry();
       process.exit(2);
     }
     if (!isDockerRunning()) {
       console.error(chalk.red('✗ Docker daemon is not running. Start Docker Desktop first.'));
+      await flushTelemetry();
       process.exit(2);
     }
 
@@ -97,6 +102,8 @@ program
         console.log(`    Dashboard: ${chalk.cyan(`http://localhost:${runningPorts.dashboardPort}`)}`);
         showPendingNotifications();
         scheduleBackgroundCheck(['npm', 'image']);
+        trackEvent('cli_start', { status: 'already_running' });
+        await flushTelemetry();
         return;
       }
 
@@ -104,6 +111,8 @@ program
       const healthy = await waitForHealth();
       if (!healthy) {
         spinner.fail('Runtime started but health check failed after 30s');
+        trackEvent('cli_start', { status: 'health_check_failed' });
+        await flushTelemetry();
         process.exit(2);
       }
 
@@ -113,10 +122,14 @@ program
       console.log(`    Dashboard: ${chalk.cyan(`http://localhost:${startedPorts.dashboardPort}`)}`);
       showPendingNotifications();
       scheduleBackgroundCheck(['npm', 'image']);
+      trackEvent('cli_start', { status: 'started' });
     } catch (e: any) {
       spinner.fail(e.message);
+      trackEvent('cli_start', { status: 'error', error: e.message });
+      await flushTelemetry();
       process.exit(2);
     }
+    await flushTelemetry();
   });
 
 // ─── stop command ────────────────────────────────────────────────────────────
@@ -514,6 +527,23 @@ program
       }
     }
 
+    const finishTelemetryAndExit = async (exitCode: number) => {
+      try {
+        trackEvent('cli_doctor', {
+          failures,
+          warnings,
+          passed: failures === 0,
+          check_connectivity: !!opts.checkConnectivity,
+          provider: aiConfig?.provider ?? null,
+          model: aiConfig?.model ?? null,
+        });
+        await flushTelemetry();
+      } catch {
+        // ignore
+      }
+      process.exit(exitCode);
+    };
+
     // ── Output ──
     if (isJsonMode(opts)) {
       emitJson({
@@ -538,7 +568,7 @@ program
         passed: failures === 0,
       });
       scheduleBackgroundCheck(['npm', 'image']);
-      process.exit(failures > 0 ? 1 : 0);
+      await finishTelemetryAndExit(failures > 0 ? 1 : 0);
     }
 
     console.log('');
@@ -553,7 +583,7 @@ program
     console.log('');
     showPendingNotifications();
     scheduleBackgroundCheck(['npm', 'image']);
-    process.exit(failures > 0 ? 1 : 0);
+    await finishTelemetryAndExit(failures > 0 ? 1 : 0);
   });
 
 // ─── agent-setup command ─────────────────────────────────────────────────────
@@ -618,14 +648,68 @@ program
   .option('--skip-agent-files', 'Don\'t write .cursorrules/CLAUDE.md/CODEX.md')
   .option('--dry-run', 'Preview what would happen, don\'t write anything')
   .action(async (opts) => {
-    if (opts.yes || opts.dryRun) {
-      // Non-interactive mode
-      const { runNonInteractiveInit } = await import('./init-noninteractive');
-      await runNonInteractiveInit(opts);
-    } else {
-      // Interactive wizard (unchanged)
-      const { runInitWizard } = await import('./init-wizard');
-      await runInitWizard();
+    const originalExit = process.exit;
+    let telemetryCaptured = false;
+
+    const captureTelemetry = async (exitCode: number, errorMsg?: string) => {
+      if (telemetryCaptured) return;
+      telemetryCaptured = true;
+
+      let aiConfig: any = null;
+      let verfixConfig: any = null;
+      try {
+        const { loadAIConfig, loadVerfixConfig } = await import('./config/loader');
+        aiConfig = loadAIConfig(process.cwd());
+        const configPath = path.resolve(process.cwd(), DEFAULT_CONFIG);
+        if (fs.existsSync(configPath)) {
+          verfixConfig = loadVerfixConfig(configPath);
+        }
+      } catch (err) {
+        // ignore load config errors for telemetry
+      }
+
+      trackEvent('cli_init', {
+        interactive: !opts.yes,
+        dry_run: !!opts.dryRun,
+        provider: aiConfig?.provider || opts.aiProvider || null,
+        model: aiConfig?.model || opts.aiModel || null,
+        mode: verfixConfig?.mode || opts.mode || null,
+        skip_runtime: !!opts.skipRuntime,
+        skip_agent_files: !!opts.skipAgentFiles,
+        exit_code: exitCode,
+        error: errorMsg || (exitCode !== 0 ? 'exit_non_zero' : undefined),
+      });
+      await flushTelemetry();
+    };
+
+    // Override process.exit so that sub-modules calling process.exit will yield to flush telemetry
+    process.exit = ((code?: number) => {
+      const exitCode = code ?? 0;
+      captureTelemetry(exitCode).then(() => {
+        originalExit(exitCode);
+      }).catch(() => {
+        originalExit(exitCode);
+      });
+    }) as any;
+
+    try {
+      if (opts.yes || opts.dryRun) {
+        // Non-interactive mode
+        const { runNonInteractiveInit } = await import('./init-noninteractive');
+        await runNonInteractiveInit(opts);
+      } else {
+        // Interactive wizard (unchanged)
+        const { runInitWizard } = await import('./init-wizard');
+        await runInitWizard();
+      }
+
+      await captureTelemetry(0);
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      await captureTelemetry(1, errorMsg);
+      throw err;
+    } finally {
+      process.exit = originalExit;
     }
   });
 
@@ -730,6 +814,28 @@ program
   .option('--timeout <ms>', 'Timeout in milliseconds', '15000')
   .option('--retries <n>', 'Number of retries on failure', '2')
   .action(async (opts) => {
+    let trackMode = opts.mode || 'strict';
+    let trackFlowCount = 0;
+    let trackDurationMs = 0;
+    let trackHasConfig = false;
+
+    const finishTelemetryAndExit = async (exitCode: number, error?: string) => {
+      try {
+        trackEvent('cli_run', {
+          mode: trackMode,
+          flow_count: trackFlowCount,
+          has_config: trackHasConfig,
+          passed: exitCode === 0,
+          duration_ms: trackDurationMs,
+          error: error || (exitCode !== 0 ? (exitCode === 1 ? 'verification_failed' : 'exit_non_zero') : undefined),
+        });
+        await flushTelemetry();
+      } catch {
+        // ignore telemetry errors
+      }
+      process.exit(exitCode);
+    };
+
     refreshRuntimePortsFromContainerIfRunning();
     const apiBase = await resolveApiBase();
     const runtimePorts = getRuntimePorts();
@@ -744,12 +850,13 @@ program
     if (fs.existsSync(configPath)) {
       config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
       didLoadConfig = true;
+      trackHasConfig = true;
     } else if (opts.config) {
       if (isJsonMode(opts)) {
         emitJsonError({ error: 'config_not_found', message: `Config file not found: ${configPath}`, hint: 'Run: verfix init --yes (non-interactive) or verfix init (interactive)' });
       }
       console.error(chalk.red(`Config file not found: ${configPath}`));
-      process.exit(2);
+      await finishTelemetryAndExit(2, 'config_not_found');
     }
 
     if (didLoadConfig) {
@@ -760,7 +867,7 @@ program
           emitJsonError({ error: 'config_validation_failed', message: e.message, hint: 'Fix the config file to match the schema.' });
         }
         console.error(chalk.red(e.message));
-        process.exit(2);
+        await finishTelemetryAndExit(2, 'config_validation_failed');
       }
     }
 
@@ -772,11 +879,13 @@ program
         emitJsonError({ error: 'flow_not_found', message: e.message, hint: 'Run: verfix flows to see available flows.' });
       }
       console.error(chalk.red(e.message));
-      process.exit(2);
+      await finishTelemetryAndExit(2, 'flow_not_found');
     }
 
     const flows = selectedFlows.length > 0 ? normalizeFlows(selectedFlows) : normalizeFlows(config?.flows || []);
     const assertions = selectedFlows.length > 0 ? undefined : config.assertions;
+
+    trackFlowCount = flows.length > 0 ? flows.length : (assertions ? assertions.length : 0);
 
     const baseUrl = opts.url || config.baseUrl || config.url;
     // Rewrite localhost → host.docker.internal so Playwright inside the
@@ -800,13 +909,15 @@ program
       retries: parseInt(opts.retries) || config.retries || 2,
     };
 
+    trackMode = payload.mode;
+
     if (!payload.url) {
       if (isJsonMode(opts)) {
         emitJsonError({ error: 'missing_url', message: '--url is required (or set baseUrl in config file)', hint: 'Pass --url <url> or add baseUrl to your config.' });
       }
       console.error(chalk.red('Error: --url is required (or set baseUrl in config file)'));
       if (activeProxy) activeProxy.close();
-      process.exit(2);
+      await finishTelemetryAndExit(2, 'missing_url');
     }
 
     if (opts.output === 'pretty') {
@@ -834,7 +945,7 @@ program
       }
       console.error(chalk.red(e.message));
       if (activeProxy) activeProxy.close();
-      process.exit(2);
+      await finishTelemetryAndExit(2, 'submit_failed');
     }
 
     // Poll for result
@@ -868,9 +979,10 @@ program
       console.error(chalk.yellow('⚠ Timed out waiting for result. Job may still be running.'));
       console.log(`  Run: verfix status ${executionId}`);
       if (activeProxy) activeProxy.close();
-      process.exit(2);
+      await finishTelemetryAndExit(2, 'poll_timeout');
     }
 
+    trackDurationMs = result.duration_ms || 0;
     const timelineUrl = buildTimelineUrl(opts.dashboard || dashboardBase, executionId);
 
     if (isJsonMode(opts)) {
@@ -887,7 +999,7 @@ program
       emitJson(jsonResult);
       scheduleBackgroundCheck(['npm', 'image']);
       if (activeProxy) activeProxy.close();
-      process.exit(jsonResult.exit_code);
+      await finishTelemetryAndExit(jsonResult.exit_code);
     }
 
     // Pretty output
@@ -940,7 +1052,7 @@ program
       scheduleBackgroundCheck(['npm', 'image']);
     }
     if (activeProxy) activeProxy.close();
-    process.exit(result.passed ? 0 : 1);
+    await finishTelemetryAndExit(result.passed ? 0 : 1);
   });
 
 // ─── list command ─────────────────────────────────────────────────────────────
