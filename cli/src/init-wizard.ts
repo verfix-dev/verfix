@@ -4,7 +4,7 @@ import chalk from 'chalk';
 import ora from 'ora';
 import { input, select, checkbox, confirm, password } from '@inquirer/prompts';
 import {
-  DOCKER_IMAGE, CONTAINER_NAME, DEFAULT_CONFIG,
+  CONTAINER_NAME, DEFAULT_CONFIG, getBrowserMode,
 } from './constants';
 import {
   generateAgentsSection,
@@ -23,7 +23,11 @@ import { getRuntimePorts } from './runtime';
 import { PROVIDER_REGISTRY, getAllProviders, getProviderChoices, detectProviderFromModel } from './providers/registry';
 import type { ProviderId } from './providers/types';
 import { detectLegacyConfig } from './config/migration';
-import { saveAIConfig, updateAIConfigInFile } from './config/loader';
+import { saveAIConfig, updateAIConfigInFile, parseEnvFile } from './config/loader';
+import {
+  extractWorkerFiles, ensurePlaywrightBrowser, startLocalWorker, isWorkerRunning,
+} from './worker-runner';
+import os from 'os';
 
 // ─── Port scanning ───────────────────────────────────────────────────────────
 
@@ -330,6 +334,16 @@ export async function runInitWizard(): Promise<void> {
   console.log(chalk.gray('  ─────────────────────────────'));
   console.log('');
 
+  // ── Auto-detect and recommend Browser Mode ──
+  const browserMode = getBrowserMode();
+  const platformName = os.platform() === 'darwin' ? 'macOS' : os.platform() === 'win32' ? 'Windows' : 'Linux';
+  if (browserMode === 'host') {
+    console.log(chalk.blue(`  ℹ  Detected OS: ${platformName}. Recommending 'host' (hybrid) browser mode for native localhost access.`));
+  } else {
+    console.log(chalk.blue(`  ℹ  Detected OS: Linux. Recommending 'container' browser mode (host networking supported natively).`));
+  }
+  console.log('');
+
   // ── Step 1: Check Docker ──
   const dockerSpinner = ora('Checking Docker...').start();
   if (!isDockerRunning()) {
@@ -346,14 +360,42 @@ export async function runInitWizard(): Promise<void> {
   let aiModel = '';
   let aiProvider: ProviderId | undefined;
 
+  // ── Step 2.5: Browser Mode Preference ──
+  console.log('');
+  const isLinux = os.platform() === 'linux';
+  const recommendedMode = isLinux ? 'container' : 'host';
+  const selectedBrowserMode = await select({
+    message: 'Select browser execution mode:',
+    choices: [
+      {
+        name: `host - run workers on your host machine for native localhost access${!isLinux ? ` (Recommended on ${platformName})` : ''}`,
+        value: 'host',
+      },
+      {
+        name: `container - run workers inside Docker${isLinux ? ' (Recommended on Linux)' : ''}`,
+        value: 'container',
+      },
+    ],
+    default: recommendedMode,
+  }) as 'host' | 'container';
+
   if (aiConfig) {
     aiProvider = aiConfig.provider;
     aiApiKey = aiConfig.apiKey;
     aiModel = aiConfig.model;
 
     // Persist to .verfix/.env
-    saveAIConfig(cwd, aiProvider, aiModel, aiApiKey);
+    saveAIConfig(cwd, aiProvider, aiModel, aiApiKey, selectedBrowserMode);
     console.log(chalk.green('  ✓ AI configuration saved'));
+  } else {
+    // Save browser mode even if AI setup is skipped
+    const envDir = path.join(cwd, '.verfix');
+    if (!fs.existsSync(envDir)) fs.mkdirSync(envDir, { recursive: true });
+    const env = parseEnvFile(cwd);
+    env['VERFIX_BROWSER_MODE'] = selectedBrowserMode;
+    const lines = Object.entries(env).map(([key, val]) => `${key}=${val}`);
+    fs.writeFileSync(path.join(envDir, '.env'), lines.join('\n') + '\n', 'utf-8');
+    console.log(chalk.green('  ✓ Browser mode configuration saved'));
   }
 
   // ── Step 3: Pull + Start Runtime ──
@@ -362,6 +404,24 @@ export async function runInitWizard(): Promise<void> {
   if (state?.status === 'running') {
     syncRuntimePortsFromContainer();
     console.log(chalk.green('  ✓ Verfix runtime is already running'));
+
+    if (getBrowserMode() === 'host') {
+      const workerState = isWorkerRunning();
+      if (workerState.running) {
+        console.log(chalk.green(`  ✓ Local worker is already running (PID: ${workerState.pid})`));
+      } else {
+        const workerSpinner = ora('Starting local worker...').start();
+        try {
+          extractWorkerFiles();
+          ensurePlaywrightBrowser();
+          const redisPort = process.env.REDIS_PORT ? parseInt(process.env.REDIS_PORT, 10) : 6379;
+          const workerPid = startLocalWorker(redisPort);
+          workerSpinner.succeed(`Local worker started on host (PID: ${workerPid})`);
+        } catch (err: any) {
+          workerSpinner.fail(`Failed to start local worker: ${err.message}`);
+        }
+      }
+    }
   } else {
     const pullSpinner = ora('Pulling verfix runtime (this takes ~2 min on first run)...').start();
     try {
@@ -382,6 +442,20 @@ export async function runInitWizard(): Promise<void> {
         throw new Error('Runtime started but health check failed');
       }
       startSpinner.succeed('Runtime started and healthy');
+
+      if (getBrowserMode() === 'host') {
+        const workerSpinner = ora('Setting up local worker environment...').start();
+        try {
+          extractWorkerFiles();
+          ensurePlaywrightBrowser();
+          workerSpinner.text = 'Starting local worker...';
+          const redisPort = process.env.REDIS_PORT ? parseInt(process.env.REDIS_PORT, 10) : 6379;
+          const workerPid = startLocalWorker(redisPort);
+          workerSpinner.succeed(`Local worker started on host (PID: ${workerPid})`);
+        } catch (err: any) {
+          workerSpinner.fail(`Failed to start local worker: ${err.message}`);
+        }
+      }
     } catch (e: any) {
       startSpinner.fail(`Failed to start runtime: ${e.message}`);
       throw new Error(`Failed to start runtime: ${e.message}`);

@@ -1,13 +1,10 @@
 #!/bin/sh
-# verfix server startup script
-# Runs inside the single-image container: PostgreSQL → Redis → API → Workers → Dashboard
+# verfix slim server startup script
+# Runs inside the slim container: Redis → API → Workers → Dashboard
+# No PostgreSQL — the API uses embedded SQLite (file at SQLITE_PATH).
 # tini (PID 1) handles zombie reaping; we use wait-with-pid-tracking to die fast
 # if any critical service exits unexpectedly.
 set -e
-
-PG_DATA=/var/lib/postgresql/15/main
-PG_CTL=/usr/lib/postgresql/15/bin/pg_ctl
-PG_LOG=/tmp/pg.log        # /var/log is root-only; postgres user can write /tmp
 
 # ── Inject host.docker.internal on Linux (bridge mode only) ──────────────────
 # When VERFIX_HOST_NETWORK=1 the container uses --network=host.
@@ -17,7 +14,13 @@ PG_LOG=/tmp/pg.log        # /var/log is root-only; postgres user can write /tmp
 #   On plain Linux bridge we inject it ourselves from the routing table.
 if [ "${VERFIX_HOST_NETWORK}" != "1" ]; then
   if ! grep -q "host.docker.internal" /etc/hosts 2>/dev/null; then
+    # Primary: use the default route gateway (works for standard Docker bridge).
     HOST_GW=$(ip route show default 2>/dev/null | awk '{print $3}' | head -1)
+    # Fallback: on custom bridge networks, the default route gateway may not be
+    # the host. Try the docker0 interface IP as a fallback.
+    if [ -z "$HOST_GW" ]; then
+      HOST_GW=$(ip -4 addr show docker0 2>/dev/null | grep -oP '(?<=inet\s)\d+(\.\d+){3}')
+    fi
     if [ -n "$HOST_GW" ]; then
       echo "${HOST_GW}  host.docker.internal" >> /etc/hosts
       echo "✅ host.docker.internal → ${HOST_GW} (injected into /etc/hosts)"
@@ -32,87 +35,22 @@ else
 fi
 
 # ── Env defaults (all overridable via docker run -e / docker-compose env) ─────
-POSTGRES_USER="${POSTGRES_USER:-verfix}"
-POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-verfix}"
-POSTGRES_DB="${POSTGRES_DB:-verifydb}"
 REDIS_PORT="${REDIS_PORT:-6379}"
 API_PORT="${API_PORT:-3611}"
 DASHBOARD_PORT="${DASHBOARD_PORT:-3610}"
 
-export DATABASE_URL="${DATABASE_URL:-postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@localhost:5432/${POSTGRES_DB}?sslmode=disable}"
 export REDIS_HOST="${REDIS_HOST:-localhost}"
 export REDIS_PORT="${REDIS_PORT}"
+export SQLITE_PATH="${SQLITE_PATH:-/app/data/verfix.db}"
 
-# ── Helper: wait for a TCP port to be accepting connections ───────────────────
-wait_for_port() {
-  local name="$1"
-  local port="$2"
-  local retries=30
-  echo "⏳ Waiting for ${name} on port ${port}..."
-  while [ "$retries" -gt 0 ]; do
-    if curl -sf "http://localhost:${port}" >/dev/null 2>&1; then
-      echo "✅ ${name} is ready"
-      return 0
-    fi
-    retries=$((retries - 1))
-    sleep 1
-  done
-  echo "❌ ${name} failed to start on port ${port}" >&2
-  exit 1
-}
-
-# ── 1. PostgreSQL ─────────────────────────────────────────────────────────────
-echo ""
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "  Starting PostgreSQL 15..."
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-
-# Ensure correct ownership and permissions for the data volume
-echo "⚙  Configuring permissions for Postgres data directory..."
-mkdir -p "${PG_DATA}" || { echo "❌ Failed to create Postgres data directory" >&2; exit 1; }
-chown -R postgres:postgres "${PG_DATA}" || { echo "❌ Failed to set Postgres data directory ownership" >&2; exit 1; }
-chmod 700 "${PG_DATA}" || { echo "❌ Failed to set Postgres data directory permissions" >&2; exit 1; }
-
-# Clean up any stale postmaster.pid lock file if it exists (e.g. from an abrupt container stop)
-if [ -f "${PG_DATA}/postmaster.pid" ]; then
-  echo "🧹 Removing stale PostgreSQL pid file..."
-  rm -f "${PG_DATA}/postmaster.pid"
-fi
-
-# If the data dir was wiped (fresh volume), re-initialise
-if [ ! -f "${PG_DATA}/PG_VERSION" ]; then
-  echo "⚙  Re-initialising Postgres data directory..."
-  su -s /bin/sh postgres -c "/usr/lib/postgresql/15/bin/initdb -D ${PG_DATA}"
-  su -s /bin/sh postgres -c "
-    ${PG_CTL} -D ${PG_DATA} -l ${PG_LOG} start
-    psql -c \"CREATE USER ${POSTGRES_USER} WITH PASSWORD '${POSTGRES_PASSWORD}' CREATEDB;\"
-    psql -c \"CREATE DATABASE ${POSTGRES_DB} OWNER ${POSTGRES_USER};\"
-  "
-else
-  su -s /bin/sh postgres -c "${PG_CTL} -D ${PG_DATA} -l ${PG_LOG} start"
-fi
-
-# Wait for Postgres to be ready
-retries=20
-while [ "$retries" -gt 0 ]; do
-  if su -s /bin/sh postgres -c "psql -c '\q'" >/dev/null 2>&1; then
-    echo "✅ PostgreSQL is ready"
-    break
-  fi
-  retries=$((retries - 1))
-  sleep 1
-done
-
-if [ "$retries" -eq 0 ]; then
-  echo "❌ PostgreSQL failed to start" >&2
-  exit 1
-fi
-
-# ── 2. Redis ──────────────────────────────────────────────────────────────────
+# ── 1. Redis ──────────────────────────────────────────────────────────────────
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "  Starting Redis..."
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+# SQLite data dir must exist before the API starts (it opens the file directly).
+mkdir -p "$(dirname "${SQLITE_PATH}")"
 
 redis-server --daemonize yes --port "${REDIS_PORT}" \
   --save "" \
@@ -131,7 +69,12 @@ while [ "$retries" -gt 0 ]; do
   sleep 1
 done
 
-# ── 3. Go API ─────────────────────────────────────────────────────────────────
+if [ "$retries" -eq 0 ]; then
+  echo "❌ Redis failed to start" >&2
+  exit 1
+fi
+
+# ── 2. Go API ─────────────────────────────────────────────────────────────────
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "  Starting Verfix API (Go)..."
@@ -154,10 +97,15 @@ while [ "$retries" -gt 0 ]; do
   sleep 1
 done
 
-# ── 4. Workers (TypeScript, compiled to JS) ───────────────────────────────────
+if [ "$retries" -eq 0 ]; then
+  echo "❌ Go API failed to start" >&2
+  exit 1
+fi
+
+# ── 3. Workers (TypeScript, compiled to JS) ───────────────────────────────────
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "  Starting Workers (Playwright/BullMQ)..."
+echo "  Starting Workers (BullMQ)..."
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 if [ "${SKIP_WORKERS}" = "1" ]; then
@@ -172,7 +120,7 @@ else
   echo "✅ Workers started (PID ${WORKERS_PID})"
 fi
 
-# ── 5. Dashboard (Next.js standalone) ────────────────────────────────────────
+# ── 4. Dashboard (Next.js standalone) ────────────────────────────────────────
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "  Starting Dashboard (Next.js)..."
@@ -196,11 +144,12 @@ done
 # ── All services started ──────────────────────────────────────────────────────
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "  🚀 Verfix Server is running!"
+echo "  🚀 Verfix Slim Server is running!"
 echo ""
 echo "    API:        http://localhost:${API_PORT}/api/v1"
 echo "    Dashboard:  http://localhost:${DASHBOARD_PORT}"
 echo "    Health:     http://localhost:${API_PORT}/api/v1/health"
+echo "    Database:   SQLite (${SQLITE_PATH})"
 if [ "${SKIP_WORKERS}" = "1" ]; then
   echo "    Workers:    running on host (hybrid mode)"
 fi

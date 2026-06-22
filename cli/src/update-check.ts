@@ -20,6 +20,7 @@ import path from 'path';
 import { spawnSync, spawn } from 'child_process';
 import chalk from 'chalk';
 import os from 'os';
+import { getDockerImage } from './constants';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -27,6 +28,11 @@ const CACHE_DIR = path.join(os.homedir(), '.verfix');
 const NPM_CACHE_FILE = path.join(CACHE_DIR, 'npm-check.json');
 const IMAGE_CACHE_FILE = path.join(CACHE_DIR, 'image-check.json');
 const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+// Resolve the Docker image that the user is actually running (slim or full)
+// based on the current browser mode. This ensures update checks query the
+// correct registry tag for the image the user has pulled.
+const DOCKER_IMAGE = getDockerImage();
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -107,8 +113,6 @@ function getLocalImageDigest(image: string): string | null {
     return null;
   }
 }
-
-const DOCKER_IMAGE = 'ghcr.io/verfix-dev/verfix-server:latest';
 
 // ─── Banner rendering ─────────────────────────────────────────────────────────
 

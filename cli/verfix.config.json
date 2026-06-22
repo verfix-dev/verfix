@@ -1,0 +1,9 @@
+{
+  "baseUrl": "http://localhost:3000",
+  "mode": "assisted",
+  "flows": [],
+  "ai": {
+    "provider": "gemini",
+    "model": "gemini-3.5-flash"
+  }
+}

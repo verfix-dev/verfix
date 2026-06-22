@@ -24,3 +24,5 @@ workers/artifacts/
 .DS_Store
 
 /ignore
+**/.kilo
+**/.verfix

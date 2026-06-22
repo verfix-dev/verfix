@@ -4,10 +4,14 @@
 
 import { execSync, spawnSync } from 'child_process';
 import os from 'os';
+import fs from 'fs';
 import {
-  DOCKER_IMAGE,
+  getDockerImage,
+  getDataVolume,
   CONTAINER_NAME,
   VOLUMES,
+  getBrowserMode,
+  HOST_ARTIFACTS_DIR,
 } from './constants';
 import { getRuntimePorts, resolveAvailableRuntimePorts, saveRuntimePorts, type RuntimePorts } from './runtime';
 
@@ -203,6 +207,43 @@ export async function startContainer(opts?: DockerRunOptions): Promise<'already_
   envArgs.push('-e', `DASHBOARD_PORT=${resolvedPorts.dashboardPort}`);
 
   const hostNetwork = isHostNetworkMode();
+  const browserMode = getBrowserMode();
+
+  // In host browser mode, tell container to skip starting workers
+  // (they'll run on the host with direct localhost access)
+  if (browserMode === 'host') {
+    envArgs.push('-e', 'SKIP_WORKERS=1');
+  }
+
+  // ── Detect host-side Redis on port 6379 (bridge mode only) ──────────────────
+  // On Linux (host network), the container shares the host loopback so Redis is
+  // accessible without any port mapping. On Mac/Windows bridge mode, the
+  // container's Redis needs a port mapping so host workers can reach it.
+  // If Redis is already running on the host at 6379, skip the mapping to avoid
+  // a "port is already allocated" failure.
+  let needsRedisMapping = false;
+  if (!hostNetwork && browserMode === 'host') {
+    try {
+      const net = require('net');
+      const socket = new net.Socket();
+      const hasRedis = await new Promise<boolean>((resolve) => {
+        socket.connect(6379, '127.0.0.1', () => {
+          socket.destroy();
+          resolve(true);
+        });
+        socket.on('error', () => {
+          socket.destroy();
+          resolve(false);
+        });
+      });
+      if (!hasRedis) {
+        needsRedisMapping = true;
+      }
+    } catch {
+      // net module unavailable — conservative: assume we need the mapping
+      needsRedisMapping = true;
+    }
+  }
 
   // Signal to workers inside the container whether they are on host network.
   // On host network: localhost == host's localhost, no URL rewriting needed.
@@ -224,16 +265,33 @@ export async function startContainer(opts?: DockerRunOptions): Promise<'already_
         '--add-host=host.docker.internal:host-gateway',
         '-p', `${resolvedPorts.apiPort}:${resolvedPorts.apiPort}`,
         '-p', `${resolvedPorts.dashboardPort}:${resolvedPorts.dashboardPort}`,
+        // In host browser mode, expose Redis so host workers can connect.
+        // Bound to 127.0.0.1 only — not accessible from other machines.
+        // Skipped if host already has Redis on 6379 to avoid port conflicts.
+        ...(needsRedisMapping ? ['-p', '127.0.0.1:6379:6379'] : []),
       ];
+
+  // In host browser mode, use a bind mount so both host workers and
+  // container API can access the same artifacts directory.
+  // We append :z on Linux so SELinux (e.g. on Fedora) allows the container to read it.
+  const selinuxFlag = os.platform() === 'linux' ? ':z' : '';
+  const artifactsVolume = browserMode === 'host'
+    ? `${HOST_ARTIFACTS_DIR}:/app/workers/artifacts${selinuxFlag}`
+    : VOLUMES.artifacts;
+
+  // Ensure host artifacts dir exists for bind mount
+  if (browserMode === 'host' && !fs.existsSync(HOST_ARTIFACTS_DIR)) {
+    fs.mkdirSync(HOST_ARTIFACTS_DIR, { recursive: true });
+  }
 
   const args = [
     'run', '-d',
     '--name', CONTAINER_NAME,
     ...networkArgs,
-    '-v', VOLUMES.data,
-    '-v', VOLUMES.artifacts,
+    '-v', getDataVolume(),
+    '-v', artifactsVolume,
     ...envArgs,
-    DOCKER_IMAGE,
+    getDockerImage(),
   ];
 
   const result = spawnSync('docker', args, { stdio: 'pipe' });
@@ -241,8 +299,9 @@ export async function startContainer(opts?: DockerRunOptions): Promise<'already_
   if (result.status !== 0) {
     const stderr = result.stderr?.toString().trim() || '';
     if (stderr.includes('port is already allocated') || stderr.includes('address already in use')) {
+      const redisNote = needsRedisMapping ? ' (including Redis on 6379)' : '';
       throw new Error(
-        `Port conflict: ports ${resolvedPorts.apiPort} or ${resolvedPorts.dashboardPort} are already in use.\n` +
+        `Port conflict: ports ${resolvedPorts.apiPort} or ${resolvedPorts.dashboardPort}${redisNote} are already in use.\n` +
         `Stop whatever is using those ports, or use 'verfix stop' first.`
       );
     }
@@ -276,11 +335,12 @@ export function stopContainer(): boolean {
  * Pull the latest verfix image.
  */
 export function pullImage(): void {
-  const result = spawnSync('docker', ['pull', DOCKER_IMAGE], {
+  const image = getDockerImage();
+  const result = spawnSync('docker', ['pull', image], {
     stdio: 'inherit',
   });
   if (result.status !== 0) {
-    throw new Error(`Failed to pull image: ${DOCKER_IMAGE}`);
+    throw new Error(`Failed to pull image: ${image}`);
   }
 }
 
@@ -288,7 +348,8 @@ export function pullImage(): void {
  * Pull image if not already present locally.
  */
 export function pullImageIfMissing(): boolean {
-  const result = spawnSync('docker', ['image', 'inspect', DOCKER_IMAGE], {
+  const image = getDockerImage();
+  const result = spawnSync('docker', ['image', 'inspect', image], {
     stdio: 'pipe',
   });
   if (result.status !== 0) {

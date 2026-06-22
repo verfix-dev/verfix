@@ -8,8 +8,11 @@ import Ajv from 'ajv';
 import fs from 'fs';
 import path from 'path';
 import {
-  DOCKER_IMAGE, CONTAINER_NAME, DEFAULT_CONFIG, HEALTH_ENDPOINT,
+  CONTAINER_NAME, DEFAULT_CONFIG, HEALTH_ENDPOINT, getBrowserMode,
 } from './constants';
+import {
+  extractWorkerFiles, ensurePlaywrightBrowser, startLocalWorker, stopLocalWorker, isWorkerRunning, getWorkerHeadlessState,
+} from './worker-runner';
 
 import {
   isDockerInstalled, isDockerRunning, getContainerState,
@@ -75,7 +78,15 @@ function refreshRuntimePortsFromContainerIfRunning(): void {
 program
   .command('start')
   .description('Start the Verfix runtime container')
-  .action(async () => {
+  .option('--show-browser', 'Show the browser window during verification runs (hybrid mode only)', false)
+  .action(async (opts) => {
+    if (opts.showBrowser) {
+      if (getBrowserMode() !== 'host') {
+        console.warn(chalk.yellow('⚠ --show-browser is only supported in hybrid mode. Ignoring.'));
+      } else {
+        process.env.PLAYWRIGHT_HEADLESS = 'false';
+      }
+    }
     trackEvent('cli_start', { status: 'attempted' });
     if (!isDockerInstalled()) {
       console.error(chalk.red('✗ Docker is not installed. Install Docker from https://docker.com'));
@@ -98,6 +109,32 @@ program
         syncRuntimePortsFromContainer();
         const runningPorts = getRuntimePorts();
         spinner.succeed('Verfix runtime is already running');
+
+        if (getBrowserMode() === 'host') {
+          const workerState = isWorkerRunning();
+          if (workerState.running && !opts.showBrowser) {
+            console.log(`    Worker:    running on host (PID: ${workerState.pid})`);
+          } else {
+            try {
+              extractWorkerFiles();
+              ensurePlaywrightBrowser();
+              if (workerState.running && opts.showBrowser) {
+                console.log('    Worker:    restarting local worker with browser visible...');
+              } else {
+                console.log('    Worker:    starting local worker...');
+              }
+              const redisPort = process.env.REDIS_PORT ? parseInt(process.env.REDIS_PORT, 10) : 6379;
+              const workerPid = startLocalWorker(redisPort);
+              console.log(`    Worker:    started on host (PID: ${workerPid})`);
+            } catch (err: any) {
+              console.error(chalk.red(`    Worker:    failed to start: ${err.message}`));
+              trackEvent('cli_start', { status: 'worker_failed', error: err.message });
+              await flushTelemetry();
+              process.exit(2);
+            }
+          }
+        }
+
         console.log(`    API:       ${chalk.cyan(`http://localhost:${runningPorts.apiPort}`)}`);
         console.log(`    Dashboard: ${chalk.cyan(`http://localhost:${runningPorts.dashboardPort}`)}`);
         showPendingNotifications();
@@ -118,6 +155,23 @@ program
 
       spinner.succeed('Verfix runtime is running');
       const startedPorts = getRuntimePorts();
+
+      if (getBrowserMode() === 'host') {
+        try {
+          extractWorkerFiles();
+          ensurePlaywrightBrowser();
+          console.log('    Worker:    starting local worker...');
+          const redisPort = process.env.REDIS_PORT ? parseInt(process.env.REDIS_PORT, 10) : 6379;
+          const workerPid = startLocalWorker(redisPort);
+          console.log(`    Worker:    started on host (PID: ${workerPid})`);
+        } catch (err: any) {
+          console.error(chalk.red(`    Worker:    failed to start: ${err.message}`));
+          trackEvent('cli_start', { status: 'worker_failed', error: err.message });
+          await flushTelemetry();
+          process.exit(2);
+        }
+      }
+
       console.log(`    API:       ${chalk.cyan(`http://localhost:${startedPorts.apiPort}`)}`);
       console.log(`    Dashboard: ${chalk.cyan(`http://localhost:${startedPorts.dashboardPort}`)}`);
       showPendingNotifications();
@@ -138,14 +192,31 @@ program
   .command('stop')
   .description('Stop the Verfix runtime container')
   .action(() => {
+    let stoppedContainer = false;
     try {
-      const stopped = stopContainer();
-      if (stopped) {
-        console.log(chalk.green('✓ Runtime stopped'));
-      } else {
-        console.log(chalk.gray('Runtime is not running'));
-      }
+      stoppedContainer = stopContainer();
     } catch (e: any) {
+      // ignore
+    }
+
+    let stoppedWorker = false;
+    if (getBrowserMode() === 'host') {
+      try {
+        stoppedWorker = stopLocalWorker();
+      } catch (e: any) {
+        // ignore
+      }
+    }
+
+    if (stoppedContainer || stoppedWorker) {
+      if (stoppedContainer && stoppedWorker) {
+        console.log(chalk.green('✓ Runtime container and local worker stopped'));
+      } else if (stoppedContainer) {
+        console.log(chalk.green('✓ Runtime container stopped'));
+      } else {
+        console.log(chalk.green('✓ Local worker stopped'));
+      }
+    } else {
       console.log(chalk.gray('Runtime is not running'));
     }
   });
@@ -192,12 +263,17 @@ program
     const dashReachable = await isDashboardReachable();
 
     if (isJsonMode(opts)) {
+      const browserMode = getBrowserMode();
+      const workerState = browserMode === 'host' ? isWorkerRunning() : null;
       emitJson({
         runtime: runtimeStatus,
         api: apiHealthy ? 'healthy' : 'unreachable',
         api_url: `http://localhost:${runtimePorts.apiPort}`,
         dashboard: dashReachable ? 'healthy' : 'unreachable',
         dashboard_url: `http://localhost:${runtimePorts.dashboardPort}`,
+        browser_mode: browserMode,
+        worker: workerState ? (workerState.running ? 'running' : 'stopped') : 'container',
+        worker_pid: workerState?.pid || null,
         image: state?.image || null,
         uptime: state?.startedAt && runtimeStatus === 'running' ? formatUptime(state.startedAt) : null,
       });
@@ -208,6 +284,16 @@ program
     console.log(`  ${chalk.bold('Runtime:')}    ${runtimeStatus === 'running' ? chalk.green(runtimeStatus) : chalk.red(runtimeStatus)}`);
     console.log(`  ${chalk.bold('API:')}        ${apiHealthy ? chalk.green('healthy') : chalk.red('unreachable')}   (http://localhost:${runtimePorts.apiPort})`);
     console.log(`  ${chalk.bold('Dashboard:')}  ${dashReachable ? chalk.green('healthy') : chalk.red('unreachable')}   (http://localhost:${runtimePorts.dashboardPort})`);
+    
+    const browserMode = getBrowserMode();
+    if (browserMode === 'host') {
+      const workerState = isWorkerRunning();
+      console.log(`  ${chalk.bold('Browser Mode:')} host (hybrid)`);
+      console.log(`  ${chalk.bold('Worker:')}      ${workerState.running ? chalk.green('running') : chalk.red('stopped')}${workerState.pid ? ` (PID: ${workerState.pid})` : ''}`);
+    } else {
+      console.log(`  ${chalk.bold('Browser Mode:')} container`);
+    }
+
     if (state?.image) {
       console.log(`  ${chalk.bold('Image:')}      ${state.image}`);
     }
@@ -264,6 +350,13 @@ program
 
     // Stop existing container if running
     stopContainer();
+    if (getBrowserMode() === 'host') {
+      try {
+        stopLocalWorker();
+      } catch (e: any) {
+        // ignore
+      }
+    }
 
     const startSpinner = ora('Starting runtime...').start();
     try {
@@ -276,6 +369,21 @@ program
       }
       startSpinner.succeed('Verfix runtime is running (updated)');
       const startedPorts = getRuntimePorts();
+
+      if (getBrowserMode() === 'host') {
+        try {
+          extractWorkerFiles();
+          ensurePlaywrightBrowser();
+          console.log('    Worker:    starting local worker...');
+          const redisPort = process.env.REDIS_PORT ? parseInt(process.env.REDIS_PORT, 10) : 6379;
+          const workerPid = startLocalWorker(redisPort);
+          console.log(`    Worker:    started on host (PID: ${workerPid})`);
+        } catch (err: any) {
+          console.error(chalk.red(`    Worker:    failed to start: ${err.message}`));
+          process.exit(2);
+        }
+      }
+
       console.log(`    API:       ${chalk.cyan(`http://localhost:${startedPorts.apiPort}`)}`);
       console.log(`    Dashboard: ${chalk.cyan(`http://localhost:${startedPorts.dashboardPort}`)}`);
       // Clear stale image cache — user just updated, so no banner needed next run
@@ -801,7 +909,12 @@ program
   .option('--dashboard <url>', 'Dashboard base URL for timeline links')
   .option('--timeout <ms>', 'Timeout in milliseconds', '15000')
   .option('--retries <n>', 'Number of retries on failure', '2')
+  .option('--show-browser', 'Show the browser window during verification runs (hybrid mode only)', false)
   .action(async (opts) => {
+    if (opts.showBrowser && getBrowserMode() !== 'host') {
+      console.warn(chalk.yellow('⚠ --show-browser is only supported in hybrid mode. Ignoring.'));
+    }
+
     let trackMode = opts.mode || 'strict';
     let trackFlowCount = 0;
     let trackDurationMs = 0;
@@ -876,6 +989,38 @@ program
     trackFlowCount = flows.length > 0 ? flows.length : (assertions ? assertions.length : 0);
 
     const baseUrl = opts.url || config.baseUrl || config.url;
+
+    // If browser mode is host, make sure the local worker is running with the requested headfulness
+    if (getBrowserMode() === 'host') {
+      const workerState = isWorkerRunning();
+      const currentHeadless = getWorkerHeadlessState();
+      const requestedHeadless = !opts.showBrowser;
+
+      if (!workerState.running || currentHeadless !== requestedHeadless) {
+        if (!isJsonMode(opts)) {
+          if (workerState.running) {
+            console.log(chalk.yellow(`  ⚠  Restarting local worker to run in ${requestedHeadless ? 'headless' : 'headful'} mode...`));
+          } else {
+            console.log(chalk.yellow('  ⚠  Local worker is not running. Starting it now...'));
+          }
+        }
+        try {
+          extractWorkerFiles();
+          ensurePlaywrightBrowser();
+          // Pass the requested headless env variable
+          process.env.PLAYWRIGHT_HEADLESS = String(requestedHeadless);
+          const redisPort = process.env.REDIS_PORT ? parseInt(process.env.REDIS_PORT, 10) : 6379;
+          startLocalWorker(redisPort);
+        } catch (err: any) {
+          if (isJsonMode(opts)) {
+            emitJsonError({ error: 'worker_start_failed', message: `Local worker failed to start: ${err.message}`, hint: 'Try starting the runtime explicitly: verfix start' });
+          }
+          console.error(chalk.red(`  ✗ Failed to start local worker: ${err.message}`));
+          await finishTelemetryAndExit(2, 'worker_start_failed');
+        }
+      }
+    }
+
     // Rewrite localhost → host.docker.internal so Playwright inside the
     // container can reach the user's app running on the host machine.
     const resolved = await resolveJobUrl(baseUrl);
@@ -1092,6 +1237,8 @@ async function resolveJobUrl(url: string): Promise<{ url: string; rewritten: boo
   if (!url) return { url, rewritten: false };
   // Host network mode (Linux): localhost resolves correctly inside container.
   if (isHostNetworkMode()) return { url, rewritten: false };
+  // Host browser mode: workers run on the host, so localhost is reachable natively.
+  if (getBrowserMode() === 'host') return { url, rewritten: false };
   
   // Bridge mode (Mac/Windows): intercept localhost / 127.0.0.1
   const match = url.match(/^(https?:\/\/)(localhost|127\.0\.0\.1)(:\d+)?(.*)$/);
