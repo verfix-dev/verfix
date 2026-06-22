@@ -1,0 +1,136 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Stage 1 — Build Go API
+# go.mod specifies Go 1.22; CGO_ENABLED=0 produces a static binary that
+# runs without any libc in the final image.
+# ─────────────────────────────────────────────────────────────────────────────
+FROM golang:1.22-alpine AS api-builder
+
+WORKDIR /build/api
+COPY api/go.mod api/go.sum ./
+RUN go mod download
+
+COPY api/ ./
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+    go build -ldflags="-s -w" -trimpath -o /verfix-api .
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Stage 2 — Build Next.js Dashboard (standalone mode)
+# next.config.ts is patched to add output:'standalone' at build time so devs
+# don't have to change their local config. Idempotent if already set.
+# ─────────────────────────────────────────────────────────────────────────────
+FROM node:20-alpine AS dashboard-builder
+
+WORKDIR /build/dashboard
+COPY dashboard/package*.json ./
+RUN npm ci --ignore-scripts || npm ci --ignore-scripts || npm ci --ignore-scripts
+
+COPY cli/ /build/cli/
+COPY dashboard/ ./
+
+# Inject output:'standalone' into next.config.ts if not already present.
+# Written as a single-line RUN so Docker's parser doesn't misread JS as instructions.
+RUN node -e "var fs=require('fs');var s=fs.readFileSync('next.config.ts','utf8');if(!s.includes(\"output: 'standalone'\"))fs.writeFileSync('next.config.ts',s.replace('const nextConfig: NextConfig = {',\"const nextConfig: NextConfig = {\\n  output: 'standalone',\"));console.log('next.config.ts: standalone output enabled');"
+
+ENV NEXT_TELEMETRY_DISABLED=1
+RUN npm run build
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Stage 3 — Compile Workers TypeScript → JavaScript
+# workers/tsconfig.json has no outDir — we patch it before compiling so
+# ts-node is not needed at runtime (only compiled JS ships to final image).
+# ─────────────────────────────────────────────────────────────────────────────
+FROM node:20-alpine AS workers-builder
+
+WORKDIR /build/workers
+COPY workers/package*.json ./
+RUN npm ci --ignore-scripts || npm ci --ignore-scripts || npm ci --ignore-scripts
+
+COPY workers/ ./
+
+# Patch tsconfig: add outDir + rootDir so tsc compiles src/index.ts → dist/src/index.js.
+# Single-line RUN avoids Docker misreading JS keywords (const, let) as Dockerfile instructions.
+RUN node -e "var fs=require('fs');var c=JSON.parse(fs.readFileSync('tsconfig.json','utf8'));c.compilerOptions=c.compilerOptions||{};c.compilerOptions.outDir='./dist';c.compilerOptions.rootDir='.';c.include=['src/**/*'];fs.writeFileSync('tsconfig.json',JSON.stringify(c,null,2));console.log('tsconfig.json: outDir=dist rootDir=. applied');"
+RUN npx tsc --skipLibCheck
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Stage 4 — Final runtime image (Slim - No Playwright Chromium)
+#
+# Base: node:20-slim  →  Debian 12 (bookworm-slim)
+# ─────────────────────────────────────────────────────────────────────────────
+FROM node:20-slim AS final
+
+# ── Build-time traceability args (passed by CI workflow via build-args) ────────
+ARG BUILD_SHA=unknown
+ARG BUILD_REF=unknown
+LABEL org.opencontainers.image.revision="${BUILD_SHA}" \
+      org.opencontainers.image.ref.name="${BUILD_REF}" \
+      org.opencontainers.image.source="https://github.com/verfix-dev/verfix" \
+      org.opencontainers.image.title="verfix-server-slim" \
+      org.opencontainers.image.description="Verfix slim server: API + Dashboard + Redis + PostgreSQL (no browser)"
+
+# ── System packages ───────────────────────────────────────────────────────────
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        curl \
+        tini \
+        iproute2 \
+        redis-server \
+        postgresql-15 \
+        postgresql-client-15 \
+    && rm -rf /var/lib/apt/lists/*
+
+# ── Workers: production node_modules ─────────────────────────────────────────
+WORKDIR /app/workers
+COPY workers/package*.json ./
+RUN npm ci --ignore-scripts --omit=dev || npm ci --ignore-scripts --omit=dev || npm ci --ignore-scripts --omit=dev
+
+# ── Copy compiled worker JS from builder ──────────────────────────────────────
+COPY --from=workers-builder /build/workers/dist ./dist
+
+# artifacts/ must exist before API starts — api/main.go serves ../workers/artifacts
+RUN mkdir -p /app/workers/artifacts
+
+# ── Go API (static binary, no runtime deps) ───────────────────────────────────
+COPY --from=api-builder /verfix-api /app/api/verfix-api
+RUN chmod +x /app/api/verfix-api
+
+# ── Next.js Dashboard (standalone) ───────────────────────────────────────────
+COPY --from=dashboard-builder /build/dashboard/.next/standalone /app/dashboard/
+COPY --from=dashboard-builder /build/dashboard/.next/static     /app/dashboard/.next/static
+COPY --from=dashboard-builder /build/dashboard/public           /app/dashboard/public
+
+# ── PostgreSQL: initialise cluster at image build time ───────────────────────
+USER postgres
+RUN rm -rf /var/lib/postgresql/15/main \
+    && /usr/lib/postgresql/15/bin/initdb -D /var/lib/postgresql/15/main \
+    && /usr/lib/postgresql/15/bin/pg_ctl \
+         -D /var/lib/postgresql/15/main \
+         -l /tmp/pg_init.log start \
+    && psql -v ON_ERROR_STOP=1 \
+         -c "CREATE USER verfix WITH PASSWORD 'verfix' CREATEDB;" \
+    && psql -v ON_ERROR_STOP=1 \
+         -c "CREATE DATABASE verifydb OWNER verfix;" \
+    && /usr/lib/postgresql/15/bin/pg_ctl \
+         -D /var/lib/postgresql/15/main stop
+
+USER root
+
+# ── Startup script ────────────────────────────────────────────────────────────
+COPY scripts/server-start.sh /start.sh
+RUN chmod +x /start.sh
+
+# ── Volumes ───────────────────────────────────────────────────────────────────
+VOLUME ["/var/lib/postgresql/15/main", "/app/workers/artifacts"]
+
+# ── Healthcheck ───────────────────────────────────────────────────────────────
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD sh -c 'curl -f http://localhost:${API_PORT:-3611}/api/v1/health || exit 1'
+
+# ── Ports ─────────────────────────────────────────────────────────────────────
+EXPOSE 3611 3610
+
+# tini as PID 1
+ENTRYPOINT ["/usr/bin/tini", "--"]
+CMD ["/start.sh"]

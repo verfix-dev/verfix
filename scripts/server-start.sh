@@ -160,12 +160,17 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo "  Starting Workers (Playwright/BullMQ)..."
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-# Workers use __dirname — working dir must be /app/workers so paths resolve.
-# dist/src/index.js is the compiled entry since rootDir='.', outDir='./dist'.
-cd /app/workers
-node dist/src/index.js &
-WORKERS_PID=$!
-echo "✅ Workers started (PID ${WORKERS_PID})"
+if [ "${SKIP_WORKERS}" = "1" ]; then
+  echo "⏭  Workers: skipped (SKIP_WORKERS=1 — running on host)"
+  WORKERS_PID=""
+else
+  # Workers use __dirname — working dir must be /app/workers so paths resolve.
+  # dist/src/index.js is the compiled entry since rootDir='.', outDir='./dist'.
+  cd /app/workers
+  node dist/src/index.js &
+  WORKERS_PID=$!
+  echo "✅ Workers started (PID ${WORKERS_PID})"
+fi
 
 # ── 5. Dashboard (Next.js standalone) ────────────────────────────────────────
 echo ""
@@ -196,6 +201,9 @@ echo ""
 echo "    API:        http://localhost:${API_PORT}/api/v1"
 echo "    Dashboard:  http://localhost:${DASHBOARD_PORT}"
 echo "    Health:     http://localhost:${API_PORT}/api/v1/health"
+if [ "${SKIP_WORKERS}" = "1" ]; then
+  echo "    Workers:    running on host (hybrid mode)"
+fi
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 
@@ -207,7 +215,7 @@ while true; do
     echo "❌ Go API process died — shutting down container" >&2
     exit 1
   fi
-  if ! kill -0 "$WORKERS_PID" 2>/dev/null; then
+  if [ -n "$WORKERS_PID" ] && ! kill -0 "$WORKERS_PID" 2>/dev/null; then
     echo "❌ Workers process died — shutting down container" >&2
     exit 1
   fi

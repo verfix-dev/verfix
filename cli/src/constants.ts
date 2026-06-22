@@ -1,3 +1,6 @@
+import os from 'os';
+import path from 'path';
+
 // ─── Single source of truth for static runtime constants ────────────────────
 // Dynamic ports are resolved via cli/src/runtime.ts.
 
@@ -12,6 +15,29 @@ export const VOLUMES = {
   artifacts: 'verfix-artifacts:/app/workers/artifacts',
 };
 
+export type BrowserMode = 'host' | 'container';
+
+/**
+ * Where the browser (Playwright + Chromium) runs.
+ * - 'host': Workers + browser on the host machine. All localhost ports accessible natively.
+ *           Default on macOS and Windows where --network=host doesn't reach the real host.
+ * - 'container': Workers + browser inside Docker. Default on Linux where --network=host works.
+ *
+ * Override: VERFIX_BROWSER_MODE=host|container
+ */
+export function getBrowserMode(): BrowserMode {
+  const override = process.env.VERFIX_BROWSER_MODE;
+  if (override === 'host' || override === 'container') return override;
+  return os.platform() === 'linux' ? 'container' : 'host';
+}
+
+// ─── Host-mode paths ─────────────────────────────────────────────────────────
+// When workers run on the host, these paths store extracted worker code,
+// artifacts, and the worker PID file.
+export const VERFIX_HOME = path.join(os.homedir(), '.verfix');
+export const HOST_WORKER_DIR = path.join(VERFIX_HOME, 'worker');
+export const HOST_ARTIFACTS_DIR = path.join(VERFIX_HOME, 'artifacts');
+export const HOST_WORKER_PID_FILE = path.join(VERFIX_HOME, 'worker.pid');
 
 
 

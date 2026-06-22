@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import chalk from 'chalk';
 import ora from 'ora';
-import { DEFAULT_CONFIG } from './constants';
+import { DEFAULT_CONFIG, getBrowserMode } from './constants';
 import { generateAgentsSection } from './agents-md';
 import { detectAllAgentPlatforms } from './agent-platform';
 import { writeAgentsMd, writePlatformAgentFiles } from './agent-writer';
@@ -15,6 +15,10 @@ import { getRuntimePorts } from './runtime';
 import { PROVIDER_REGISTRY } from './providers/registry';
 import type { ProviderId } from './providers/types';
 import { saveAIConfig } from './config/loader';
+import {
+  extractWorkerFiles, ensurePlaywrightBrowser, startLocalWorker, isWorkerRunning,
+} from './worker-runner';
+import os from 'os';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -166,6 +170,16 @@ export async function runNonInteractiveInit(opts: NonInteractiveOptions): Promis
   console.log(chalk.gray('  ─────────────────────────────'));
   console.log('');
 
+  // ── Auto-detect and recommend Browser Mode ──
+  const browserMode = getBrowserMode();
+  const platformName = os.platform() === 'darwin' ? 'macOS' : os.platform() === 'win32' ? 'Windows' : 'Linux';
+  if (browserMode === 'host') {
+    console.log(chalk.blue(`  ℹ  Detected OS: ${platformName}. Defaulting to 'host' (hybrid) browser mode for native localhost access.`));
+  } else {
+    console.log(chalk.blue(`  ℹ  Detected OS: Linux. Defaulting to 'container' browser mode (host networking supported natively).`));
+  }
+  console.log('');
+
   // ── Step 1: Resolve and validate config ──
   const config = resolveConfig(opts);
 
@@ -210,6 +224,24 @@ export async function runNonInteractiveInit(opts: NonInteractiveOptions): Promis
     if (state?.status === 'running') {
       syncRuntimePortsFromContainer();
       console.log(chalk.green('  ✓ Verfix runtime is already running'));
+
+      if (getBrowserMode() === 'host') {
+        const workerState = isWorkerRunning();
+        if (workerState.running) {
+          console.log(chalk.green(`  ✓ Local worker is already running (PID: ${workerState.pid})`));
+        } else {
+          const workerSpinner = ora('Starting local worker...').start();
+          try {
+            extractWorkerFiles();
+            ensurePlaywrightBrowser();
+            const redisPort = process.env.REDIS_PORT ? parseInt(process.env.REDIS_PORT, 10) : 6379;
+            const workerPid = startLocalWorker(redisPort);
+            workerSpinner.succeed(`Local worker started on host (PID: ${workerPid})`);
+          } catch (err: any) {
+            workerSpinner.fail(`Failed to start local worker: ${err.message}`);
+          }
+        }
+      }
     } else {
       // Check Docker availability
       if (!isDockerInstalled() || !isDockerRunning()) {
@@ -235,6 +267,20 @@ export async function runNonInteractiveInit(opts: NonInteractiveOptions): Promis
             console.log(chalk.yellow('  ⚠ Continuing anyway. Check: verfix doctor'));
           } else {
             startSpinner.succeed('Runtime started and healthy');
+
+            if (getBrowserMode() === 'host') {
+              const workerSpinner = ora('Setting up local worker environment...').start();
+              try {
+                extractWorkerFiles();
+                ensurePlaywrightBrowser();
+                workerSpinner.text = 'Starting local worker...';
+                const redisPort = process.env.REDIS_PORT ? parseInt(process.env.REDIS_PORT, 10) : 6379;
+                const workerPid = startLocalWorker(redisPort);
+                workerSpinner.succeed(`Local worker started on host (PID: ${workerPid})`);
+              } catch (err: any) {
+                workerSpinner.fail(`Failed to start local worker: ${err.message}`);
+              }
+            }
           }
         } catch (e: any) {
           startSpinner.fail(`Failed to start runtime: ${e.message}`);

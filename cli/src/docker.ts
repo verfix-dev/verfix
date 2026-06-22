@@ -4,10 +4,13 @@
 
 import { execSync, spawnSync } from 'child_process';
 import os from 'os';
+import fs from 'fs';
 import {
   DOCKER_IMAGE,
   CONTAINER_NAME,
   VOLUMES,
+  getBrowserMode,
+  HOST_ARTIFACTS_DIR,
 } from './constants';
 import { getRuntimePorts, resolveAvailableRuntimePorts, saveRuntimePorts, type RuntimePorts } from './runtime';
 
@@ -202,6 +205,14 @@ export async function startContainer(opts?: DockerRunOptions): Promise<'already_
   envArgs.push('-e', `API_PORT=${resolvedPorts.apiPort}`);
   envArgs.push('-e', `DASHBOARD_PORT=${resolvedPorts.dashboardPort}`);
 
+  const browserMode = getBrowserMode();
+
+  // In host browser mode, tell container to skip starting workers
+  // (they'll run on the host with direct localhost access)
+  if (browserMode === 'host') {
+    envArgs.push('-e', 'SKIP_WORKERS=1');
+  }
+
   const hostNetwork = isHostNetworkMode();
 
   // Signal to workers inside the container whether they are on host network.
@@ -224,14 +235,30 @@ export async function startContainer(opts?: DockerRunOptions): Promise<'already_
         '--add-host=host.docker.internal:host-gateway',
         '-p', `${resolvedPorts.apiPort}:${resolvedPorts.apiPort}`,
         '-p', `${resolvedPorts.dashboardPort}:${resolvedPorts.dashboardPort}`,
+        // In host browser mode, expose Redis so host workers can connect.
+        // Bound to 127.0.0.1 only — not accessible from other machines.
+        ...(browserMode === 'host' ? ['-p', '127.0.0.1:6379:6379'] : []),
       ];
+
+  // In host browser mode, use a bind mount so both host workers and
+  // container API can access the same artifacts directory.
+  // We append :z on Linux so SELinux (e.g. on Fedora) allows the container to read it.
+  const selinuxFlag = os.platform() === 'linux' ? ':z' : '';
+  const artifactsVolume = browserMode === 'host'
+    ? `${HOST_ARTIFACTS_DIR}:/app/workers/artifacts${selinuxFlag}`
+    : VOLUMES.artifacts;
+
+  // Ensure host artifacts dir exists for bind mount
+  if (browserMode === 'host' && !fs.existsSync(HOST_ARTIFACTS_DIR)) {
+    fs.mkdirSync(HOST_ARTIFACTS_DIR, { recursive: true });
+  }
 
   const args = [
     'run', '-d',
     '--name', CONTAINER_NAME,
     ...networkArgs,
     '-v', VOLUMES.data,
-    '-v', VOLUMES.artifacts,
+    '-v', artifactsVolume,
     ...envArgs,
     DOCKER_IMAGE,
   ];
