@@ -14,7 +14,7 @@ import { waitForHealth } from './health';
 import { getRuntimePorts } from './runtime';
 import { PROVIDER_REGISTRY } from './providers/registry';
 import type { ProviderId } from './providers/types';
-import { saveAIConfig } from './config/loader';
+import { saveAIConfig, parseEnvFile } from './config/loader';
 import {
   extractWorkerFiles, ensurePlaywrightBrowser, startLocalWorker, isWorkerRunning,
 } from './worker-runner';
@@ -215,8 +215,11 @@ export async function runNonInteractiveInit(opts: NonInteractiveOptions): Promis
 
   // ── Step 3: Save AI config to .verfix/.env ──
   const spinner1 = ora('Saving AI configuration...').start();
-  saveAIConfig(cwd, config.provider, config.model, config.apiKey);
+  saveAIConfig(cwd, config.provider, config.model, config.apiKey, browserMode);
   spinner1.succeed(`AI configuration saved (${PROVIDER_REGISTRY[config.provider].displayName} / ${config.model})`);
+
+  // Ensure getBrowserMode() sees the correct mode for pullImage() below
+  process.env.VERFIX_BROWSER_MODE = browserMode;
 
   // ── Step 4: Docker runtime ──
   if (!config.skipRuntime) {

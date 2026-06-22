@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.8] - 2026-06-22
+
+### Added
+- **Hybrid Browser Mode (Host/Container):** Introduced a dual browser execution model with two modes: `host` (default on macOS/Windows) runs Playwright workers directly on the host machine with native localhost access, while `container` (default on Linux) keeps workers inside Docker with `--network=host`. Users can override via `VERFIX_BROWSER_MODE=host|container`.
+  - Hybrid mode solves localhost networking issues on macOS/Windows where Docker containers cannot reach host services without a proxy.
+  - On container start, the CLI automatically extracts worker files from the Docker image, installs Playwright Chromium locally, and spawns a dedicated local worker process.
+  - New `--show-browser` flag on `verfix start` and `verfix run` enables visible browser window for debugging (headful mode).
+- **Slim Server Image (`verfix-server-slim`):** A new lightweight Docker image built on SQLite (no PostgreSQL dependency) that CLI automatically selects when running in host browser mode on macOS/Windows, reducing resource overhead.
+- **Pluggable Database Backend:** Refactored the Go API to a `Store` interface with two implementations — PostgreSQL (full image, existing behavior) and SQLite (slim image, embedded). This decouples the API from a specific database driver.
+- **Local Worker Lifecycle Management:** The CLI now manages local worker processes with proper PID tracking, auto-detection of stale workers, headful/headless mode switching, graceful shutdown (`verfix stop`), and artifact directory bind-mounting for shared access between host workers and the container.
+- **Update Checker Browser-Mode Awareness:** The NPM and Docker image update-checker now queries the correct image tag based on the active browser mode (slim vs. full image).
+
+### Fixed
+- **Localhost Networking on macOS/Windows:** Replaced the previous CLI TCP proxy approach with hybrid browser mode, providing a more robust and maintainable solution to Docker networking restrictions.
+- **Port Conflicts on Host Redis Detection:** The CLI now detects if Redis is already running on the host at port 6379 before mapping container ports, preventing "port is already allocated" errors.
+
 ## [0.2.7] - 2026-06-20
 
 ### Added

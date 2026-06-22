@@ -1,22 +1,66 @@
 # Docker Runtime
 
 Verfix operates entirely within a local-first Docker runtime. All services
-(Go API, Next.js Dashboard, Playwright Workers, Redis, PostgreSQL) run inside
-a single container image.
+run inside Docker, with two architecture variants depending on the host platform.
 
 ---
 
-## Single Container Architecture
+## Browser Execution Modes
+
+Verfix has two docker runtime variants, selected automatically by platform:
+
+| Mode | Default Platform | Docker Image | Workers | Database | Ports |
+|------|-----------------|---------------|---------|----------|-------|
+| **Container** | Linux | `verfix-server:latest` | Inside Docker (`--network=host`) | PostgreSQL | 3610/3611 |
+| **Host** | macOS/Windows | `verfix-server-slim:latest` | On the host machine | SQLite | 3610/3611 |
+
+The mode can be overridden with the `VERFIX_BROWSER_MODE` environment variable
+(`host` or `container`).
+
+---
+
+## Container Mode — Single Full Image (Linux)
 
 The official image `ghcr.io/verfix-dev/verfix-server:latest` bundles:
 
 | Service | Port | Role |
 |---------|------|------|
-| Go API (Fiber) | `:3001` | Job ingestion, queue dispatch, result serving |
-| Next.js Dashboard | `:3000` | Execution timeline observability UI |
+| Go API (Fiber) | `:3001` (ext) / `:3611` (host) | Job ingestion, queue dispatch, result serving |
+| Next.js Dashboard | `:3000` (ext) / `:3610` (host) | Execution timeline observability UI |
 | Playwright Workers | — | Browser execution engine (internal) |
-| Redis | `:6379` | BullMQ job queue (internal) |
-| PostgreSQL 15 | `:5432` | Execution result storage (internal) |
+| Redis | `:6379` (internal) | BullMQ job queue |
+| PostgreSQL 15 | `:5432` (internal) | Execution result storage |
+
+On Linux, the CLI starts the container with `--network=host` so workers can
+reach `localhost` on the host directly.
+
+---
+
+## Host Mode — Slim Image + Local Workers (macOS/Windows)
+
+The slim server image `ghcr.io/verfix-dev/verfix-server-slim:latest` was
+introduced in v0.2.8 specifically for host browser mode. It replaces
+Playwright and PostgreSQL with SQLite to reduce size and resource usage.
+
+| Service | Port | Role |
+|---------|------|------|
+| Go API (Fiber) | `:3611` | Job ingestion, queue dispatch, result serving |
+| Next.js Dashboard | `:3610` | Execution timeline observability UI |
+| Redis | `:6379` | BullMQ job queue (bridge mode) |
+| SQLite | `~/.verfix/data` | Execution result storage (embedded) |
+
+The CLI starts the slim container with:
+- `--network=bridge` + `--add-host=host.docker.internal:host-gateway`
+- `SKIP_WORKERS=1` so the container skips its own browser workers.
+- Redis port mapped to `127.0.0.1:6379` (skipped if host Redis is detected).
+
+On the host machine, the CLI then:
+1. Extracts compiled worker JS and node_modules from the slim image into
+   `~/.verfix/worker/`.
+2. Runs `npx playwright install chromium` to ensure Chromium is available on
+   the host.
+3. Spawns a local Node.js worker that connects to container Redis and uses
+   native `localhost` access for browser execution.
 
 ---
 
@@ -24,54 +68,44 @@ The official image `ghcr.io/verfix-dev/verfix-server:latest` bundles:
 
 ### Recommended — use the CLI
 
-The CLI manages the container lifecycle correctly for your platform:
+The CLI manages the container lifecycle correctly for your platform and mode:
 
 ```bash
 npx verfix start
 ```
 
-This automatically applies the right network mode (see below) and injects all
-required environment variables.
-
-### Manual `docker run` (Linux)
-
-On Linux, use `--network=host` so the container can reach your locally running
-app (dev server, Ollama, etc.):
+### Manual `docker run` (Container mode — Linux)
 
 ```bash
 docker run -d \
   --name verfix \
   --network=host \
+  -e VERFIX_BROWSER_MODE=container \
   -e VERFIX_HOST_NETWORK=1 \
   -e AI_API_KEY=your_key \
-  -e AI_MODEL=gpt-4o-mini \
   -v verfix-data:/var/lib/postgresql/15/main \
   -v verfix-artifacts:/app/workers/artifacts \
   ghcr.io/verfix-dev/verfix-server:latest
 ```
 
-### Manual `docker run` (Mac / Windows)
-
-On Mac/Windows Docker Desktop uses bridge networking. `host.docker.internal`
-resolves to the host machine automatically:
+### Manual `docker run` (Host mode — Mac/Windows)
 
 ```bash
 docker run -d \
   --name verfix \
-  -p 3001:3001 \
-  -p 3000:3000 \
+  --network=bridge \
   --add-host=host.docker.internal:host-gateway \
-  -e AI_API_KEY=your_key \
-  -e AI_MODEL=gpt-4o-mini \
-  -v verfix-data:/var/lib/postgresql/15/main \
-  -v verfix-artifacts:/app/workers/artifacts \
-  ghcr.io/verfix-dev/verfix-server:latest
+  -p 127.0.0.1:6379:6379 \
+  -p 3611:3611 \
+  -p 3610:3610 \
+  -v ~/.verfix/artifacts:/app/workers/artifacts \
+  -v verfix-slim-data:/app/data \
+  -e SKIP_WORKERS=1 \
+  -e VERFIX_BROWSER_MODE=host \
+  ghcr.io/verfix-dev/verfix-server-slim:latest
 ```
 
-> **Important:** When running manually on Mac/Windows, URLs in your
-> `verfix.config.json` must use `host.docker.internal` instead of `localhost`
-> (e.g. `http://host.docker.internal:3002`). The CLI rewrites these
-> automatically, but manual API calls do not.
+Check the complete host-mode guide in [`docs/4-guides/docker-networking.md`](./docker-networking.md).
 
 ---
 
@@ -93,37 +127,42 @@ For the full technical explanation see
 
 ## Environment Variables
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `AI_API_KEY` | No | API key for AI-assisted and exploratory modes |
-| `AI_MODEL` | No | Model name (default: `gpt-4o-mini`) |
-| `AI_BASE_URL` | No | Custom base URL for OpenAI-compatible APIs (e.g. Ollama) |
-| `VERFIX_HOST_NETWORK` | Auto | Set to `1` by CLI on Linux; controls URL rewriting |
-| `REDIS_HOST` | No | Redis hostname (default: `localhost` — internal) |
-| `REDIS_PORT` | No | Redis port (default: `6379`) |
-| `MAX_CONCURRENCY` | No | Playwright worker concurrency (default: `3`) |
-| `POSTGRES_USER` | No | Postgres user (default: `verfix`) |
-| `POSTGRES_PASSWORD` | No | Postgres password (default: `verfix`) |
-| `POSTGRES_DB` | No | Postgres database name (default: `verifydb`) |
+| Variable | Mode | Description |
+|----------|------|-------------|
+| `VERFIX_BROWSER_MODE` | Both | `host` or `container` — selects browser execution mode |
+| `VERFIX_HOST_NETWORK` | Container | `1` on Linux (host network), `0` otherwise (bridge) |
+| `SKIP_WORKERS` | Host | `1` tells container to skip starting workers |
+| `VERFIX_WORKER_MODE` | Host | `local` for host-side worker processes |
+| `REDIS_HOST` | Host | Redis hostname (default: `localhost`) |
+| `REDIS_PORT` | Host | Redis port (default: `6379`) |
+| `ARTIFACTS_DIR` | Host | Shared artifacts directory path |
+| `AI_API_KEY` | Both | API key for AI-assisted and exploratory modes |
+| `AI_MODEL` | Both | Model name (default: `gpt-4o-mini`) |
+| `AI_BASE_URL` | Both | Custom base URL for OpenAI-compatible APIs (e.g. Ollama) |
 
 ---
 
 ## Volume Mounts
 
-Volumes persist data across container restarts and upgrades:
+### Container mode
 
 ```bash
 -v verfix-data:/var/lib/postgresql/15/main   # Execution history (Postgres)
 -v verfix-artifacts:/app/workers/artifacts   # Screenshots, HAR files, traces
 ```
 
-Without volumes, all execution history is lost when the container stops.
+### Host mode
+
+```bash
+-v ~/.verfix/artifacts:/app/workers/artifacts  # Shared artifacts (bind mount)
+-v verfix-slim-data:/app/data                  # SQLite database in container
+```
 
 ---
 
 ## Building Locally
 
-To build the image from source (e.g. after modifying workers or the API):
+To build the full image from source:
 
 ```bash
 git clone https://github.com/verfix-dev/verfix.git
@@ -134,6 +173,14 @@ docker build -f Dockerfile.server -t verfix-server:local .
 
 Then run with `verfix-server:local` instead of `ghcr.io/verfix-dev/verfix-server:latest`.
 
+To build the slim image (SQLite, no browser) for host mode development:
+
+```bash
+docker build -f Dockerfile.server-slim -t verfix-server-slim:local .
+```
+
+Then run with `verfix-server-slim:local`.
+
 ---
 
 ## Health Check
@@ -141,7 +188,7 @@ Then run with `verfix-server:local` instead of `ghcr.io/verfix-dev/verfix-server
 The API exposes a health endpoint used by the CLI's `verfix start` command:
 
 ```bash
-curl http://localhost:3001/api/v1/health
+curl http://localhost:3611/api/v1/health
 # {"status":"healthy","redis":"ok","database":"ok","queue_depth":0,"active_workers":0}
 ```
 

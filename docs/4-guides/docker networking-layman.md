@@ -6,90 +6,111 @@ When someone in Apartment A (your machine) says "go to my kitchen" (`localhost`)
 
 ---
 
-## Why One Fix Wasn't Enough
+## One Fix Wasn't Enough
 
-### "Why not just fix it in the workers?" 
+### Our first fix: container mode
 
-The worker is what actually opens the browser. So yes, the worker is the one who ultimately needs the right address. We *did* fix the worker. But the worker alone isn't enough because:
+On Linux, we can make the container share the host's entire network with
+`--network=host`. Then `localhost` inside the container means the host's
+localhost.
 
-**The worker doesn't know HOW it was started.** If it's on host network (`--network=host`), localhost works fine — no rewrite needed. If it's on bridge network (Mac/Windows), it needs to rewrite to `host.docker.internal`. The worker can't figure this out by itself — someone needs to tell it. That "someone" is the CLI, which injects `VERFIX_HOST_NETWORK=1` when it starts the container.
+On Mac/Windows, `--network=host` doesn't work — containers run inside a VM.
+Our old fix there was a CLI-managed TCP proxy: the CLI starts a proxy on the
+host that forwards traffic from `host.docker.internal:<port>` to your app's
+`localhost:<port>`. This worked but added complexity.
 
-Also: the worker is a belt-and-suspenders safety net. If someone calls the API *directly* (not via CLI) and sends `localhost`, the worker catches it as a last resort.
+### Our current fix: host mode (hybrid)
 
----
-
-### "Why not just fix it in the Dockerfile/startup script?"
-
-The startup script (`server-start.sh`) injects `host.docker.internal` into the container's address book (`/etc/hosts`) so the container knows where that name points. This solves the DNS problem — the name now resolves.
-
-**But on Linux, we went a step further.** Instead of pointing `host.docker.internal` to the IPv4 gateway (`172.17.0.1`), we use `--network=host` which makes the container share your entire network. This means `localhost` inside the container *is* your localhost — including IPv6 (`::1`).
-
-Your Vite app was bound to `[::1]:3002` (IPv6 only). The `172.17.0.1` gateway is IPv4 — it can't reach `::1`. So the startup-script-only fix wasn't enough. We needed `--network=host` to truly solve it.
-
-But `--network=host` is a flag you pass when *starting* the container — that's a CLI responsibility, not something the image can do for itself.
-
----
-
-### "So why does the CLI need changes?"
-
-The CLI has two jobs in this fix:
-
-**Job 1 — Start the container correctly.**  
-On Linux, it adds `--network=host` to the `docker run` command. Without the CLI doing this, the container starts in the wrong mode.
-
-**Job 2 — Rewrite the URL before sending it to the API (for Mac/Windows).**  
-On Mac/Windows, the container can't use `--network=host` (it's in a VM). So the CLI intercepts your `localhost:3002` URL and rewrites it to `host.docker.internal:3002` *before* posting the job to the API. The worker then receives the already-correct address.
-
----
-
-## "But if the CLI fixes the URL, why does it work from the Dashboard too?"
-
-Here's the key insight: **the Dashboard doesn't go through the CLI at all.**
+Starting in v0.2.8, on macOS and Windows Verfix uses a **hybrid approach**:
 
 ```
-CLI path:     You → CLI (rewrites URL) → API → Redis → Worker → Browser
-Dashboard:    You → Dashboard UI → API → Redis → Worker → Browser
+                    ┌─────────────────────────────────────┐
+                    │     Docker Container (slim image)   │
+  Your machine ──▶ │   API  │  Redis  │  SQLite + slim   │
+                    │   :3611  :6379   + server image      │
+                    └─────────────────────────────────────┘
+
+                    ┌─────────────────────────────────────┐
+                    │       Host Machine (you)            │
+  Your app  :3002 ──▶│  Playwright Workers + Chromium       │
+                    │  talks directly to localhost         │
+                    └─────────────────────────────────────┘
 ```
 
-The Dashboard talks directly to the API. If you type `localhost:3002` in the dashboard, it sends that raw to the API — no rewriting. That's why the **worker-level fix exists**: it catches any `localhost` URL regardless of who sent it, as a safety net.
+The slim Docker image contains only the API server, Redis, and SQLite — no
+browser, no Playwright. The CLI extracts the compiled worker files from the
+image, installs Chromium locally, and runs the worker as a regular Node.js
+process on your machine.
 
-But on Linux, even the worker doesn't need to rewrite — because `--network=host` means `localhost` already works. So:
+The benefits:
 
-- **Dashboard on Linux**: URL stays as `localhost:3002` all the way through. Worker receives it, container is on host network, browser opens it successfully. ✅
-- **Dashboard on Mac/Windows**: URL stays as `localhost:3002`. Worker receives it, sees it's on bridge mode (`VERFIX_HOST_NETWORK=0`), rewrites to `host.docker.internal:3002`, browser opens it. ✅
-- **CLI on Linux**: URL stays as `localhost:3002` (CLI doesn't rewrite on Linux). Worker does nothing (host network). ✅
-- **CLI on Mac/Windows**: CLI rewrites to `host.docker.internal:3002`, worker receives it already correct, doesn't need to rewrite again. ✅
+- **Native localhost access** — workers reach your dev server directly, no
+  URL rewriting or proxy required.
+- **Faster iteration** — no Docker networking layer between the browser and
+  your app.
+- **Smaller image** — the slim image is significantly smaller than the full
+  image with Chromium bundled.
 
 ---
 
-## Summary in one picture
+## How the pieces work together
+
+### Container mode (Linux)
+
+```
+Linux + verfix CLI:
+  CLI → docker run --network=host
+  → Worker in container shares host network
+  → localhost = your localhost ✅
+```
+
+### Host mode (macOS/Windows)
+
+```
+macOS/Windows + verfix CLI:
+  CLI → docker run --network=bridge (slim image, SKIP_WORKERS=1)
+  → API + Redis + SQLite in container
+  → CLI extracts worker files from image to ~/.verfix/worker/
+  → CLI starts Playwright Chromium on host
+  → Local worker connects to container Redis on 127.0.0.1:6379
+  → Worker navigates to localhost:3002 natively ✅
+```
+
+### Dashboard submissions
+
+The Dashboard talks directly to the API. When you type `localhost:3002` in the
+dashboard UI:
+
+- **Container mode (Linux):** Worker receives the URL, `--network=host` makes
+  localhost work without rewriting.
+- **Container mode (Mac/Win):** Worker sees it's on bridge mode, rewrites
+  `localhost` → `host.docker.internal`.
+- **Host mode (any OS):** No rewriting needed — workers run on the host and
+  localhost works natively.
+
+---
+
+## Summary
 
 ```
                     ┌─────────────────────────────────────────────┐
-                    │              Docker Container                │
-                    │                                              │
-You type:           │  API → Redis → Worker → Playwright           │
-localhost:3002  ──▶ │                                              │
-                    │  On Linux (--network=host):                  │
-                    │    localhost = YOUR localhost ✅              │
-                    │                                              │
-                    │  On Mac/Windows (bridge):                    │
-                    │    localhost = container's localhost ❌       │
-                    │    host.docker.internal = your machine ✅    │
-                    └─────────────────────────────────────────────┘
+                    │              Docker Container (slim)        │
+                    │                                             │
+  You type:           │   API → Redis → SQLite                      │
+  localhost:3002  ──▶ │   (no browser, no workers)                  │
+                      └─────────────────────────────────────────────┘
+
+                    ┌─────────────────────────────────────────────┐
+                    │       Host Machine (native)                 │
+  Your app  :3002 ──▶│  Playwright Workers + Chromium               │
+                      │  direct localhost access                     │
+                      └─────────────────────────────────────────────┘
 
 Who fixes what:
 
-CLI          → Starts container with right network mode
-              (also rewrites URL on Mac/Windows as belt-and-suspenders)
+CLI          → Starts the container, extracts worker files, installs browser,
+               spawns local workers, manages their lifecycle
 
-server-start.sh → Makes host.docker.internal resolvable in bridge mode
-                  (fallback for people who run docker manually)
-
-Workers      → Last-resort URL rewrite for URLs that arrive as localhost
-              (catches direct API calls, dashboard submissions on Mac/Win)
-
-Dockerfile   → Installs iproute2 so server-start.sh can detect the gateway IP
+Workers      → Run natively on the host, direct localhost access
+               (no URL rewriting needed)
 ```
-
-Every layer handles a different entry point or failure mode. No single file could handle all three.

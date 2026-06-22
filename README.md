@@ -10,7 +10,8 @@ Run deterministic browser flows, assert UI state, and get structured failure rep
 [![npm version](https://img.shields.io/npm/v/verfix.svg?style=flat-square)](https://www.npmjs.com/package/verfix)
 [![npm downloads](https://img.shields.io/npm/dm/verfix.svg?style=flat-square)](https://www.npmjs.com/package/verfix)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg?style=flat-square)](./LICENSE.md)
-[![Docker Image](https://img.shields.io/badge/docker-ghcr.io%2Fverfix--dev%2Fverfix--server-blue?style=flat-square&logo=docker)](https://github.com/verfix-dev/verfix/packages)
+[![Docker Image](https://img.shields.io/badge/docker-verfix--server-blue?style=flat-square&logo=docker)](https://github.com/verfix-dev/verfix/packages)
+[![Docker Slim](https://img.shields.io/badge/docker-verfix--server--slim-green?style=flat-square&logo=docker)](https://github.com/verfix-dev/verfix/packages)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat-square)](./CONTRIBUTING.md)
 
 [Website](https://verfix.dev) · [Docs](https://verfix.dev/docs) · [npm Package](https://www.npmjs.com/package/verfix) · [Report a Bug](https://github.com/verfix-dev/verfix/issues/new?template=bug_report.md) · [Request a Feature](https://github.com/verfix-dev/verfix/issues/new?template=feature_request.md)
@@ -56,7 +57,7 @@ Developers still manually open browsers, click through flows, and debug regressi
 
 ## Quick Start
 
-**Requirements:** [Docker Desktop](https://www.docker.com/products/docker-desktop/) (running), Node.js 18+
+**Requirements:** [Docker Desktop](https://www.docker.com/products/docker-desktop/) (running), Node.js 20+
 
 ```bash
 # In your project directory
@@ -190,26 +191,19 @@ npx verfix init --yes --ai-key sk-ant-... --dry-run
 
 ## Architecture
 
-```
-+-------------------+       +-----------------------+
-|   Coding Agent    | ----> |    Verfix Runtime     |
-| (Cursor, Claude,  |       |   (Local / Docker)    |
-|  Codex, etc.)     |       +-----------+-----------+
-+-------------------+                   |
-         ^                              v
-         |                  +----------------------+
-         |                  |  Playwright Workers  |
-         |                  |  + BullMQ + Redis    |
-         |                  +----------+-----------+
-         |                             |
-+--------+----------+      +-----------+----------+
-|  Structured JSON  | <--- |  Postgres + API      |
-|  (passed/failed,  |      |  (Go + Fiber)        |
-|   fix_hint, etc.) |      +----------------------+
-+-------------------+
-```
+On macOS/Windows, Verfix runs the server (API + Dashboard + Redis + SQLite) in
+a lightweight Docker container and executes browser workers natively on the host
+machine for direct localhost access. On Linux, the full stack runs inside a
+single container with host networking.
 
-**Execution path:** `CLI → API → Redis queue → Playwright Workers → Postgres → API → CLI output`
+```
+Execution path (macOS/Windows — host mode):
+  CLI → API (Docker slim) → Redis (bridge) → Worker (host) → Browser
+         └──────────────────────────────────────────────────────┘
+
+Execution path (Linux — container mode):
+  CLI → API (Docker full) → Redis (host net) → Worker (container) → Browser
+```
 
 ---
 

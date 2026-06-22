@@ -27,7 +27,7 @@
 
 AI coding agents write code fast — but they can't verify that it actually works in a browser. **Verfix** bridges that gap.
 
-It's a local-first runtime that spins up a full verification stack (Playwright, Redis, PostgreSQL, API, Dashboard) inside a single Docker container. Define browser flows in JSON, run them from the CLI, and get structured pass/fail results that agents can parse and act on automatically.
+It's a local-first runtime that gives coding agents deterministic browser verification. Define browser flows in JSON, run them from the CLI, and get structured pass/fail results that agents can parse and act on automatically. On macOS/Windows, workers run natively on your machine for direct localhost access; on Linux, they run efficiently inside Docker.
 
 **No cloud. No accounts. One command to start.**
 
@@ -42,7 +42,7 @@ npx verfix init
 ### Prerequisites
 
 - **Docker** — [install here](https://docs.docker.com/get-docker/)
-- **Node.js** 18+
+- **Node.js** 20+
 
 ### 1. Initialize
 
@@ -125,7 +125,9 @@ verfix status
 #   Runtime:    running
 #   API:        healthy   (http://localhost:3611)
 #   Dashboard:  healthy   (http://localhost:3610)
-#   Image:      ghcr.io/verfix-dev/verfix-server:latest
+#   Browser Mode: host (hybrid)
+#   Worker:      running (PID: 12345)
+#   Image:      ghcr.io/verfix-dev/verfix-server-slim:latest
 #   Uptime:     2h 14m
 ```
 
@@ -143,6 +145,9 @@ verfix run --flow login --output pretty
 # Override URL and mode
 verfix run --flow checkout --url http://localhost:5173 --mode strict
 
+# Show the browser window (host mode only)
+verfix run --flow checkout --show-browser
+
 # Run against a custom config
 verfix run --config path/to/verfix.config.json --flow signup
 ```
@@ -157,6 +162,7 @@ verfix run --config path/to/verfix.config.json --flow signup
 | `--timeout <ms>` | Timeout per flow | `15000` |
 | `--retries <n>` | Retries on failure | `2` |
 | `--dashboard <url>` | Dashboard URL for links | `http://localhost:3610` |
+| `--show-browser` | Show browser window (host mode only) | `false` |
 
 ### `verfix logs`
 
@@ -399,7 +405,12 @@ Running `verfix init` generates an `AGENTS.md` file with instructions that codin
 
 ## Architecture
 
-The entire runtime runs inside a single Docker container:
+Verfix uses two Docker images depending on the host platform. On Linux,
+workers and Playwright run inside the container with host networking. On
+macOS/Windows, a slim image runs only the server (API, Redis, SQLite) while
+workers and Chromium run natively on the host machine.
+
+### Container Mode (Linux)
 
 ```
 ┌──────────────────────────────────────────────┐
@@ -413,7 +424,7 @@ The entire runtime runs inside a single Docker container:
 │       v            v              │          │
 │  ┌──────────────────────┐        │          │
 │  │  Playwright Workers  │────────┘          │
-│  │  (Chromium headless)  │                   │
+│  │  + Chromium headless │                   │
 │  └──────────────────────┘                   │
 │                                              │
 │  ┌──────────────────────┐                   │
@@ -425,6 +436,32 @@ The entire runtime runs inside a single Docker container:
         │  CLI / SDK / Agent
         │
    verfix run --flow login
+```
+
+### Host Mode (macOS/Windows)
+
+```
+┌──────────────────────────────────────────────┐
+│      Docker Container (slim image)           │
+│                                              │
+│  ┌─────────┐  ┌──────────┐  ┌────────────┐  │
+│  │ Go API  │  │  Redis   │  │   SQLite   │  │
+│  │  :3611  │  │  Queue   │  │   Store    │  │
+│  └─────────┘  └──────────┘  └────────────┘  │
+│                                              │
+│  ┌──────────────────────┐                   │
+│  │  Next.js Dashboard   │                   │
+│  │       :3610          │                   │
+│  └──────────────────────┘                   │
+└──────────────────┬───────────────────────────┘
+                   │ 127.0.0.1:6379
+                   │
+┌──────────────────┴───────────────────────────┐
+│         Your Machine (host)                  │
+│                                              │
+│  Playwright Workers + Chromium               │
+│  (native localhost access)                   │
+└──────────────────────────────────────────────┘
 ```
 
 - **API** (`:3611` by default) — Receives verification jobs, queues them, serves results
@@ -439,9 +476,9 @@ The entire runtime runs inside a single Docker container:
 
 | Dependency | Version |
 |------------|---------|
-| Node.js | ≥ 18 |
+| Node.js | ≥ 20.20.0 |
 | Docker | ≥ 20.10 |
-| Disk space | ~1.5 GB (Docker image) |
+| Disk space | ~1 GB (slim image) / ~2 GB (full image) |
 
 ---
 
@@ -451,7 +488,7 @@ The entire runtime runs inside a single Docker container:
 - 📖 **Documentation**: [verfix.dev/docs](https://verfix.dev/docs)
 - 🐙 **GitHub**: [github.com/verfix-dev/verfix](https://github.com/verfix-dev/verfix)
 - 🐛 **Issues**: [github.com/verfix-dev/verfix/issues](https://github.com/verfix-dev/verfix/issues)
-- 📦 **Docker Image**: [ghcr.io/verfix-dev/verfix-server](https://github.com/verfix-dev/verfix/pkgs/container/verfix-server)
+- 📦 **Docker Images**: [verfix-server](https://github.com/verfix-dev/verfix/pkgs/container/verfix-server) · [verfix-server-slim](https://github.com/verfix-dev/verfix/pkgs/container/verfix-server-slim)
 
 ---
 

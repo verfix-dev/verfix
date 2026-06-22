@@ -111,8 +111,8 @@ docker compose -f docker-compose.server.yml up -d
 | `DATABASE_URL` | _(auto-built)_ | Override to use an external Postgres |
 | `REDIS_HOST` | `localhost` | Override to use an external Redis |
 | `REDIS_PORT` | `6379` | — |
-| `API_PORT` | `3001` | Go API listen port (matches `api/main.go`) |
-| `DASHBOARD_PORT` | `3000` | Next.js listen port |
+| `API_PORT` | `3611` | Go API listen port |
+| `DASHBOARD_PORT` | `3610` | Next.js listen port |
 | `MAX_CONCURRENCY` | `3` | Parallel Playwright browser instances |
 | `AI_API_KEY` | _(unset)_ | OpenAI-compatible API key (optional) |
 | `AI_MODEL` | _(unset)_ | e.g. `gpt-4o-mini`, `llama3` |
@@ -238,7 +238,7 @@ Stage 4: final (node:20-slim = Debian bookworm-slim)
 
 | | Details |
 |---|---|
-| **API is on :3001, not :7331** | `api/main.go` → `app.Listen(":3001")`. CLI (`cli/src/index.ts`) correctly defaults to `localhost:3001`. |
+| **API is on :3611** | `api/ports.ts` → `DEFAULT_API_PORT = 3611`. CLI (`cli/src/runtime.ts`) correctly defaults to `localhost:3611`. |
 | **Workers entry is `dist/src/index.js`** | With `rootDir='.'` and `outDir='./dist'`, tsc maps `src/index.ts` → `dist/src/index.js`. Confirmed by local tsc run. |
 | **Artifact path is shared** | API serves `/artifacts/*` from `../workers/artifacts` (relative to `/app/api/`). The startup script sets `cd /app/api` before launching the binary. |
 | **Chromium is always headless** | `workers/src/index.ts` uses the browser pool which runs headless. The `headless: false` in the old root `workers/index.ts` only applies to local dev. |

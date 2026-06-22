@@ -3,7 +3,7 @@
 Verfix is designed to be installed globally or per-project via npm, relying on Docker to run the actual infrastructure.
 
 ## Requirements
-- **Node.js**: v18 or newer
+- **Node.js**: v20 or newer
 - **Docker**: Docker Desktop or Docker Engine installed and running
 
 ## Global Installation (CLI)

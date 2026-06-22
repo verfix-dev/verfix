@@ -13,7 +13,7 @@ npm install verfix
 ```typescript
 import { VerfixClient } from 'verfix';
 
-// Automatically connects to http://localhost:3001
+// Automatically connects to http://localhost:3611
 const client = new VerfixClient();
 
 async function run() {
