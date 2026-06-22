@@ -14,7 +14,13 @@ set -e
 #   On plain Linux bridge we inject it ourselves from the routing table.
 if [ "${VERFIX_HOST_NETWORK}" != "1" ]; then
   if ! grep -q "host.docker.internal" /etc/hosts 2>/dev/null; then
+    # Primary: use the default route gateway (works for standard Docker bridge).
     HOST_GW=$(ip route show default 2>/dev/null | awk '{print $3}' | head -1)
+    # Fallback: on custom bridge networks, the default route gateway may not be
+    # the host. Try the docker0 interface IP as a fallback.
+    if [ -z "$HOST_GW" ]; then
+      HOST_GW=$(ip -4 addr show docker0 2>/dev/null | grep -oP '(?<=inet\s)\d+(\.\d+){3}')
+    fi
     if [ -n "$HOST_GW" ]; then
       echo "${HOST_GW}  host.docker.internal" >> /etc/hosts
       echo "✅ host.docker.internal → ${HOST_GW} (injected into /etc/hosts)"

@@ -206,6 +206,7 @@ export async function startContainer(opts?: DockerRunOptions): Promise<'already_
   envArgs.push('-e', `API_PORT=${resolvedPorts.apiPort}`);
   envArgs.push('-e', `DASHBOARD_PORT=${resolvedPorts.dashboardPort}`);
 
+  const hostNetwork = isHostNetworkMode();
   const browserMode = getBrowserMode();
 
   // In host browser mode, tell container to skip starting workers
@@ -214,7 +215,35 @@ export async function startContainer(opts?: DockerRunOptions): Promise<'already_
     envArgs.push('-e', 'SKIP_WORKERS=1');
   }
 
-  const hostNetwork = isHostNetworkMode();
+  // ── Detect host-side Redis on port 6379 (bridge mode only) ──────────────────
+  // On Linux (host network), the container shares the host loopback so Redis is
+  // accessible without any port mapping. On Mac/Windows bridge mode, the
+  // container's Redis needs a port mapping so host workers can reach it.
+  // If Redis is already running on the host at 6379, skip the mapping to avoid
+  // a "port is already allocated" failure.
+  let needsRedisMapping = false;
+  if (!hostNetwork && browserMode === 'host') {
+    try {
+      const net = require('net');
+      const socket = new net.Socket();
+      const hasRedis = await new Promise<boolean>((resolve) => {
+        socket.connect(6379, '127.0.0.1', () => {
+          socket.destroy();
+          resolve(true);
+        });
+        socket.on('error', () => {
+          socket.destroy();
+          resolve(false);
+        });
+      });
+      if (!hasRedis) {
+        needsRedisMapping = true;
+      }
+    } catch {
+      // net module unavailable — conservative: assume we need the mapping
+      needsRedisMapping = true;
+    }
+  }
 
   // Signal to workers inside the container whether they are on host network.
   // On host network: localhost == host's localhost, no URL rewriting needed.
@@ -238,7 +267,8 @@ export async function startContainer(opts?: DockerRunOptions): Promise<'already_
         '-p', `${resolvedPorts.dashboardPort}:${resolvedPorts.dashboardPort}`,
         // In host browser mode, expose Redis so host workers can connect.
         // Bound to 127.0.0.1 only — not accessible from other machines.
-        ...(browserMode === 'host' ? ['-p', '127.0.0.1:6379:6379'] : []),
+        // Skipped if host already has Redis on 6379 to avoid port conflicts.
+        ...(needsRedisMapping ? ['-p', '127.0.0.1:6379:6379'] : []),
       ];
 
   // In host browser mode, use a bind mount so both host workers and
@@ -269,8 +299,9 @@ export async function startContainer(opts?: DockerRunOptions): Promise<'already_
   if (result.status !== 0) {
     const stderr = result.stderr?.toString().trim() || '';
     if (stderr.includes('port is already allocated') || stderr.includes('address already in use')) {
+      const redisNote = needsRedisMapping ? ' (including Redis on 6379)' : '';
       throw new Error(
-        `Port conflict: ports ${resolvedPorts.apiPort} or ${resolvedPorts.dashboardPort} are already in use.\n` +
+        `Port conflict: ports ${resolvedPorts.apiPort} or ${resolvedPorts.dashboardPort}${redisNote} are already in use.\n` +
         `Stop whatever is using those ports, or use 'verfix stop' first.`
       );
     }

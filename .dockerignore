@@ -2,6 +2,9 @@
 # Without this, Docker sends node_modules, .next, artifacts, traces (~1GB+)
 # to the build daemon on every build. This cuts context to <5MB.
 
+# Host runtime state — worker cache, PID files, configs in ~/.verfix
+.verfix
+
 # Dependencies (installed fresh in each builder stage)
 **/node_modules
 

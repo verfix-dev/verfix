@@ -228,6 +228,8 @@ func (s *sqliteStore) GetStats() (Metrics, []DayTrend, []URLFailure, error) {
 	s.db.QueryRow(`SELECT COALESCE(AVG(retry_count),0) FROM executions`).Scan(&m.AvgRetriesPerRun)
 
 	m.P95DurationMs = s.computeP95()
+	// TODO: Consider caching P95 in a separate table updated on insert/update,
+	// avoiding full-table fetch + sort on every GetStats() call.
 
 	completed := m.TotalPassed + m.TotalFailed
 	if completed > 0 {

@@ -24,6 +24,7 @@ FROM node:20-alpine AS dashboard-builder
 
 WORKDIR /build/dashboard
 COPY dashboard/package*.json ./
+# Triple-retry npm ci to handle transient Docker build cache / network issues.
 RUN npm ci --ignore-scripts || npm ci --ignore-scripts || npm ci --ignore-scripts
 
 COPY cli/ /build/cli/
@@ -46,6 +47,7 @@ FROM node:20-alpine AS workers-builder
 
 WORKDIR /build/workers
 COPY workers/package*.json ./
+# Triple-retry npm ci to handle transient Docker build cache / network issues.
 RUN npm ci --ignore-scripts || npm ci --ignore-scripts || npm ci --ignore-scripts
 
 COPY workers/ ./
@@ -72,11 +74,12 @@ RUN npx tsc --skipLibCheck
 #   /app/dashboard/              → Next.js standalone bundle
 #   /app/data/verfix.db          → SQLite database file (mount as volume)
 # ─────────────────────────────────────────────────────────────────────────────
-FROM node:20-slim AS final
+FROM --platform=$BUILDPLATFORM node:20-slim AS final
 
 # ── Build-time traceability args (passed by CI workflow via build-args) ────────
 ARG BUILD_SHA=unknown
 ARG BUILD_REF=unknown
+ARG BUILDPLATFORM
 LABEL org.opencontainers.image.revision="${BUILD_SHA}" \
       org.opencontainers.image.ref.name="${BUILD_REF}" \
       org.opencontainers.image.source="https://github.com/verfix-dev/verfix" \
@@ -87,6 +90,8 @@ LABEL org.opencontainers.image.revision="${BUILD_SHA}" \
 # node:20-slim is Debian bookworm-slim. bookworm default repos include:
 #   redis-server, tini — so no third-party repo is needed.
 # PostgreSQL is intentionally omitted; the API uses embedded SQLite.
+# modernc.org/sqlite (pure Go, no CGO) bundles its own ICU for date functions —
+# no system libicu-dev needed.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         curl \
         tini \

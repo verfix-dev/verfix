@@ -7,6 +7,7 @@ import { execSync, spawn, ChildProcess } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import { randomUUID } from 'crypto';
 import {
   getDockerImage,
   HOST_WORKER_DIR,
@@ -63,9 +64,9 @@ export function extractWorkerFiles(): void {
   }
   fs.mkdirSync(HOST_WORKER_DIR, { recursive: true });
 
-  const tempContainer = 'verfix-extract-tmp';
+  const tempContainer = `verfix-extract-${process.pid}-${randomUUID().slice(0, 8)}`;
   try {
-    // Remove leftover extract container if it exists
+    // Remove leftover extract container if it exists (from a crashed previous run)
     execSync(`docker rm -f ${tempContainer}`, { stdio: 'pipe' });
   } catch {
     // not found — fine
@@ -121,7 +122,8 @@ export function ensurePlaywrightBrowser(): void {
       cwd: HOST_WORKER_DIR,
       env: {
         ...process.env,
-        // Use default host browser path, not the container's /ms-playwright
+        // Use default host browser path. Explicitly unset PLAYWRIGHT_BROWSERS_PATH
+        // so it doesn't inherit a container path like /ms-playwright.
         PLAYWRIGHT_BROWSERS_PATH: undefined,
       },
     });
