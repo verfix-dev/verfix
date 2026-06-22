@@ -13,6 +13,7 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import https from 'https';
+import { getDockerImage } from './constants';
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
@@ -20,8 +21,11 @@ const CACHE_DIR = path.join(os.homedir(), '.verfix');
 const NPM_CACHE_FILE = path.join(CACHE_DIR, 'npm-check.json');
 const IMAGE_CACHE_FILE = path.join(CACHE_DIR, 'image-check.json');
 const NPM_PACKAGE_NAME = 'verfix';
-const DOCKER_IMAGE = 'ghcr.io/verfix-dev/verfix-server:latest';
 const TIMEOUT_MS = 8000;
+// Resolve the image the user is actually running (slim or full) so the worker
+// checks the correct registry tag. getDockerImage() only uses os/path — safe
+// for this isolated worker process.
+const DOCKER_IMAGE = getDockerImage();
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
 

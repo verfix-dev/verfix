@@ -6,7 +6,8 @@ import { execSync, spawnSync } from 'child_process';
 import os from 'os';
 import fs from 'fs';
 import {
-  DOCKER_IMAGE,
+  getDockerImage,
+  getDataVolume,
   CONTAINER_NAME,
   VOLUMES,
   getBrowserMode,
@@ -257,10 +258,10 @@ export async function startContainer(opts?: DockerRunOptions): Promise<'already_
     'run', '-d',
     '--name', CONTAINER_NAME,
     ...networkArgs,
-    '-v', VOLUMES.data,
+    '-v', getDataVolume(),
     '-v', artifactsVolume,
     ...envArgs,
-    DOCKER_IMAGE,
+    getDockerImage(),
   ];
 
   const result = spawnSync('docker', args, { stdio: 'pipe' });
@@ -303,11 +304,12 @@ export function stopContainer(): boolean {
  * Pull the latest verfix image.
  */
 export function pullImage(): void {
-  const result = spawnSync('docker', ['pull', DOCKER_IMAGE], {
+  const image = getDockerImage();
+  const result = spawnSync('docker', ['pull', image], {
     stdio: 'inherit',
   });
   if (result.status !== 0) {
-    throw new Error(`Failed to pull image: ${DOCKER_IMAGE}`);
+    throw new Error(`Failed to pull image: ${image}`);
   }
 }
 
@@ -315,7 +317,8 @@ export function pullImage(): void {
  * Pull image if not already present locally.
  */
 export function pullImageIfMissing(): boolean {
-  const result = spawnSync('docker', ['image', 'inspect', DOCKER_IMAGE], {
+  const image = getDockerImage();
+  const result = spawnSync('docker', ['image', 'inspect', image], {
     stdio: 'pipe',
   });
   if (result.status !== 0) {

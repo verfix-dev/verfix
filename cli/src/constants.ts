@@ -7,13 +7,33 @@ import path from 'path';
 export const HEALTH_ENDPOINT = '/api/v1/health';
 
 export const DOCKER_IMAGE = 'ghcr.io/verfix-dev/verfix-server:latest';
+export const DOCKER_IMAGE_SLIM = 'ghcr.io/verfix-dev/verfix-server-slim:latest';
 export const CONTAINER_NAME = 'verfix';
 export const DEFAULT_CONFIG = 'verfix.config.json';
 
 export const VOLUMES = {
   data: 'verfix-data:/var/lib/postgresql/15/main',
+  slimData: 'verfix-slim-data:/app/data',
   artifacts: 'verfix-artifacts:/app/workers/artifacts',
 };
+
+/**
+ * Returns the Docker image to pull/run based on the browser mode.
+ * - 'host' (hybrid, default on macOS/Windows) → slim image (SQLite, no browser).
+ * - 'container' (default on Linux)            → full image (PostgreSQL + Chromium).
+ */
+export function getDockerImage(): string {
+  return getBrowserMode() === 'host' ? DOCKER_IMAGE_SLIM : DOCKER_IMAGE;
+}
+
+/**
+ * Returns the data volume to mount based on the browser mode.
+ * - Slim image (host mode)     → verfix-slim-data:/app/data (SQLite file)
+ * - Full image (container mode)→ verfix-data:/var/lib/postgresql/15/main (PostgreSQL)
+ */
+export function getDataVolume(): string {
+  return getBrowserMode() === 'host' ? VOLUMES.slimData : VOLUMES.data;
+}
 
 export type BrowserMode = 'host' | 'container';
 

@@ -4,7 +4,7 @@ import chalk from 'chalk';
 import ora from 'ora';
 import { input, select, checkbox, confirm, password } from '@inquirer/prompts';
 import {
-  DOCKER_IMAGE, CONTAINER_NAME, DEFAULT_CONFIG, getBrowserMode,
+  CONTAINER_NAME, DEFAULT_CONFIG, getBrowserMode,
 } from './constants';
 import {
   generateAgentsSection,

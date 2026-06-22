@@ -8,7 +8,7 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import {
-  DOCKER_IMAGE,
+  getDockerImage,
   HOST_WORKER_DIR,
   HOST_ARTIFACTS_DIR,
   HOST_WORKER_PID_FILE,
@@ -24,7 +24,7 @@ import {
 function getImageDigest(): string | null {
   try {
     const result = execSync(
-      `docker image inspect --format={{.Id}} ${DOCKER_IMAGE}`,
+      `docker image inspect --format={{.Id}} ${getDockerImage()}`,
       { stdio: 'pipe' },
     );
     return result.toString().trim();
@@ -72,7 +72,7 @@ export function extractWorkerFiles(): void {
   }
 
   try {
-    execSync(`docker create --name ${tempContainer} ${DOCKER_IMAGE}`, {
+    execSync(`docker create --name ${tempContainer} ${getDockerImage()}`, {
       stdio: 'pipe',
     });
     // Copy compiled JS, node_modules, and package.json from the image

@@ -1,7 +1,8 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# Stage 1 — Build Go API
+# Stage 1 — Build Go API (SQLite backend via -tags sqlite)
 # go.mod specifies Go 1.22; CGO_ENABLED=0 produces a static binary that
-# runs without any libc in the final image.
+# runs without any libc in the final image. The sqlite build tag selects the
+# embedded SQLite store (modernc.org/sqlite, pure-Go) instead of PostgreSQL.
 # ─────────────────────────────────────────────────────────────────────────────
 FROM golang:1.22-alpine AS api-builder
 
@@ -11,7 +12,7 @@ RUN go mod download
 
 COPY api/ ./
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
-    go build -ldflags="-s -w" -trimpath -o /verfix-api .
+    go build -tags sqlite -ldflags="-s -w" -trimpath -o /verfix-api .
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -56,9 +57,20 @@ RUN npx tsc --skipLibCheck
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Stage 4 — Final runtime image (Slim - No Playwright Chromium)
+# Stage 4 — Final runtime image (Slim: SQLite + Redis, no PostgreSQL, no browser)
 #
 # Base: node:20-slim  →  Debian 12 (bookworm-slim)
+#   • bookworm ships redis-server in its default repos — no third-party repo needed
+#   • tini is used as PID 1 for correct signal handling + zombie reaping
+#   • PostgreSQL is NOT included — the Go API uses embedded SQLite (file-based)
+#
+# Layout inside the container:
+#   /app/api/verfix-api          → static Go binary (api listens on :3001)
+#   /app/workers/dist/src/       → compiled TypeScript worker JS
+#   /app/workers/node_modules/   → production-only worker deps
+#   /app/workers/artifacts/      → screenshots / HAR / traces (mount as volume)
+#   /app/dashboard/              → Next.js standalone bundle
+#   /app/data/verfix.db          → SQLite database file (mount as volume)
 # ─────────────────────────────────────────────────────────────────────────────
 FROM node:20-slim AS final
 
@@ -69,16 +81,17 @@ LABEL org.opencontainers.image.revision="${BUILD_SHA}" \
       org.opencontainers.image.ref.name="${BUILD_REF}" \
       org.opencontainers.image.source="https://github.com/verfix-dev/verfix" \
       org.opencontainers.image.title="verfix-server-slim" \
-      org.opencontainers.image.description="Verfix slim server: API + Dashboard + Redis + PostgreSQL (no browser)"
+      org.opencontainers.image.description="Verfix slim server: API + Dashboard + Workers + Redis + SQLite (no browser, no PostgreSQL)"
 
 # ── System packages ───────────────────────────────────────────────────────────
+# node:20-slim is Debian bookworm-slim. bookworm default repos include:
+#   redis-server, tini — so no third-party repo is needed.
+# PostgreSQL is intentionally omitted; the API uses embedded SQLite.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         curl \
         tini \
         iproute2 \
         redis-server \
-        postgresql-15 \
-        postgresql-client-15 \
     && rm -rf /var/lib/apt/lists/*
 
 # ── Workers: production node_modules ─────────────────────────────────────────
@@ -87,50 +100,45 @@ COPY workers/package*.json ./
 RUN npm ci --ignore-scripts --omit=dev || npm ci --ignore-scripts --omit=dev || npm ci --ignore-scripts --omit=dev
 
 # ── Copy compiled worker JS from builder ──────────────────────────────────────
+# dist/src/index.js is the entry because rootDir='.' and src/ is under that.
 COPY --from=workers-builder /build/workers/dist ./dist
 
 # artifacts/ must exist before API starts — api/main.go serves ../workers/artifacts
 RUN mkdir -p /app/workers/artifacts
 
-# ── Go API (static binary, no runtime deps) ───────────────────────────────────
+# ── Go API (static binary, SQLite backend, no runtime deps) ───────────────────
 COPY --from=api-builder /verfix-api /app/api/verfix-api
 RUN chmod +x /app/api/verfix-api
 
 # ── Next.js Dashboard (standalone) ───────────────────────────────────────────
+# Standalone mode emits .next/standalone/server.js — no npm start needed.
 COPY --from=dashboard-builder /build/dashboard/.next/standalone /app/dashboard/
 COPY --from=dashboard-builder /build/dashboard/.next/static     /app/dashboard/.next/static
 COPY --from=dashboard-builder /build/dashboard/public           /app/dashboard/public
 
-# ── PostgreSQL: initialise cluster at image build time ───────────────────────
-USER postgres
-RUN rm -rf /var/lib/postgresql/15/main \
-    && /usr/lib/postgresql/15/bin/initdb -D /var/lib/postgresql/15/main \
-    && /usr/lib/postgresql/15/bin/pg_ctl \
-         -D /var/lib/postgresql/15/main \
-         -l /tmp/pg_init.log start \
-    && psql -v ON_ERROR_STOP=1 \
-         -c "CREATE USER verfix WITH PASSWORD 'verfix' CREATEDB;" \
-    && psql -v ON_ERROR_STOP=1 \
-         -c "CREATE DATABASE verifydb OWNER verfix;" \
-    && /usr/lib/postgresql/15/bin/pg_ctl \
-         -D /var/lib/postgresql/15/main stop
+# ── SQLite data directory ─────────────────────────────────────────────────────
+# The Go API opens /app/data/verfix.db directly (embedded SQLite, no server).
+RUN mkdir -p /app/data
 
-USER root
-
-# ── Startup script ────────────────────────────────────────────────────────────
-COPY scripts/server-start.sh /start.sh
+# ── Startup script (slim: Redis → API → Workers → Dashboard, no PostgreSQL) ───
+COPY scripts/server-start-slim.sh /start.sh
 RUN chmod +x /start.sh
 
 # ── Volumes ───────────────────────────────────────────────────────────────────
-VOLUME ["/var/lib/postgresql/15/main", "/app/workers/artifacts"]
+# Declare volumes so Docker knows these paths hold persistent state.
+#   /app/data                 → SQLite database file
+#   /app/workers/artifacts    → screenshots / HAR / traces
+VOLUME ["/app/data", "/app/workers/artifacts"]
 
 # ── Healthcheck ───────────────────────────────────────────────────────────────
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD sh -c 'curl -f http://localhost:${API_PORT:-3611}/api/v1/health || exit 1'
 
 # ── Ports ─────────────────────────────────────────────────────────────────────
+# 3611 = Go API  (default; override with API_PORT)
+# 3610 = Next.js Dashboard (default; override with DASHBOARD_PORT)
 EXPOSE 3611 3610
 
-# tini as PID 1
+# tini as PID 1 — proper signal forwarding and zombie process reaping
 ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["/start.sh"]

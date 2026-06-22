@@ -8,7 +8,7 @@ import Ajv from 'ajv';
 import fs from 'fs';
 import path from 'path';
 import {
-  DOCKER_IMAGE, CONTAINER_NAME, DEFAULT_CONFIG, HEALTH_ENDPOINT, getBrowserMode,
+  CONTAINER_NAME, DEFAULT_CONFIG, HEALTH_ENDPOINT, getBrowserMode,
 } from './constants';
 import {
   extractWorkerFiles, ensurePlaywrightBrowser, startLocalWorker, stopLocalWorker, isWorkerRunning, getWorkerHeadlessState,
