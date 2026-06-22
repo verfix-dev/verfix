@@ -11,7 +11,7 @@ npm install verfix
 ```typescript
 import { VerfixClient } from 'verfix';
 
-const client = new VerfixClient({ baseUrl: 'http://localhost:3001' });
+const client = new VerfixClient({ baseUrl: 'http://localhost:3611' });
 
 const result = await client.verify({
   url: 'https://example.com',

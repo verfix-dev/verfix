@@ -32,8 +32,7 @@ and walks you through config (or bypass with `--yes`):
 npx verfix init
 ```
 
-This spins up the Go API, Next.js Dashboard, Redis, PostgreSQL, and Playwright
-Workers within a single orchestrated container.
+This spins up the Go API, Next.js Dashboard, Redis, and the database (PostgreSQL or SQLite depending on mode). On macOS/Windows, Playwright workers run natively on your machine alongside your browser for direct localhost access.
 
 > **Note:** The runtime needs to reach your app's dev server (e.g.
 > `localhost:3002`). The CLI handles this automatically — you don't need to
@@ -71,5 +70,5 @@ npx verfix run -c verfix.config.json
 Once the execution completes, open the Dashboard to view the Execution Intelligence Timeline:
 
 ```
-http://localhost:3000
+http://localhost:3610
 ```

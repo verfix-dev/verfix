@@ -64,7 +64,7 @@ RUN npx tsc --skipLibCheck
 #   • tini is used as PID 1 for correct signal handling + zombie reaping
 #
 # Layout inside the container:
-#   /app/api/verfix-api          → static Go binary (api listens on :3001)
+#   /app/api/verfix-api          → static Go binary (api listens on :3611)
 #   /app/workers/dist/src/       → compiled TypeScript worker JS
 #   /app/workers/node_modules/   → production-only worker deps
 #   /app/workers/artifacts/      → screenshots / HAR / traces (mount as volume)

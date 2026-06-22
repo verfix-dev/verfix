@@ -4,32 +4,51 @@ Verfix is designed as a highly scalable, event-driven, local-first execution run
 
 ---
 
-## System Diagram
+## Browser Execution Modes
 
-```text
-      [ CLI / SDK / Agent ]
-               |
-         (HTTP API)
-               |
-      +-------------------+
-      |    Verfix API     |  (Go / Fiber)
-      +-------------------+
-               |
-       (Redis / BullMQ)
-               |
-      +-------------------+
-      |  Verfix Workers   |  (Node.js / Playwright)
-      +-------------------+
-               |
-    [ Chromium Headless ]
-               |
-      +-------------------+
-      | PostgreSQL DB     |  (Execution History & Metadata)
-      +-------------------+
-               |
-      +-------------------+
-      | Verfix Dashboard  |  (Next.js)
-      +-------------------+
+Verfix supports two browser execution modes:
+
+### Container Mode (default on Linux)
+
+Workers and Playwright run inside a single Docker image alongside the API, Dashboard, Redis, and PostgreSQL.
+
+```
+       [ CLI / SDK / Agent ]
+                |
+          (HTTP API)
+                |
+       ┌───────────────────┐
+       │   Docker Image    │  verfix-server:latest
+       │                   │
+       │  Go API  :3611    │
+       │  Dashboard :3610  │
+       │  Workers +        │
+       │  Playwright       │
+       │  Redis :6379      │
+       │  PostgreSQL       │
+       └───────────────────┘
+```
+
+### Host Mode (default on macOS/Windows)
+
+The slim image runs the API, Dashboard, Redis, and SQLite in Docker. Workers
+and Playwright run natively on the host machine for direct localhost access.
+
+```
+       [ CLI / SDK / Agent ]
+                |
+          (HTTP API)
+                |
+       ┌───────────────────┐          ┌───────────────────────────┐
+       │  Docker Container │          │     Host Machine           │
+       │  verfix-server-   │          │                           │
+       │       slim        │          │   Playwright Workers      │
+       │                   │          │   + Chromium (native)     │
+       │  Go API  :3611    │◀───────▶│   localhost access ✅     │
+       │  Dashboard :3610  │  Redis   │                           │
+       │  Redis :6379      │   mapped │                           │
+       │  SQLite (data)    │          │                           │
+       └───────────────────┘          └───────────────────────────┘
 ```
 
 ---
@@ -46,9 +65,9 @@ We utilize BullMQ backed by Redis for robust job orchestration.
 
 ### 3. Browser Runtime (Node.js + Playwright)
 The execution engine. It spins up isolated browser contexts, executes deterministic assertions, and manages AI-assisted semantic healing. It emits real-time timeline events (navigation, clicks, console logs, network errors) back to the API.
+### 4. Database (PostgreSQL / SQLite)
 
-### 4. Database (PostgreSQL)
-Persistent storage for execution timelines, assertions, and AI reasoning logs. Provides the data foundation for the observability dashboard.
+Persistent storage for execution timelines, assertions, and AI reasoning logs. The full image uses PostgreSQL; the slim image uses an embedded SQLite store. Both are accessed through a common `Store` interface in the Go API. The data layer provides the observability foundation for the dashboard.
 
 ---
 
@@ -79,9 +98,16 @@ This hybrid approach guarantees that AI is only invoked when necessary, preservi
 
 ## Docker Orchestration
 
-The entire runtime is bundled into a single, production-grade Docker image (`ghcr.io/verfix-dev/verfix-server`). 
+Verfix uses two Docker images depending on the browser execution mode:
 
-- Built using multi-stage builds.
-- Contains Go API, Next.js standalone server, compiled TS workers, Redis, and PostgreSQL.
-- Uses `tini` as the init process.
-- Volumes are used to persist PostgreSQL data and Playwright artifacts (screenshots, traces).
+- `ghcr.io/verfix-dev/verfix-server:latest` — Full image with PostgreSQL,
+  Redis, Go API, workers, and Playwright. Used in container mode on Linux.
+- `ghcr.io/verfix-dev/verfix-server-slim:latest` — Lightweight image with
+  SQLite (no PostgreSQL), Redis, and Go API. Used in host mode on macOS/Windows
+  where workers run natively on the host.
+
+Both images:
+- Are built using multi-stage builds.
+- Use `tini` as the init process.
+- Ship health checks that poll the `/api/v1/health` endpoint every 30 seconds.
+- Expose port mappings for the Dashboard (`3610`) and API (`3611`).

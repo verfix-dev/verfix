@@ -71,13 +71,13 @@ make up
 ### Running Services Local Dev Mode
 Start each service in a separate terminal:
 ```bash
-# Go API server (runs on :3001)
+# Go API server (runs on :3611)
 make api
 
 # Playwright Workers (connects to Redis)
 make worker
 
-# Next.js Dashboard (runs on :3000)
+# Next.js Dashboard (runs on :3610)
 make ui
 ```
 
@@ -134,15 +134,25 @@ chore(<scope>): description
 ## 6. Critical Guardrails & Boundaries
 
 ### Docker Networking
-Workers run inside Docker containers and must reach targets on the host machine.
+
+Verfix has two browser execution modes:
+
+- **Host (macOS/Windows):** Workers run natively on the host. The slim Docker
+  image (API + Redis + SQLite) runs in Docker; workers connect to Redis via a
+  mapped port and access `localhost` directly. No URL rewriting needed.
+- **Container (Linux):** Workers and Playwright run inside Docker with
+  `--network=host`, sharing the host network stack. URLs are not rewritten.
+
 * **Linux:** Uses host networking (`--network=host`), meaning localhost inside the container points to localhost on the host.
-* **Mac / Windows:** Uses bridge networking. Target URLs pointing to `localhost` must be translated to `host.docker.internal`.
+* **Mac / Windows (host mode):** Workers run on the host machine. Slim server in Docker has `SKIP_WORKERS=1`. No `host.docker.internal` rewriting needed for host workers.
+* **Mac / Windows (container mode):** Uses bridge networking. Target URLs pointing to `localhost` must be translated to `host.docker.internal`.
 * **Code References:** If editing files that deal with port/URL translation, be extremely careful. Refer to the networking logic inside:
   - `cli/src/docker.ts` (container networking modes)
   - `cli/src/index.ts` (`resolveJobUrl`)
-  - `workers/src/index.ts` (`resolveTargetUrl`)
-  - `workers/src/ai/provider.ts` (`resolveBaseUrl`)
-  - `scripts/server-start.sh` & `Dockerfile.server` (environment injection)
+  - `cli/src/worker-runner.ts` (local worker lifecycle)
+  - `cli/src/constants.ts` (browser mode, image selection)
+  - `scripts/server-start.sh` & `scripts/server-start-slim.sh`
+  - `Dockerfile.server` & `Dockerfile.server-slim`
 
 ### Failure Taxonomy
 All assertion failures must be classified into one of these strict, stable string formats. Do not introduce new string categories without opening a GitHub Discussion:

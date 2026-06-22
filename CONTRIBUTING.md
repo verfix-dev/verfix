@@ -39,34 +39,37 @@ Understanding how the pieces fit will make any contribution faster:
 ```
 CLI (npm: verfix)
   └── sends jobs to →
-        API (Go + Fiber, :3001)
+        API (Go + Fiber, :3611)
           └── queues jobs in →
                 Redis (BullMQ)
                   └── consumed by →
-                        Workers (Node.js + Playwright)
+                        Workers (Node.js + Playwright, host or container)
                           └── writes results to →
-                                Postgres
+                                PostgreSQL / SQLite
                                   └── served by →
                                         API → CLI output
-                                        Dashboard (Next.js, :3000)
+                                        Dashboard (Next.js, :3610)
 ```
 
 ### Networking Layer
 
-Workers run inside Docker and cannot reach the host machine via plain `localhost`.
-Verfix solves this differently per platform:
+Verfix uses two browser execution modes depending on the platform. Workers can
+run **inside Docker** (container mode) or **directly on the host machine**
+(host mode, macOS/Windows default).
 
 | Platform | Strategy |
 |----------|----------|
-| **Linux** | `--network=host` — container shares host network namespace (IPv4 + IPv6) |
-| **Mac/Windows** | Bridge + `host.docker.internal` alias provided by Docker Desktop |
+| **Linux (container mode)** | `--network=host` — container shares host network namespace (IPv4 + IPv6) |
+| **macOS/Windows (host mode)** | Slim Docker image (API + Redis + SQLite); workers run natively on host with direct `localhost` access |
+| **macOS/Windows (container mode)** | Bridge + `host.docker.internal` alias provided by Docker Desktop |
 | **Linux (manual run)** | `/etc/hosts` injection via `ip route` at container startup |
 
 See [`docs/4-guides/docker-networking.md`](docs/4-guides/docker-networking.md)
 for the full technical breakdown. **Read it before touching any of:**
-`cli/src/docker.ts`, `cli/src/index.ts` (resolveJobUrl), `workers/src/index.ts`
-(resolveTargetUrl), `workers/src/ai/provider.ts` (resolveBaseUrl),
-`scripts/server-start.sh`, `Dockerfile.server`.
+`cli/src/docker.ts`, `cli/src/index.ts` (resolveJobUrl, host mode start/stop),
+`cli/src/worker-runner.ts`, `cli/src/constants.ts` (browser mode selection),
+`scripts/server-start.sh`, `scripts/server-start-slim.sh`, `Dockerfile.server`,
+`Dockerfile.server-slim`.
 
 | Package | Language | Role |
 |---------|----------|------|
@@ -120,9 +123,9 @@ make up
 # or: docker compose up -d postgres redis
 
 # Start each service in a separate terminal
-make api        # Go API server on :3001
+make api        # Go API server on :3611
 make workers    # Playwright workers (connects to Redis)
-make dashboard  # Next.js dashboard on :3000
+make dashboard  # Next.js dashboard on :3610
 ```
 
 Verify the full stack is working:

@@ -16,7 +16,7 @@ jobs:
       
       - name: Start Verfix Runtime
         run: |
-          docker run -d -p 3001:3001 -p 3000:3000 ghcr.io/verfix-dev/verfix-server:latest
+          docker run -d --network=host -e VERFIX_HOST_NETWORK=1 ghcr.io/verfix-dev/verfix-server:latest
           sleep 15 # Wait for services
           
       - name: Run Tests

@@ -398,6 +398,9 @@ export async function runInitWizard(): Promise<void> {
     console.log(chalk.green('  ✓ Browser mode configuration saved'));
   }
 
+  // Ensure getBrowserMode() sees the just-saved mode for pullImage() below
+  process.env.VERFIX_BROWSER_MODE = selectedBrowserMode;
+
   // ── Step 3: Pull + Start Runtime ──
   console.log('');
   const state = getContainerState();

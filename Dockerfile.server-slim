@@ -67,7 +67,7 @@ RUN npx tsc --skipLibCheck
 #   • PostgreSQL is NOT included — the Go API uses embedded SQLite (file-based)
 #
 # Layout inside the container:
-#   /app/api/verfix-api          → static Go binary (api listens on :3001)
+#   /app/api/verfix-api          → static Go binary (api listens on :3611)
 #   /app/workers/dist/src/       → compiled TypeScript worker JS
 #   /app/workers/node_modules/   → production-only worker deps
 #   /app/workers/artifacts/      → screenshots / HAR / traces (mount as volume)
