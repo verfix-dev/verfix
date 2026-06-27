@@ -198,9 +198,7 @@ function ReplayTab({ execution: e, apiBase }: { execution: Execution; apiBase: s
   }
 
   const getScreenshotUrl = (event?: ExecutionEvent | null) => {
-    const rawPath = event?.screenshot;
-    if (!rawPath) return null;
-    return `${apiBase}/artifacts/${rawPath.split('/artifacts/').pop()}`;
+    return formatArtifactUrl(apiBase, event?.screenshot);
   };
 
   const cleanMessage = (value: string) => value.replace(/\x1b\[[0-9;]*m/g, '').replace(/\s+/g, ' ').trim();
@@ -481,7 +479,7 @@ function AssertionsTab({ execution: e, apiBase }: { execution: Execution; apiBas
             <div style={{ padding: '0 14px 12px' }}>
               <p style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Failure Screenshot</p>
               <img
-                src={`${apiBase}${a.screenshot_on_failure.replace(/.*\/artifacts/, '/artifacts')}`}
+                src={formatArtifactUrl(apiBase, a.screenshot_on_failure) || ''}
                 alt="failure"
                 style={{ maxWidth: '100%', borderRadius: 6, border: '1px solid var(--border)', boxShadow: '0 2px 12px rgba(0,0,0,0.4)' }}
               />
@@ -582,19 +580,20 @@ function ArtifactsTab({ execution: e, apiBase }: { execution: Execution; apiBase
   }
 
   const screenshot = arts.screenshot || arts.failed_screenshot;
+  const screenshotUrl = formatArtifactUrl(apiBase, screenshot);
 
   return (
     <div>
-      {screenshot && (
+      {screenshot && screenshotUrl && (
         <div style={{ marginBottom: 20 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
             <p style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Screenshot</p>
-            <a href={`${apiBase}${screenshot.replace(/.*\/artifacts/, '/artifacts')}`} download style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--accent-blue)', textDecoration: 'none' }}>
+            <a href={screenshotUrl} download style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--accent-blue)', textDecoration: 'none' }}>
               <Download size={11} /> Download
             </a>
           </div>
           <img
-            src={`${apiBase}${screenshot.replace(/.*\/artifacts/, '/artifacts')}`}
+            src={screenshotUrl}
             alt="screenshot"
             style={{ width: '100%', borderRadius: 8, border: '1px solid var(--border)', boxShadow: '0 4px 24px rgba(0,0,0,0.5)' }}
             onError={ev => { (ev.target as HTMLImageElement).style.display = 'none'; }}
@@ -614,6 +613,14 @@ function ArtifactsTab({ execution: e, apiBase }: { execution: Execution; apiBase
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
+
+function formatArtifactUrl(apiBase: string, rawPath?: string | null): string | null {
+  if (!rawPath) return null;
+  const normalized = rawPath.replace(/\\/g, '/');
+  const idx = normalized.lastIndexOf('/artifacts/');
+  const relPath = idx !== -1 ? normalized.substring(idx + 11) : normalized.split('/').pop();
+  return `${apiBase}/artifacts/${relPath}`;
+}
 
 function Empty({ icon, text }: { icon: React.ReactNode; text: string }) {
   return (
