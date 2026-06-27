@@ -115,6 +115,7 @@ echo "  Starting Redis..."
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 redis-server --daemonize yes --port "${REDIS_PORT}" \
+  --protected-mode no \
   --save "" \
   --appendonly no \
   --loglevel notice \

@@ -49,23 +49,48 @@ function resolveTargetUrl(rawUrl: string): string {
   );
 }
 
-// ─── Redis ────────────────────────────────────────────────────────────────────
+const redisHost = process.env.REDIS_HOST || '127.0.0.1';
+const redisPort = parseInt(process.env.REDIS_PORT || '6379', 10);
 
-const connection = new Redis({
-  host: process.env.REDIS_HOST || 'localhost',
-  port: parseInt(process.env.REDIS_PORT || '6379'),
-  maxRetriesPerRequest: null,
+function createRedisClient(name: string): Redis {
+  let lastLoggedAttempt = 0;
+  return new Redis({
+    host: redisHost,
+    port: redisPort,
+    maxRetriesPerRequest: null,
+    retryStrategy(times) {
+      if (times - lastLoggedAttempt >= 10) {
+        lastLoggedAttempt = times;
+        console.error(
+          `\n❌ Redis (${name}) unreachable after ${times} connection attempts at ${redisHost}:${redisPort}.\n` +
+          `   👉 Ensure the Verfix runtime container is running ("verfix status" or "verfix start")\n`
+        );
+      }
+      return Math.min(times * 500, 5000);
+    },
+  });
+}
+
+const connection = createRedisClient('worker');
+const adapterConnection = createRedisClient('adapter');
+
+connection.on('connect', () => {
+  console.log('⚡ Redis worker connection established');
+});
+adapterConnection.on('connect', () => {
+  console.log('🔌 Redis adapter connection established');
 });
 
-const adapterConnection = new Redis({
-  host: process.env.REDIS_HOST || 'localhost',
-  port: parseInt(process.env.REDIS_PORT || '6379'),
+connection.on('error', err => {
+  if (!err.message.includes('ECONNREFUSED')) {
+    console.error(`⚠ Redis (worker) error: ${err.message}`);
+  }
 });
-
-// Without these listeners, an emitted Redis `error` becomes an unhandled
-// exception that can crash the worker process.
-connection.on('error', err => console.error(`⚠ Redis (worker) error: ${err.message}`));
-adapterConnection.on('error', err => console.error(`⚠ Redis (adapter) error: ${err.message}`));
+adapterConnection.on('error', err => {
+  if (!err.message.includes('ECONNREFUSED')) {
+    console.error(`⚠ Redis (adapter) error: ${err.message}`);
+  }
+});
 
 // ─── Artifacts directory ──────────────────────────────────────────────────────
 
