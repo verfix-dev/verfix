@@ -34,6 +34,25 @@ function getImageDigest(): string | null {
   }
 }
 
+function verifyHostDependencies(): void {
+  try {
+    execSync('npm --version', { stdio: 'pipe' });
+  } catch {
+    const isLinux = os.platform() === 'linux';
+    let msg =
+      '✗ Missing Host Dependency: "npm" was not found in your system PATH.\n' +
+      '  Hybrid Mode runs Playwright workers directly on your host machine and requires Node.js + npm.\n' +
+      '  • Action Required: Install Node.js (v20+) from https://nodejs.org\n';
+
+    if (isLinux) {
+      msg += '  • Alternative: Run in container mode by setting VERFIX_BROWSER_MODE=container\n';
+    } else {
+      msg += '  • Note: On macOS and Windows, Hybrid Mode is required to reliably test applications running on localhost.\n';
+    }
+    throw new Error(msg);
+  }
+}
+
 /**
  * Extract compiled worker files (JS + node_modules) from the Docker image
  * to the host cache at ~/.verfix/worker/.
@@ -47,6 +66,8 @@ function getImageDigest(): string | null {
  * creates .cmd shims in .bin/ instead of symlinks, so no admin rights are needed.
  */
 export function extractWorkerFiles(): void {
+  verifyHostDependencies();
+
   const digestFile = path.join(HOST_WORKER_DIR, '.image-digest');
   const entryPoint = path.join(HOST_WORKER_DIR, 'dist', 'src', 'index.js');
   const currentDigest = getImageDigest();

@@ -64,6 +64,8 @@ We revised the worker extraction strategy in `cli/src/worker-runner.ts`:
 * The CLI then runs `npm ci --omit=dev --ignore-scripts` natively on the host machine inside `~/.verfix/worker/`.
 * Running `npm ci` on Windows natively creates standard `.cmd` executable shims in `.bin/` instead of Linux symlinks, resolving the privilege issue completely without requiring elevated rights.
 
+> ℹ️ **OS Dependency & Networking Note:** On macOS and Windows, Hybrid Mode (host worker) is required to reliably test applications running on `localhost` because Docker Desktop VMs do not support native `--network=host`. Therefore, the CLI explicitly instructs users on Mac/Windows to install Node.js/npm on the host rather than suggesting container-only mode, avoiding network dead-ends when verifying local apps.
+
 ---
 
 ### Issue 2: Redis Protected Mode Blocking Host Workers
