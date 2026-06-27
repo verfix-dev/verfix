@@ -53,6 +53,7 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 mkdir -p "$(dirname "${SQLITE_PATH}")"
 
 redis-server --daemonize yes --port "${REDIS_PORT}" \
+  --protected-mode no \
   --save "" \
   --appendonly no \
   --loglevel notice \

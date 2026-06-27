@@ -52,14 +52,15 @@ function resolveTargetUrl(rawUrl: string): string {
 // ─── Redis ────────────────────────────────────────────────────────────────────
 
 const connection = new Redis({
-  host: process.env.REDIS_HOST || 'localhost',
+  host: process.env.REDIS_HOST || '127.0.0.1',
   port: parseInt(process.env.REDIS_PORT || '6379'),
   maxRetriesPerRequest: null,
 });
 
 const adapterConnection = new Redis({
-  host: process.env.REDIS_HOST || 'localhost',
+  host: process.env.REDIS_HOST || '127.0.0.1',
   port: parseInt(process.env.REDIS_PORT || '6379'),
+  maxRetriesPerRequest: null,
 });
 
 // Without these listeners, an emitted Redis `error` becomes an unhandled

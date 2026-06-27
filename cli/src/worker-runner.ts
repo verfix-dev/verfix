@@ -40,6 +40,11 @@ function getImageDigest(): string | null {
  *
  * Skips extraction if the cache is up-to-date (same image digest).
  * Forces re-extraction when the Docker image is updated.
+ *
+ * Strategy: We docker-cp only plain files (dist/, package.json, package-lock.json)
+ * from the image, then run `npm ci` on the host to install node_modules natively.
+ * This avoids the Linux→Windows symlink privilege issue entirely — npm on Windows
+ * creates .cmd shims in .bin/ instead of symlinks, so no admin rights are needed.
  */
 export function extractWorkerFiles(): void {
   const digestFile = path.join(HOST_WORKER_DIR, '.image-digest');
@@ -76,20 +81,21 @@ export function extractWorkerFiles(): void {
     execSync(`docker create --name ${tempContainer} ${getDockerImage()}`, {
       stdio: 'pipe',
     });
-    // Copy compiled JS, node_modules, and package.json from the image
+
+    // Copy compiled JS and manifests from the image.
+    // These are plain files (no symlinks), so docker cp works on every OS.
     execSync(
       `docker cp ${tempContainer}:/app/workers/dist ${path.join(HOST_WORKER_DIR, 'dist')}`,
-      { stdio: 'pipe' },
-    );
-    execSync(
-      `docker cp ${tempContainer}:/app/workers/node_modules ${path.join(HOST_WORKER_DIR, 'node_modules')}`,
       { stdio: 'pipe' },
     );
     execSync(
       `docker cp ${tempContainer}:/app/workers/package.json ${path.join(HOST_WORKER_DIR, 'package.json')}`,
       { stdio: 'pipe' },
     );
-    console.log('  ✅ Worker files extracted');
+    execSync(
+      `docker cp ${tempContainer}:/app/workers/package-lock.json ${path.join(HOST_WORKER_DIR, 'package-lock.json')}`,
+      { stdio: 'pipe' },
+    );
   } finally {
     try {
       execSync(`docker rm -f ${tempContainer}`, { stdio: 'pipe' });
@@ -97,6 +103,30 @@ export function extractWorkerFiles(): void {
       // best-effort cleanup
     }
   }
+
+  // Install node_modules natively on the host instead of copying from the
+  // Linux image.  npm ci uses the lockfile so versions match the Docker build
+  // exactly.  --omit=dev and --ignore-scripts mirror the Dockerfile flags.
+  // On Windows this produces .cmd shims in .bin/ (no symlinks needed).
+  // On Linux/macOS this produces normal symlinks (no privilege issues).
+  console.log('  📦 Installing worker dependencies...');
+  try {
+    execSync('npm ci --omit=dev --ignore-scripts', {
+      cwd: HOST_WORKER_DIR,
+      stdio: 'pipe',
+      timeout: 120_000, // 2 minutes — more than enough for 6 production deps
+    });
+  } catch (err: any) {
+    const stderr = err.stderr ? err.stderr.toString().trim() : '';
+    throw new Error(
+      'Failed to install worker dependencies.\n' +
+      'Make sure npm is available and you have network access.\n' +
+      (stderr ? `npm error: ${stderr}\n` : '') +
+      `Error: ${err.message}`,
+    );
+  }
+
+  console.log('  ✅ Worker files extracted');
 
   // Save digest for cache invalidation
   if (currentDigest) {
@@ -173,7 +203,7 @@ export function startLocalWorker(redisPort: number = 6379): number {
     env: {
       ...process.env,
       VERFIX_WORKER_MODE: 'local',
-      REDIS_HOST: 'localhost',
+      REDIS_HOST: '127.0.0.1',
       REDIS_PORT: String(redisPort),
       ARTIFACTS_DIR: HOST_ARTIFACTS_DIR,
       // Use default host browser path
