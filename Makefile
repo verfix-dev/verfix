@@ -7,7 +7,7 @@ down:
 	docker-compose down
 
 api:
-	cd api && GOTOOLCHAIN=local ~/.local/go/bin/go run main.go
+	cd api && GOTOOLCHAIN=local ~/.local/go/bin/go run .
 
 worker:
 	cd workers && npm run dev

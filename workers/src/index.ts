@@ -259,7 +259,7 @@ async function processJob(job: Job<JobPayload>): Promise<ExecutionResult> {
               ranFlowAssertions = true;
               console.log(`\n🔍 Running ${flow.assertions.length} flow assertion(s)...`);
               const flowResults = await runAssertions(
-                page, flow.assertions, consoleLogs, networkRequests, artifactsDir, data.id, data.mode, data.task, tracker
+                page, flow.assertions, consoleLogs, networkRequests, artifactsDir, data.id, data.mode, data.task, tracker, flow.name
               );
               assertionResults.push(...flowResults);
             }
@@ -300,6 +300,7 @@ async function processJob(job: Job<JobPayload>): Promise<ExecutionResult> {
         status: 'completed',
         task: data.task,
         url: data.url,
+        mode: data.mode || 'strict',
         passed,
         duration_ms: duration,
         retry_count: job.attemptsMade,
@@ -340,6 +341,7 @@ async function processJob(job: Job<JobPayload>): Promise<ExecutionResult> {
         status: 'failed',
         task: data.task,
         url: data.url,
+        mode: data.mode || 'strict',
         passed: false,
         duration_ms: duration,
         retry_count: job.attemptsMade,

@@ -5,13 +5,13 @@
   "main": "index.js",
   "scripts": {
     "dev": "ts-node src/index.ts",
-    "test": "npm run test:registry && npm run test:openai && npm run test:formats",
+    "test": "npm run test:registry && npm run test:openai && npm run test:formats && npm run test:assertions",
     "test:registry": "ts-node test/ai/adapters/registry.test.ts",
     "test:openai": "ts-node test/ai/adapters/openai.test.ts",
     "test:formats": "ts-node test/ai/adapters/message-format.test.ts",
-    "test:smoke": "ts-node scripts/test-ai-provider.ts"
+    "test:smoke": "ts-node scripts/test-ai-provider.ts",
+    "test:assertions": "ts-node test/assertions/engine-flow-tagging.test.ts"
   },
-
   "keywords": [],
   "author": "",
   "license": "ISC",

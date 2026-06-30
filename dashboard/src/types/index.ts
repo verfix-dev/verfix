@@ -57,6 +57,7 @@ export type AssertionResult = {
   screenshot_on_failure?: string;
   failure_type?: string;
   fix_hint?: string;
+  flow_name?: string;
 };
 
 export type ConsoleLine = { type: string; text: string; timestamp: string };
