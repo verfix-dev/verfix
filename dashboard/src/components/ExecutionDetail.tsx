@@ -552,7 +552,6 @@ function AssertionsTab({ execution: e, apiBase }: { execution: Execution; apiBas
 }
 
 // Single assertion card. Extracted so both the grouped and legacy flat layouts
-// Single assertion card. Extracted so both the grouped and legacy flat layouts
 // render identical per-assertion markup.
 function AssertionCard({ a, apiBase }: { a: AssertionResult; apiBase: string }) {
   const statusColor = a.passed ? 'var(--accent-green)' : 'var(--accent-red)';
