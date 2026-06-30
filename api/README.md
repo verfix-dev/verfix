@@ -12,5 +12,5 @@ This service is the primary entry point for the Verfix CLI, SDK, and external AI
 
 ## Local Development
 ```bash
-go run main.go
+go run .
 ```

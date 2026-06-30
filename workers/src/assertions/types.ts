@@ -35,6 +35,10 @@ export interface AssertionResult {
   screenshot_on_failure?: string;
   failure_type?: FailureType;
   fix_hint?: string;
+  // Identifier of the flow these assertions belong to. Absent for top-level /
+  // default (page_loaded / no_console_errors) assertions. Used by the dashboard
+  // assertion tab to group results by flow.
+  flow_name?: string;
 }
 
 export interface FlowStep {
@@ -112,6 +116,7 @@ export interface ExecutionResult {
   status: 'queued' | 'running' | 'completed' | 'failed';
   task: string;
   url: string;
+  mode: string;
   passed: boolean;
   duration_ms: number;
   retry_count: number;

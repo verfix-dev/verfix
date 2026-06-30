@@ -21,6 +21,7 @@ export async function runAssertions(
   mode: string = 'strict',
   task: string = '',
   tracker?: EventTracker,
+  flowName?: string,
 ): Promise<AssertionResult[]> {
   const results: AssertionResult[] = [];
 
@@ -186,7 +187,7 @@ export async function runAssertions(
       }
     }
 
-    const assertionResult = { type: assertion.type, ...result, screenshot_on_failure, failure_type, fix_hint };
+    const assertionResult = { type: assertion.type, ...result, screenshot_on_failure, failure_type, fix_hint, flow_name: flowName };
     results.push(assertionResult);
 
     // Enhanced logging

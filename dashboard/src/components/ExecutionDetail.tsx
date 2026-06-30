@@ -1,5 +1,5 @@
 'use client';
-import { Execution, ExecutionEvent } from '@/app/page';
+import { Execution, ExecutionEvent, AssertionResult } from '@/app/page';
 import { useState } from 'react';
 import { Activity, CheckCircle2, XCircle, Clock, Image, FileText, Network, Terminal, AlertTriangle, Download, Copy, Loader2, Sparkles, Play, Brain, Globe, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useWorkspace } from '@/context/WorkspaceContext';
@@ -54,26 +54,21 @@ export default function ExecutionDetail({ execution: e, apiBase, loadingDetail }
             </div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+            {e.mode && (
+              <span style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', padding: '2px 7px', borderRadius: 99, background: 'rgba(167,139,250,0.1)', color: 'var(--accent-purple)', border: '1px solid rgba(167,139,250,0.35)' }}>
+                {e.mode}
+              </span>
+            )}
             <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 99, background: `${color}18`, color, border: `1px solid ${color}35` }}>
               {isLive ? (e.status === 'running' ? '● Running' : '⏳ Queued') : e.passed ? '✓ Passed' : '✗ Failed'}
             </span>
             {e.duration_ms > 0 && (
               <span style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'JetBrains Mono, monospace' }}>
-                {e.duration_ms}ms · {e.retry_count}r
+                {e.duration_ms}ms · {e.retry_count} {e.retry_count === 1 ? 'retry' : 'retries'}
               </span>
             )}
           </div>
         </div>
-
-        {/* Stats row */}
-        {!isLive && !loadingDetail && assertCount > 0 && (
-          <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
-            <CompactStat label="Assertions" value={`${(e.assertions||[]).filter(a=>a.passed).length}/${assertCount}`} color={(e.assertions||[]).every(a=>a.passed) ? 'var(--accent-green)' : 'var(--accent-red)'} />
-            <CompactStat label="Errors" value={errCount} color={errCount > 0 ? 'var(--accent-red)' : 'var(--accent-green)'} />
-            <CompactStat label="Requests" value={netCount} color="var(--accent-cyan)" />
-            <CompactStat label="Mode" value={e.mode || 'strict'} color="var(--accent-purple)" />
-          </div>
-        )}
 
         {/* Live banner */}
         {isLive && (
@@ -430,6 +425,16 @@ function ExplorationTab({ execution: e }: { execution: Execution }) {
 }
 
 // ── Assertions Tab ───────────────────────────────────────────────────────────
+//
+// Design notes:
+// - Flow groups are rendered as distinct cards with a colored top bar and a
+//   bold left border, making it easy to scan which flow failed.
+// - Each flow is numbered sequentially (flows are ordered in the job), while
+//   the top-level "General Checks" group uses a generic icon.
+// - Assertion cards use a circular status badge and a colored left border to
+//   reinforce pass/fail without relying solely on color.
+// - Errors, fix hints, and details are visually tiered so the failure reason
+//   is scannable.
 
 function AssertionsTab({ execution: e, apiBase }: { execution: Execution; apiBase: string }) {
   const assertions = e.assertions || [];
@@ -442,51 +447,191 @@ function AssertionsTab({ execution: e, apiBase }: { execution: Execution; apiBas
     return <Empty icon={<CheckCircle2 size={18} />} text="No assertions recorded for this execution" />;
   }
 
+  // Build ordered groups of assertions. Flow groups appear first, in the order
+  // their first assertion was emitted by the worker; assertions without a
+  // flow_name (top-level / default checks) are collected into a final
+  // "General Checks" group so they remain visible at the bottom.
+  const groupOrder: string[] = [];
+  const groups = new Map<string, AssertionResult[]>();
+  for (const a of assertions) {
+    const key = a.flow_name || '__general__';
+    if (!groups.has(key)) {
+      groups.set(key, []);
+      groupOrder.push(key);
+    }
+    groups.get(key)!.push(a);
+  }
+
+  const hasFlowGroups = groupOrder.some(k => k !== '__general__');
+
+  // Backward-compatibility: executions produced before flow tagging (or runs
+  // with only top-level assertions) have a single ungrouped list. Render the
+  // legacy flat layout in that case so existing results are unchanged.
+  if (!hasFlowGroups) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {assertions.map((a, i) => <AssertionCard key={i} a={a} apiBase={apiBase} />)}
+      </div>
+    );
+  }
+
+  // Determine the numeric index of each flow group (excluding the trailing
+  // general group) so we can render a meaningful sequence marker.
+  let flowIndex = 1;
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      {assertions.map((a, i) => (
-        <div key={i} style={{ background: 'var(--bg-surface)', borderRadius: 9, border: `1px solid ${a.passed ? 'rgba(62,207,142,0.2)' : 'rgba(248,113,113,0.2)'}`, overflow: 'hidden' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px' }}>
-            {a.passed
-              ? <CheckCircle2 size={14} color="var(--accent-green)" style={{ flexShrink: 0 }} />
-              : <XCircle size={14} color="var(--accent-red)" style={{ flexShrink: 0 }} />}
-            <code style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)', flex: 1 }}>{a.type}</code>
-            <span style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'JetBrains Mono, monospace' }}>{a.duration_ms}ms</span>
-            <span style={{ fontSize: 10, fontWeight: 700, color: a.passed ? 'var(--accent-green)' : 'var(--accent-red)', padding: '2px 7px', background: a.passed ? 'rgba(62,207,142,0.1)' : 'rgba(248,113,113,0.1)', borderRadius: 4 }}>
-              {a.passed ? 'PASS' : 'FAIL'}
-            </span>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+      {groupOrder.map((key) => {
+        const groupAssertions = groups.get(key)!;
+        const passed = groupAssertions.filter(a => a.passed).length;
+        const total = groupAssertions.length;
+        const failed = total - passed;
+        const allPassed = passed === total;
+        const isGeneral = key === '__general__';
+        const color = allPassed ? 'var(--accent-green)' : 'var(--accent-red)';
+
+        return (
+          <div key={key} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {/* Flow group header card */}
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+              padding: '10px 14px', background: 'var(--bg-surface)', borderRadius: 10,
+              border: '1px solid var(--border)', borderLeft: `3px solid ${color}`,
+              boxShadow: '0 1px 2px rgba(0,0,0,0.04)',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                {/* Sequence marker or generic icon */}
+                <div style={{
+                  width: 26, height: 26, borderRadius: 7, flexShrink: 0,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  background: allPassed ? 'rgba(62,207,142,0.12)' : 'rgba(248,113,113,0.12)',
+                  color, border: `1px solid ${color}30`,
+                }}>
+                  {isGeneral
+                    ? <Activity size={12} />
+                    : <span style={{ fontSize: 10, fontWeight: 800, fontFamily: 'JetBrains Mono, monospace' }}>{flowIndex++}</span>}
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>
+                    {isGeneral ? 'General Checks' : `Flow “${key}”`}
+                  </span>
+                  <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>
+                    {total} assertion{total !== 1 ? 's' : ''}
+                  </span>
+                </div>
+              </div>
+
+              {/* Explicit status pill */}
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 6,
+                padding: '4px 10px', borderRadius: 99,
+                background: allPassed ? 'rgba(62,207,142,0.1)' : 'rgba(248,113,113,0.1)',
+                border: `1px solid ${color}30`, color,
+              }}>
+                {allPassed
+                  ? <CheckCircle2 size={12} color={color} />
+                  : <XCircle size={12} color={color} />}
+                <span style={{ fontSize: 11, fontWeight: 700 }}>
+                  {allPassed ? `${passed}/${total} passed` : `${passed}/${total} passed (${failed} failed)`}
+                </span>
+              </div>
+            </div>
+
+            {/* Group assertions */}
+            <div style={{
+              display: 'flex', flexDirection: 'column', gap: 6,
+              paddingLeft: 12, borderLeft: `2px solid ${allPassed ? 'rgba(62,207,142,0.2)' : 'rgba(248,113,113,0.2)'}`,
+            }}>
+              {groupAssertions.map((a, i) => <AssertionCard key={i} a={a} apiBase={apiBase} />)}
+            </div>
           </div>
-          {(a.error || a.details || a.fix_hint) && (
-            <div style={{ padding: '0 14px 12px', borderTop: '1px solid var(--border)' }}>
-              {a.error && (
-                <div style={{ marginTop: 8, padding: '7px 10px', background: 'rgba(248,113,113,0.07)', borderRadius: 6, fontSize: 11, color: 'var(--accent-red)', fontFamily: 'JetBrains Mono, monospace' }}>
-                  {a.error}
-                </div>
-              )}
-              {a.fix_hint && (
-                <div style={{ marginTop: 8, padding: '7px 10px', background: 'rgba(92,142,247,0.08)', borderRadius: 6, fontSize: 11, color: 'var(--text-primary)', fontFamily: 'JetBrains Mono, monospace' }}>
-                  <span style={{ fontWeight: 700, color: 'var(--accent-blue)' }}>Fix hint:</span> {a.fix_hint}
-                </div>
-              )}
-              {a.details && (
-                <pre style={{ marginTop: 8, fontSize: 11, color: 'var(--text-secondary)', background: 'var(--bg-elevated)', padding: '8px 10px', borderRadius: 6, overflow: 'auto', lineHeight: 1.6, fontFamily: 'JetBrains Mono, monospace' }}>
-                  {JSON.stringify(a.details, null, 2)}
-                </pre>
-              )}
+        );
+      })}
+    </div>
+  );
+}
+
+// Single assertion card. Extracted so both the grouped and legacy flat layouts
+// Single assertion card. Extracted so both the grouped and legacy flat layouts
+// render identical per-assertion markup.
+function AssertionCard({ a, apiBase }: { a: AssertionResult; apiBase: string }) {
+  const statusColor = a.passed ? 'var(--accent-green)' : 'var(--accent-red)';
+  const statusBg = a.passed ? 'rgba(62,207,142,0.1)' : 'rgba(248,113,113,0.1)';
+  const statusBorder = a.passed ? 'rgba(62,207,142,0.2)' : 'rgba(248,113,113,0.2)';
+  const humanType = a.type.replace(/_/g, ' ');
+
+  return (
+    <div style={{
+      background: 'var(--bg-surface)', borderRadius: 8, border: `1px solid ${statusBorder}`,
+      borderLeft: `3px solid ${statusColor}`, overflow: 'hidden',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px' }}>
+        <div style={{
+          width: 22, height: 22, borderRadius: '50%', flexShrink: 0,
+          display: 'flex', alignItems: 'center', justifyContent: 'center', background: statusBg,
+        }}>
+          {a.passed
+            ? <CheckCircle2 size={12} color={statusColor} />
+            : <XCircle size={12} color={statusColor} />}
+        </div>
+        <code style={{
+          fontSize: 12, fontWeight: 600, color: 'var(--text-primary)', flex: 1,
+          textTransform: 'capitalize', letterSpacing: '0.01em',
+        }}>{humanType}</code>
+        <span style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'JetBrains Mono, monospace' }}>{a.duration_ms}ms</span>
+        <span style={{
+          fontSize: 9, fontWeight: 800, color: statusColor, padding: '3px 9px',
+          background: statusBg, borderRadius: 99, textTransform: 'uppercase', letterSpacing: '0.04em',
+        }}>
+          {a.passed ? 'Pass' : 'Fail'}
+        </span>
+      </div>
+      {(a.error || a.fix_hint || a.details) && (
+        <div style={{ padding: '0 14px 12px', borderTop: '1px solid var(--border)' }}>
+          {a.error && (
+            <div style={{
+              marginTop: 8, padding: '8px 11px', borderRadius: 6,
+              background: 'rgba(248,113,113,0.08)', border: '1px solid rgba(248,113,113,0.15)',
+              fontSize: 11, color: 'var(--accent-red)', lineHeight: 1.5,
+              fontFamily: 'JetBrains Mono, monospace',
+            }}>
+              {a.error}
             </div>
           )}
-          {a.screenshot_on_failure && (
-            <div style={{ padding: '0 14px 12px' }}>
-              <p style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Failure Screenshot</p>
-              <img
-                src={formatArtifactUrl(apiBase, a.screenshot_on_failure) || ''}
-                alt="failure"
-                style={{ maxWidth: '100%', borderRadius: 6, border: '1px solid var(--border)', boxShadow: '0 2px 12px rgba(0,0,0,0.4)' }}
-              />
+          {a.fix_hint && (
+            <div style={{
+              marginTop: 8, padding: '8px 11px', borderRadius: 6,
+              background: 'rgba(92,142,247,0.08)', border: '1px solid rgba(92,142,247,0.15)',
+              fontSize: 11, color: 'var(--text-primary)', lineHeight: 1.5,
+            }}>
+              <span style={{ fontWeight: 700, color: 'var(--accent-blue)' }}>Fix hint:</span>{' '}
+              <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>{a.fix_hint}</span>
             </div>
+          )}
+          {a.details && (
+            <pre style={{
+              marginTop: 8, fontSize: 11, color: 'var(--text-secondary)', background: 'var(--bg-elevated)',
+              padding: '9px 11px', borderRadius: 6, overflow: 'auto', lineHeight: 1.6,
+              fontFamily: 'JetBrains Mono, monospace', border: '1px solid var(--border)',
+            }}>
+              {JSON.stringify(a.details, null, 2)}
+            </pre>
           )}
         </div>
-      ))}
+      )}
+      {a.screenshot_on_failure && (
+        <div style={{ padding: '0 14px 12px' }}>
+          <p style={{
+            fontSize: 10, color: 'var(--text-muted)', marginBottom: 6,
+            textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 700,
+          }}>Failure Screenshot</p>
+          <img
+            src={formatArtifactUrl(apiBase, a.screenshot_on_failure) || ''}
+            alt="failure"
+            style={{ maxWidth: '100%', borderRadius: 6, border: '1px solid var(--border)', boxShadow: '0 2px 12px rgba(0,0,0,0.4)' }}
+          />
+        </div>
+      )}
     </div>
   );
 }
