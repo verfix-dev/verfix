@@ -114,8 +114,9 @@ The JSON output gains a `source_changes` field:
 ```
 
 `.verfix/**`, `verfix.config.*`, and agent instruction files (`AGENTS.md`,
-`CLAUDE.md`, `.cursorrules`, `CODEX.md`) are classified as `config`; everything
-else is `project`.
+`CLAUDE.md`, `GEMINI.md`, `CODEX.md`, `.cursorrules`, `.cursor/**`,
+`.github/copilot-instructions.md`, `.github/instructions/**`, `.clinerules/**`,
+`.agents/**`) are classified as `config`; everything else is `project`.
 
 ### `sourceCodePolicy`
 

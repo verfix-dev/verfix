@@ -8,11 +8,10 @@ import {
 } from './constants';
 import {
   generateAgentsSection,
-  generateCursorRules,
-  generateClaudeSection,
-  generateCodexInstructions,
+  generateAgentsStub,
 } from './agents-md';
 import { detectAllAgentPlatforms, getAgentFilePath } from './agent-platform';
+import { writeVerfixInstructions } from './agent-writer';
 import {
   isDockerRunning, pullImage, startContainer, getContainerState, syncRuntimePortsFromContainer,
 } from './docker';
@@ -521,14 +520,20 @@ export async function runInitWizard(): Promise<void> {
     }
   }
 
-  // ── Step 7: Write/update AGENTS.md ──
+  // ── Step 7: Write .verfix/INSTRUCTIONS.md (full reference) + AGENTS.md stub ──
   const agentsPath = path.join(cwd, 'AGENTS.md');
   const flowSummaries: { id: string }[] = [];
   const runtimePorts = getRuntimePorts();
   const verfixSection = generateAgentsSection(flowSummaries, mode, baseUrl, runtimePorts);
+  const verfixStub = generateAgentsStub();
 
+  // The full reference always goes to the file Verfix owns.
+  writeVerfixInstructions(cwd, verfixSection);
+  console.log(chalk.green('  ✓ .verfix/INSTRUCTIONS.md created'));
+
+  // AGENTS.md carries only the short stub pointing at the reference file.
   if (!fs.existsSync(agentsPath)) {
-    fs.writeFileSync(agentsPath, verfixSection + '\n', 'utf-8');
+    fs.writeFileSync(agentsPath, verfixStub + '\n', 'utf-8');
     console.log(chalk.green('  ✓ AGENTS.md created'));
   } else {
     const existing = fs.readFileSync(agentsPath, 'utf-8');
@@ -540,7 +545,7 @@ export async function runInitWizard(): Promise<void> {
         default: true,
       });
       if (updateIt) {
-        const updated = existing.replace(sectionRegex, verfixSection);
+        const updated = existing.replace(sectionRegex, verfixStub.trimEnd());
         fs.writeFileSync(agentsPath, updated, 'utf-8');
         console.log(chalk.green('  ✓ AGENTS.md Verfix section updated'));
       } else {
@@ -553,7 +558,7 @@ export async function runInitWizard(): Promise<void> {
       });
       if (appendIt) {
         const separator = existing.endsWith('\n') ? '\n' : '\n\n';
-        fs.writeFileSync(agentsPath, existing + separator + verfixSection + '\n', 'utf-8');
+        fs.writeFileSync(agentsPath, existing + separator + verfixStub + '\n', 'utf-8');
         console.log(chalk.green('  ✓ AGENTS.md updated (Verfix section appended)'));
       } else {
         console.log(chalk.gray('  ⏭ Skipping AGENTS.md'));
@@ -562,29 +567,32 @@ export async function runInitWizard(): Promise<void> {
   }
 
   // ── Step 8: Platform-specific agent files ──
+  // AGENTS.md (written above) is the universal standard read by Codex, Cursor,
+  // Copilot coding agent, Kilo, opencode, Zed, Jules, and 20+ others. The files
+  // below are only for tools that don't read AGENTS.md natively.
   const detectedPlatforms = detectAllAgentPlatforms(cwd);
 
   const platformChoices = [
     {
-      name: 'Cursor (.cursorrules)',
-      value: 'cursor' as const,
-      checked: detectedPlatforms.includes('cursor'),
-    },
-    {
-      name: 'Claude (CLAUDE.md)',
+      name: 'Claude Code (CLAUDE.md)',
       value: 'claude' as const,
       checked: detectedPlatforms.includes('claude'),
     },
     {
-      name: 'Codex / OpenAI (CODEX.md)',
-      value: 'codex' as const,
-      checked: detectedPlatforms.includes('codex'),
+      name: 'GitHub Copilot IDE (.github/copilot-instructions.md)',
+      value: 'copilot' as const,
+      checked: detectedPlatforms.includes('copilot'),
+    },
+    {
+      name: 'Cline (.clinerules/verfix.md)',
+      value: 'cline' as const,
+      checked: detectedPlatforms.includes('cline'),
     },
   ];
 
-  console.log(chalk.gray('  ℹ AGENTS.md is always written as the default. Select agents below for'));
-  console.log(chalk.gray('    additional platform-specific files (.cursorrules, CLAUDE.md, CODEX.md).'));
-  console.log(chalk.gray('    Press Enter with nothing selected to use AGENTS.md only.'));
+  console.log(chalk.gray('  ℹ AGENTS.md is always written and is read natively by most agents'));
+  console.log(chalk.gray('    (Codex, Cursor, Copilot, Kilo, opencode, Zed, Jules, …). Select below'));
+  console.log(chalk.gray('    only for tools that need their own file. Press Enter to skip.'));
   console.log('');
 
   const detectedLabel = detectedPlatforms.length > 0
@@ -592,34 +600,27 @@ export async function runInitWizard(): Promise<void> {
     : '';
 
   const selectedPlatforms = await checkbox({
-    message: `Coding agents to configure${detectedLabel} (space to toggle, Enter to confirm):`,
+    message: `Extra agent files to write${detectedLabel} (space to toggle, Enter to confirm):`,
     choices: platformChoices,
   });
 
   const updatedPlatformFiles: string[] = [];
+  const platformStub = generateAgentsStub();
 
   for (const platform of selectedPlatforms) {
     const platformPath = getAgentFilePath(platform, cwd);
     const platformFileName = path.basename(platformPath);
-    let platformContent = '';
 
-    if (platform === 'cursor') {
-      platformContent = generateCursorRules(flowSummaries, mode, baseUrl, runtimePorts);
-    } else if (platform === 'claude') {
-      platformContent = generateClaudeSection(flowSummaries, mode, baseUrl, runtimePorts);
-    } else if (platform === 'codex') {
-      platformContent = generateCodexInstructions(flowSummaries, mode, baseUrl, runtimePorts);
-    }
-
-    if (!platformContent) continue;
+    // Copilot / Cline live in subdirectories that may not exist yet.
+    fs.mkdirSync(path.dirname(platformPath), { recursive: true });
 
     if (!fs.existsSync(platformPath)) {
-      fs.writeFileSync(platformPath, platformContent + '\n', 'utf-8');
+      fs.writeFileSync(platformPath, platformStub + '\n', 'utf-8');
       console.log(chalk.green(`  ✓ ${platformFileName} created`));
       updatedPlatformFiles.push(platformFileName);
     } else {
       const existingPlatform = fs.readFileSync(platformPath, 'utf-8');
-      const hasVerfixSection = existingPlatform.includes('Verfix') || existingPlatform.includes('project that uses Verfix');
+      const hasVerfixSection = existingPlatform.includes('Verfix — Browser Verification');
 
       if (hasVerfixSection) {
         const updatePlatform = await confirm({
@@ -641,25 +642,12 @@ export async function runInitWizard(): Promise<void> {
         }
       }
 
-      if (platform === 'cursor') {
-        const startMarker = 'You are working in a project that uses Verfix';
-        if (existingPlatform.includes(startMarker)) {
-          const index = existingPlatform.indexOf(startMarker);
-          const baseContent = existingPlatform.substring(0, index);
-          fs.writeFileSync(platformPath, baseContent + platformContent + '\n', 'utf-8');
-        } else {
-          const separator = existingPlatform.endsWith('\n') ? '\n' : '\n\n';
-          fs.writeFileSync(platformPath, existingPlatform + separator + platformContent + '\n', 'utf-8');
-        }
+      const regex = /## Verfix — Browser Verification[\s\S]*?(?=\n## [^V]|\n## $|$)/;
+      if (regex.test(existingPlatform)) {
+        fs.writeFileSync(platformPath, existingPlatform.replace(regex, platformStub.trimEnd()), 'utf-8');
       } else {
-        const regex = /## Verfix[\s\S]*?(?=\n## |$)/;
-        if (regex.test(existingPlatform)) {
-          const updated = existingPlatform.replace(regex, platformContent.trim());
-          fs.writeFileSync(platformPath, updated, 'utf-8');
-        } else {
-          const separator = existingPlatform.endsWith('\n') ? '\n' : '\n\n';
-          fs.writeFileSync(platformPath, existingPlatform + separator + platformContent + '\n', 'utf-8');
-        }
+        const separator = existingPlatform.endsWith('\n') ? '\n' : '\n\n';
+        fs.writeFileSync(platformPath, existingPlatform + separator + platformStub + '\n', 'utf-8');
       }
       console.log(chalk.green(`  ✓ ${platformFileName} updated`));
       updatedPlatformFiles.push(platformFileName);

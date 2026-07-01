@@ -3,9 +3,9 @@ import path from 'path';
 import chalk from 'chalk';
 import ora from 'ora';
 import { DEFAULT_CONFIG, getBrowserMode } from './constants';
-import { generateAgentsSection } from './agents-md';
+import { generateAgentsSection, generateAgentsStub } from './agents-md';
 import { detectAllAgentPlatforms } from './agent-platform';
-import { writeAgentsMd, writePlatformAgentFiles } from './agent-writer';
+import { writeAgentsMd, writeVerfixInstructions, writePlatformAgentFiles } from './agent-writer';
 import {
   isDockerInstalled, isDockerRunning, pullImage, startContainer,
   getContainerState, syncRuntimePortsFromContainer,
@@ -306,12 +306,15 @@ export async function runNonInteractiveInit(opts: NonInteractiveOptions): Promis
   fs.writeFileSync(configPath, JSON.stringify(configData, null, 2) + '\n', 'utf-8');
   console.log(chalk.green('  ✓ verfix.config.json created'));
 
-  // ── Step 6: Write AGENTS.md ──
+  // ── Step 6: Write .verfix/INSTRUCTIONS.md (full reference) + AGENTS.md stub ──
   const flowSummaries: { id: string }[] = [];
   const runtimePorts = getRuntimePorts();
   const verfixSection = generateAgentsSection(flowSummaries, config.mode, config.baseUrl, runtimePorts);
 
-  const createdAgentsMd = writeAgentsMd(cwd, verfixSection);
+  writeVerfixInstructions(cwd, verfixSection);
+  console.log(chalk.green('  ✓ .verfix/INSTRUCTIONS.md created'));
+
+  const createdAgentsMd = writeAgentsMd(cwd, generateAgentsStub());
   if (createdAgentsMd) {
     console.log(chalk.green('  ✓ AGENTS.md created'));
   } else {
