@@ -69,7 +69,8 @@ function isConfigPath(relPath: string): boolean {
   if (/^verfix\.config\.[^/]+$/.test(p)) return true; // verfix.config.js/ts/schema.json
   if (p.startsWith('.verfix/')) return true;
   // Agent instruction files — steering the agent is config, not project code.
-  if (p === 'AGENTS.md' || p === 'CLAUDE.md' || p === 'CODEX.md' || p === '.cursorrules') return true;
+  if (p === 'AGENTS.md' || p === 'CLAUDE.md' || p === 'GEMINI.md' || p === 'CODEX.md' || p === '.cursorrules') return true;
+  if (p === '.github/copilot-instructions.md' || p.startsWith('.github/instructions/')) return true;
   if (p.startsWith('.cursor/') || p.startsWith('.clinerules/') || p.startsWith('.agents/')) return true;
   return false;
 }

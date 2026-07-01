@@ -14,7 +14,7 @@ npx verfix init
 
 This command will:
 1. Create a `verfix.config.json` file for your configuration.
-2. Generate an `AGENTS.md` file as a single source of truth for humans and AI agents.
+2. Add a short Verfix stub to `AGENTS.md` — the universal instructions standard read natively by Codex, Cursor, GitHub Copilot, Kilo, opencode, Zed, Jules, and 20+ other agents — that points coding agents at the full reference in `.verfix/INSTRUCTIONS.md`. This keeps an existing `AGENTS.md` from being bloated: the detailed schema, workflow, and flow-writing guide live in the standalone file, loaded on demand. For tools that don't read `AGENTS.md` natively, verfix also writes the same stub to any detected `CLAUDE.md` (Claude Code), `.github/copilot-instructions.md` (Copilot IDE), or `.clinerules/verfix.md` (Cline).
 
 ## 2. Starting the Runtime
 

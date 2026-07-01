@@ -193,10 +193,22 @@ The CLI (`cli/`) is the main entry point for end users and AI coding agents. It 
 3. Update `cli/README.md` with usage examples
 4. If it calls the API, add the route check to `src/constants.ts`
 
-### Editing the AGENTS.md generator
+### Editing the agent instructions
 
-The `generateAgentsSection()` function in `src/init-wizard.ts` produces the markdown injected into user projects. When editing:
+Agent instructions are split across two generators in `src/agents-md.ts`:
 
+- `generateAgentsSection()` produces the **full reference** (schema, workflow, failure
+  table, flow-writing guide). It is written to the standalone `.verfix/INSTRUCTIONS.md`,
+  which Verfix owns and overwrites cleanly.
+- `generateAgentsStub()` produces the **short stub** injected into the project's
+  `AGENTS.md` (and the platform files) — identity, the config-first rule, core commands,
+  and a pointer to `.verfix/INSTRUCTIONS.md`. This keeps a project's existing `AGENTS.md`
+  from being bloated by the full reference.
+
+When editing:
+
+- Keep the stub small — only always-in-context essentials belong there; everything else
+  goes in the full reference.
 - Keep examples **generic** (never hardcode flow names like `login` or `checkout`)
 - Add a warning comment if adding anything that could cause agent hallucination
 - Test by running `npx ts-node src/index.ts init` in a clean directory

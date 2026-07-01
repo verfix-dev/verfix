@@ -2,6 +2,57 @@ import { FAILURE_TYPES } from './constants';
 
 // ─── AGENTS.md generation ────────────────────────────────────────────────────
 
+/**
+ * Path (relative to project root) where the full Verfix reference lives.
+ * AGENTS.md and the platform files carry only a short stub that points here,
+ * so that projects with an existing AGENTS.md aren't bloated by ~580 lines.
+ */
+export const VERFIX_INSTRUCTIONS_FILE = '.verfix/INSTRUCTIONS.md';
+
+/**
+ * Short stub injected into AGENTS.md. Carries only the always-in-context
+ * essentials (identity, the config-first rule, the core commands) and points at
+ * `.verfix/INSTRUCTIONS.md` for the full schema and workflow. Starts with the
+ * same `## Verfix — Browser Verification` heading as the full section so the
+ * existing section-replace logic updates it cleanly on re-init.
+ */
+export function generateAgentsStub(): string {
+  return `## Verfix — Browser Verification
+
+Verfix is a local browser-verification runtime. After editing any UI component,
+form, route, or page, **verify browser behavior** before considering the task done:
+
+\`\`\`bash
+verfix status                          # is the runtime healthy?
+verfix flows                           # the ONLY source of truth for flow IDs
+verfix run --flow <id> --output json   # verify the flow covering what you changed
+\`\`\`
+
+- **Verify the specific page/route/component you edited.** Pick the existing flow
+  that covers it and run it.
+- **No flow covers your change?** Create one: read the changed source for its route
+  and element selectors, add a flow to \`verfix.config.json\`, then run it. See
+  \`${VERFIX_INSTRUCTIONS_FILE}\` for the flow schema and a step-by-step guide.
+
+> **⚠️ CONFIG-FIRST.** When a flow fails, fix it in **Verfix config**
+> (\`verfix.config.json\`), not project source. Precedence — stop at the first that
+> works: (1) read the source and reuse the element's **EXISTING** selector in the
+> flow step or \`selectors\` alias (deterministic, works in \`strict\` mode);
+> (2) semantic selector (role/name/text); (3) \`assisted\` mode self-healing
+> (fallback for drift, does **not** run in strict); (4) **LAST RESORT** — add a
+> \`data-testid\` to source. Editing source **is** correct for a real app bug
+> (\`console_error\`, \`network_failure\`, broken route). \`verfix run\` reports
+> \`source_changes\`; under \`sourceCodePolicy: "block"\` a source edit fails the run.
+
+**Full flow schema, verification workflow, failure reference, and flow-writing
+guide:** [\`${VERFIX_INSTRUCTIONS_FILE}\`](./${VERFIX_INSTRUCTIONS_FILE}) — read it
+before writing or fixing a flow.
+
+> If \`verfix.config.json\` doesn't exist, Verfix isn't initialized yet. Bootstrap
+> with \`npx verfix init --yes\` (see \`${VERFIX_INSTRUCTIONS_FILE}\` for all flags).
+`;
+}
+
 export function generateAgentsSection(
   flows: Array<{ id: string; description?: string }>,
   mode: string,
@@ -232,12 +283,10 @@ flows unless you need a full regression check.
 1. **Read the app's source code** to understand the page structure.
 2. **Find the page route** (e.g. \`/settings/profile\`).
 3. **Identify interactive elements** — buttons, inputs, links, modals.
-4. **Find their selectors** — check for \`data-testid\` attributes first:
-
-   \`\`\`bash
-   # Search your codebase for existing data-testid attributes
-   grep -r 'data-testid' src/
-   \`\`\`
+4. **Find their selectors** — search the source for existing \`data-testid\`
+   attributes first (use your editor's search, ripgrep, or grep — whatever your
+   environment provides). On Windows PowerShell, \`Select-String -Pattern
+   data-testid -Path src\\* -Recurse\` works; on macOS/Linux, \`grep -rn data-testid src/\`.
 
 5. **Write steps** in execution order (navigate → wait → interact).
 6. **Add assertions** for the expected end state.
@@ -252,13 +301,11 @@ flows unless you need a full regression check.
 
 #### How to find selectors in source code
 
-\`\`\`bash
-# Find all data-testid attributes
-grep -rn 'data-testid' src/
-
-# Find a specific component's selectors
-grep -rn 'data-testid' src/components/LoginForm.tsx
-\`\`\`
+Search the source with whatever tool your environment has — your editor's search,
+ripgrep (\`rg data-testid src/\`), grep (\`grep -rn data-testid src/\`), or on Windows
+PowerShell \`Select-String -Pattern data-testid -Path src\\* -Recurse\`. Narrow to a
+single component (e.g. \`src/components/LoginForm.tsx\`) once you know where the
+element lives.
 
 #### If the element has no data-testid — find its real selector, don't add one
 
@@ -585,151 +632,17 @@ All assertions accept an optional \`timeout\` (ms, default 5000).
 > **To see REAL flows, run: \`verfix flows\`**`;
 }
 
-export function generateCursorRules(
-  flows: Array<{ id: string; description?: string }>,
-  mode: string,
-  baseUrl: string,
-  runtimePorts: { apiPort: number; dashboardPort: number },
-): string {
-  const flowList = flows.map(f =>
-    `- \`${f.id}\` — ${f.description || f.id.replace(/-/g, ' ') + ' flow'}`
-  ).join('\n');
-
-  return `You are working in a project that uses Verfix for browser verification.
-Follow these instructions when verifying UI and browser behavior:
-
-### Section 1 — Source of Truth Rules
-1. \`verfix flows\` is the ONLY source of truth for available flows. Do NOT invent flow IDs.
-2. \`verfix.config.json\` is the ONLY source of truth for flow definitions.
-3. Template patterns in AGENTS.md are NOT executable.
-4. Run \`verfix flows\` if unsure what flows exist.
-
-### Section 2 — CLI Reference
-- Check runtime: \`verfix status\`
-- List flows: \`verfix flows\` / \`verfix flows --output json\`
-- Run flow: \`verfix run --flow <flow-id> --output json\`
-
-### Section 3 — Verification Workflow
-1. Run \`verfix status\` to check runtime.
-2. Run \`verfix flows\` to see existing flows.
-3. Read \`verfix.config.json\` to understand steps.
-4. Run \`verfix run --flow <id> --output json\` to verify.
-5. If failed: read \`failures[0].type\` and \`fix_hint\`.
-   - Flow/selector issue: fix in CONFIG first. PRIMARY: read the source and use
-     the element's EXISTING selector (data-testid it already has, id, role, name,
-     or stable CSS) in the flow step / \`selectors\` alias — deterministic, works in
-     strict mode. Assisted mode's self-healing is only a FALLBACK for drift (and
-     doesn't run in strict). Adding a new data-testid to source is a LAST RESORT.
-   - Real app bug (\`console_error\`, \`network_failure\`, wrong behavior): fix app code.
-6. Max 3 retry attempts. If failing, show \`timeline_url\` to human.
-
-> CONFIG-FIRST: don't rewrite project code to make a selector resolve. \`verfix run\`
-> reports \`source_changes\`; under \`sourceCodePolicy: "block"\` a project-source edit
-> fails the run (\`source_edit_blocked\`) until reverted.
-
-### Section 4 — Configured Flows
-${flowList}
-
-For the full flow schema, selector best practices, and template patterns, refer to:
-[AGENTS.md](./AGENTS.md)
-`;
-}
-
-export function generateClaudeSection(
-  flows: Array<{ id: string; description?: string }>,
-  mode: string,
-  baseUrl: string,
-  runtimePorts: { apiPort: number; dashboardPort: number },
-): string {
-  const flowList = flows.map(f =>
-    `- \`${f.id}\` — ${f.description || f.id.replace(/-/g, ' ') + ' flow'}`
-  ).join('\n');
-
-  return `## Verfix — Browser Verification
-
-Verfix is a local browser-verification runtime. Run browser flows to verify your changes.
-
-### Source of Truth Rules
-1. \`verfix flows\` is the ONLY source of truth for available flows. Do NOT invent flow IDs.
-2. \`verfix.config.json\` is the ONLY source of truth for flow definitions.
-3. Template patterns in AGENTS.md are NOT executable.
-4. Run \`verfix flows\` if unsure what flows exist.
-
-### CLI Reference
-- Check runtime: \`verfix status\`
-- List flows: \`verfix flows\`
-- Run flow: \`verfix run --flow <flow-id> --output json\`
-
-### Verification Workflow
-1. Run \`verfix status\` to check runtime.
-2. Run \`verfix flows\` to see existing flows.
-3. Read \`verfix.config.json\` to understand steps.
-4. Run \`verfix run --flow <id> --output json\` to verify.
-5. If failed: read \`failures[0].type\` and \`fix_hint\`.
-   - Flow/selector issue: fix in CONFIG first. PRIMARY: read the source and use
-     the element's EXISTING selector (data-testid it already has, id, role, name,
-     or stable CSS) in the flow step / \`selectors\` alias — deterministic, works in
-     strict mode. Assisted mode's self-healing is only a FALLBACK for drift (and
-     doesn't run in strict). Adding a new data-testid to source is a LAST RESORT.
-   - Real app bug (\`console_error\`, \`network_failure\`, wrong behavior): fix app code.
-6. Max 3 retry attempts. If failing, show \`timeline_url\` to human.
-
-> CONFIG-FIRST: don't rewrite project code to make a selector resolve. \`verfix run\`
-> reports \`source_changes\`; under \`sourceCodePolicy: "block"\` a project-source edit
-> fails the run (\`source_edit_blocked\`) until reverted.
-
-### Configured Flows
-${flowList}
-
-For the full flow schema, selector best practices, and template patterns, refer to [AGENTS.md](./AGENTS.md).
-`;
-}
-
-export function generateCodexInstructions(
-  flows: Array<{ id: string; description?: string }>,
-  mode: string,
-  baseUrl: string,
-  runtimePorts: { apiPort: number; dashboardPort: number },
-): string {
-  const flowList = flows.map(f =>
-    `- \`${f.id}\` — ${f.description || f.id.replace(/-/g, ' ') + ' flow'}`
-  ).join('\n');
-
-  return `## Verfix Verification Instructions
-
-### Source of Truth Rules
-1. \`verfix flows\` is the ONLY source of truth for available flows. Do NOT invent flow IDs.
-2. \`verfix.config.json\` is the ONLY source of truth for flow definitions.
-3. Template patterns in AGENTS.md are NOT executable.
-4. Run \`verfix flows\` if unsure what flows exist.
-
-### CLI Reference
-- Check runtime: \`verfix status\`
-- List flows: \`verfix flows\`
-- Run flow: \`verfix run --flow <flow-id> --output json\`
-
-### Verification Workflow
-1. Run \`verfix status\` to check runtime.
-2. Run \`verfix flows\` to see existing flows.
-3. Read \`verfix.config.json\` to understand steps.
-4. Run \`verfix run --flow <id> --output json\` to verify.
-5. If failed: read \`failures[0].type\` and \`fix_hint\`.
-   - Flow/selector issue: fix in CONFIG first. PRIMARY: read the source and use
-     the element's EXISTING selector (data-testid it already has, id, role, name,
-     or stable CSS) in the flow step / \`selectors\` alias — deterministic, works in
-     strict mode. Assisted mode's self-healing is only a FALLBACK for drift (and
-     doesn't run in strict). Adding a new data-testid to source is a LAST RESORT.
-   - Real app bug (\`console_error\`, \`network_failure\`, wrong behavior): fix app code.
-6. Max 3 retry attempts. If failing, show \`timeline_url\` to human.
-
-> CONFIG-FIRST: don't rewrite project code to make a selector resolve. \`verfix run\`
-> reports \`source_changes\`; under \`sourceCodePolicy: "block"\` a project-source edit
-> fails the run (\`source_edit_blocked\`) until reverted.
-
-### Configured Flows
-${flowList}
-
-For the full flow schema, selector best practices, and template patterns, refer to [AGENTS.md](./AGENTS.md).
-`;
+/**
+ * Stub written to platform-specific agent files (CLAUDE.md,
+ * .github/copilot-instructions.md, .clinerules/verfix.md) for tools that don't
+ * (yet) read AGENTS.md natively. Identical to the AGENTS.md stub — one source of
+ * truth — and points at the full reference in `.verfix/INSTRUCTIONS.md`.
+ *
+ * Note: most modern agents (Codex, Cursor, Copilot coding agent, Kilo, opencode,
+ * Zed, Jules, …) read AGENTS.md directly, so these files are belt-and-suspenders,
+ * not the primary integration surface.
+ */
+export function generatePlatformStub(): string {
+  return generateAgentsStub();
 }
 
