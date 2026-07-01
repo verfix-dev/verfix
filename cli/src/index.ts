@@ -24,6 +24,10 @@ import { buildDashboardBase, getRuntimePorts } from './runtime';
 import { emitJson, emitJsonError, isJsonMode } from './json-output';
 import { showPendingNotifications, scheduleBackgroundCheck, clearImageCache } from './update-check';
 import { trackEvent, flushTelemetry } from './telemetry';
+import {
+  evaluateSourceChanges, buildSourceFinding, clearSourceBaseline,
+  type SourceCodePolicy, type SourceChanges,
+} from './source-guard';
 
 
 // ─── Load Environment Variables ────────────────────────────────────────────────
@@ -910,6 +914,8 @@ program
   .option('--timeout <ms>', 'Timeout in milliseconds', '15000')
   .option('--retries <n>', 'Number of retries on failure', '2')
   .option('--show-browser', 'Show the browser window during verification runs (hybrid mode only)', false)
+  .option('--source-policy <policy>', 'Project-source edit policy: warn | block | off (overrides config)')
+  .option('--reset-baseline', 'Reset the source-change baseline for this verify cycle', false)
   .action(async (opts) => {
     if (opts.showBrowser && getBrowserMode() !== 'host') {
       console.warn(chalk.yellow('⚠ --show-browser is only supported in hybrid mode. Ignoring.'));
@@ -989,6 +995,18 @@ program
     trackFlowCount = flows.length > 0 ? flows.length : (assertions ? assertions.length : 0);
 
     const baseUrl = opts.url || config.baseUrl || config.url;
+
+    // ── Source-change guard ───────────────────────────────────────────────────
+    // Snapshot / compare the working tree at the START of the run so we can tell
+    // whether the agent edited project source during this verify cycle. Prefer
+    // config edits (selectors alias / assisted mode) over touching project code.
+    const rawPolicy = (opts.sourcePolicy || config.sourceCodePolicy || 'warn') as string;
+    const sourcePolicy: SourceCodePolicy =
+      rawPolicy === 'block' || rawPolicy === 'off' ? rawPolicy : 'warn';
+    const sourceChanges: SourceChanges = evaluateSourceChanges(process.cwd(), {
+      reset: !!opts.resetBaseline,
+    });
+    const sourceGate = buildSourceFinding(sourceChanges, sourcePolicy);
 
     // If browser mode is host, make sure the local worker is running with the requested headfulness
     if (getBrowserMode() === 'host') {
@@ -1121,14 +1139,24 @@ program
     if (isJsonMode(opts)) {
       const failures = buildFailures(result);
 
+      // Fold the source-change gate into the contract. In 'block' mode a project
+      // edit fails the run; in 'warn' mode it surfaces a non-blocking finding.
+      if (sourceGate.finding) failures.push(sourceGate.finding);
+      const blocked = sourceGate.block;
+      const passed = result.passed && !blocked;
+
       const jsonResult = {
-        passed: result.passed,
+        passed,
         failures,
+        source_changes: sourceChanges.status === 'ok' ? sourceChanges : undefined,
         timeline_url: timelineUrl,
-        exit_code: result.passed ? 0 : 1,
+        exit_code: passed ? 0 : 1,
         execution_id: result.executionId,
         raw: result,
       };
+      // End the verify cycle only on a clean pass; keep the baseline otherwise so
+      // a revert-and-rerun resolves cleanly.
+      if (passed) clearSourceBaseline(process.cwd());
       emitJson(jsonResult);
       scheduleBackgroundCheck(['npm', 'image']);
       if (activeProxy) activeProxy.close();
@@ -1136,8 +1164,9 @@ program
     }
 
     // Pretty output
+    const prettyPassed = result.passed && !sourceGate.block;
     console.log('');
-    console.log(result.passed
+    console.log(prettyPassed
       ? chalk.bold.green('  ✅ VERIFICATION PASSED')
       : chalk.bold.red('  ❌ VERIFICATION FAILED'));
     console.log(`  ${chalk.gray('Duration:')} ${result.duration_ms}ms  |  ${chalk.gray('Retries:')} ${result.retry_count}`);
@@ -1177,6 +1206,18 @@ program
       }
     }
 
+    if (sourceGate.finding) {
+      console.log('');
+      const header = sourceGate.block
+        ? chalk.bold.red('  ⛔ Project source edited during verify loop (blocked):')
+        : chalk.bold.yellow('  ⚠ Project source edited during verify loop:');
+      console.log(header);
+      for (const f of sourceGate.finding.files) {
+        console.log(`    ${chalk.yellow('•')} ${f}`);
+      }
+      console.log(chalk.gray(`    ${sourceGate.finding.fix_hint}`));
+    }
+
     console.log('');
     if (!isJsonMode(opts)) {
       showPendingNotifications();
@@ -1184,8 +1225,9 @@ program
     } else {
       scheduleBackgroundCheck(['npm', 'image']);
     }
+    if (prettyPassed) clearSourceBaseline(process.cwd());
     if (activeProxy) activeProxy.close();
-    await finishTelemetryAndExit(result.passed ? 0 : 1);
+    await finishTelemetryAndExit(prettyPassed ? 0 : 1);
   });
 
 // ─── list command ─────────────────────────────────────────────────────────────

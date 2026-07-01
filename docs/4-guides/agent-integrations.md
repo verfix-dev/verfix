@@ -33,3 +33,14 @@ async function verifyAgentChanges() {
 ```
 
 Agents consume structured JSON outputs (assertions, failure classifications) rather than raw DOM dumps, making self-correction deterministic.
+
+## Config-First: don't rewrite source to pass a test
+
+When a selector fails, agents should fix it in **Verfix configuration** (the
+`selectors` alias map or assisted-mode self-healing), not by adding `data-testid`
+attributes to project source. Verfix enforces this with a source guard that reports
+a `source_changes` field on every run and can `block` runs that edit project code.
+
+See **[Config-First Verification](./config-first-verification.md)** for the full
+resolution ladder, the `sourceCodePolicy` option, and how the git-baseline guard
+works.

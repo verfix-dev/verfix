@@ -121,4 +121,6 @@ export const FAILURE_TYPES = [
   { type: 'network_failure', description: 'A required network request returned non-2xx status' },
   { type: 'timeout', description: 'An operation exceeded the configured timeout duration' },
   { type: 'assertion_failed', description: 'Generic fallback — check fix_hint for details' },
+  { type: 'source_edit_warning', description: 'Project source was edited during the verify loop (non-blocking; prefer config edits)' },
+  { type: 'source_edit_blocked', description: 'Project source was edited during the verify loop and sourceCodePolicy is "block" — revert and use config' },
 ];

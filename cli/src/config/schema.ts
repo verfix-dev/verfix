@@ -40,6 +40,11 @@ export const VerfixConfigSchema = z.object({
   task: z.string().optional(),
   timeout: z.number().optional(),
   retries: z.number().optional(),
+  // Governs what happens when an agent edits project source during a verify loop.
+  //   'warn'  → run still passes, but reports which project files changed (default)
+  //   'block' → run fails with source_edit_blocked if project files changed
+  //   'off'   → no source-change detection
+  sourceCodePolicy: z.enum(['warn', 'block', 'off']).optional(),
   selectors: z.record(z.string(), z.string()).optional(),
   metadata: z.record(z.string(), z.unknown()).optional(),
   assertions: z.array(FlowAssertionSchema).optional(),
