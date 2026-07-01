@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Config-First Source Guard:** Verfix now discourages agents from rewriting project source to satisfy broken selectors. Two layers:
+  - **Instructions (Layer 1):** The generated `AGENTS.md` / `CLAUDE.md` / `.cursorrules` / `CODEX.md` now encode an explicit config-first precedence ladder: **reuse the element's existing selector from source** (works in `strict` mode) → semantic selector → `assisted`-mode self-healing as a resilience *fallback* → adding a new `data-testid` to source as a **last resort**. Previously the docs told agents to add `data-testid` to source "freely."
+  - **Deterministic gate (Layer 2):** `verfix run` snapshots a git baseline at the start of each verify cycle and reports a `source_changes` field listing project files edited during the fix loop. A new `sourceCodePolicy` config option (`warn` (default) | `block` | `off`) controls enforcement — `block` fails the run with a `source_edit_blocked` failure until the source edit is reverted. Legitimate app-bug fixes are still allowed under `warn`.
+  - New `run` flags: `--source-policy <warn|block|off>` and `--reset-baseline`. Degrades gracefully (disabled) when not in a git repo.
+
+### Fixed
+- **Config-first target resolution actually works now.** The flow executor (`workers/src/browser/flow-executor.ts`) previously ignored the `selectors` alias map and never invoked self-healing during flow execution (healing only ran in exploratory mode), so the config-without-`data-testid` path was effectively dead. `resolveLocator` now (1) resolves `selectors` alias keys to their real selector, and (2) in `assisted` mode heals unresolved selectors via the accessibility tree (aria-label / role / text) before an AI fallback. Camel/kebab/snake-case tokens are converted to intent hints for better semantic matching. `strict` mode remains fully deterministic.
+
 ## [0.2.9] - 2026-06-22
 
 ### Fixed

@@ -41,6 +41,33 @@ Verfix is a local browser-verification runtime. After editing any UI
 component, form, route, or page — **you must verify browser behavior**
 before considering the task done.
 
+> **⚠️ CONFIG-FIRST RULE (read this first).**
+> When a flow fails, fix it by editing **Verfix configuration**, not project
+> source. Editing project code (adding \`data-testid\`, renaming elements, etc.)
+> to make a selector resolve is an anti-pattern — it rewrites the app to fit the
+> test. Follow this precedence and STOP at the first that works:
+>
+> 1. **Read the app source and use the element's EXISTING selector.** Find the
+>    selector that is already in the code — a \`data-testid\` it already has, or its
+>    \`id\`, \`role\`, \`name\`, or a stable semantic CSS selector — and put it in the
+>    flow step (or the \`selectors\` alias map). This is the PRIMARY path: it's
+>    deterministic and works in \`strict\` mode (what CI runs).
+> 2. **Use a semantic selector** (accessible role/name or visible text) when there
+>    is no stable structural selector, e.g. \`role=button[name="Sign In"]\`.
+> 3. **Run in \`assisted\` mode for resilience** — self-healing recovers a *drifted*
+>    selector at run time. This is a FALLBACK for stability, NOT a way to avoid
+>    finding the real selector, and it does **not** run in \`strict\` mode.
+> 4. **LAST RESORT — edit project source** (add a \`data-testid\`/\`aria-label\`).
+>    Only when 1–3 genuinely cannot target the element, and state why in your summary.
+>
+> Editing project source **is** correct when Verfix surfaces a **real app bug**
+> (a console error, a broken route, a genuine regression) — that's the point of
+> verification. The rule is about not hacking source to satisfy a selector.
+>
+> Verfix enforces this: \`verfix run\` reports a \`source_changes\` field listing
+> project files you touched during the verify loop. Under \`sourceCodePolicy: "block"\`
+> the run fails with \`source_edit_blocked\` until you revert.
+
 ---
 
 ### Section 1 — Runtime Instructions
@@ -126,9 +153,13 @@ Follow these steps **in order** every time you need to verify a UI change:
 5. **Create a new flow ONLY if** no existing flow covers the change.
    Read the app source to find real routes, selectors, and expected behavior.
 6. \`verfix run --flow <id> --output json\` — Execute the flow.
-7. **If failure:** Is it an app issue or a flow issue?
-   - App issue → fix the application code.
-   - Flow issue → update \`verfix.config.json\` (wrong selector, stale route, etc.).
+7. **If failure:** classify it — is it a flow/selector issue or a real app bug?
+   - **Flow/selector issue** (\`selector_not_found\`, \`selector_not_visible\`,
+     stale route/text) → fix it **in config** using the CONFIG-FIRST precedence:
+     \`selectors\` alias → assisted mode → flow selector string → (last resort)
+     project source. Do **not** jump to editing project code.
+   - **Real app bug** (\`console_error\`, \`network_failure\`, wrong behavior) →
+     fix the application code. This is a legitimate source edit.
 8. **Fix and retry** — Go back to step 6.
 9. **After 3 failed attempts** → Stop retrying. Show the \`timeline_url\` to the
    human and let them inspect the visual timeline on the dashboard.
@@ -136,14 +167,20 @@ Follow these steps **in order** every time you need to verify a UI change:
 #### Edit → verify → fix loop
 
 \`\`\`
-1. Edit the application code
+1. Edit the application code (your feature work)
 2. Run the relevant flow:  verfix run --flow <id> --output json
 3. If passed → done, move to next task
 4. If !passed:
    a. Read failures[0].type and failures[0].fix_hint
-   b. App code issue  → fix the app, go to step 2
-   c. Flow definition issue → update verfix.config.json, go to step 2
+   b. Flow/selector issue → fix in CONFIG (selectors alias → assisted mode →
+      flow selector string → project source only as last resort), go to step 2
+   c. Real app bug (console_error, network_failure, wrong behavior) → fix the
+      app code, go to step 2
 5. After 3 failed attempts → stop, show timeline_url to user
+
+> Note: \`verfix run\` reports \`source_changes\` — project files edited during this
+> loop. If you see your feature files there and it wasn't a genuine bug fix,
+> revert and use the config path instead.
 \`\`\`
 
 #### When to create a new flow
@@ -223,17 +260,33 @@ grep -rn 'data-testid' src/
 grep -rn 'data-testid' src/components/LoginForm.tsx
 \`\`\`
 
-#### How to add data-testid if missing
+#### If the element has no data-testid — find its real selector, don't add one
 
-If the element you need to target has no \`data-testid\`, **add one**:
+Adding \`data-testid\` to project source is the **last resort**, not the default.
+The primary job when writing a flow is to **read the source and use the selector
+that already exists**. Work down this ladder and stop at the first that resolves:
 
-\`\`\`diff
--<button type="submit">Sign In</button>
-+<button type="submit" data-testid="login-submit">Sign In</button>
-\`\`\`
-
-This is a non-breaking change. Add \`data-testid\` attributes freely — they
-don't affect runtime behavior and make flows much more stable.
+1. **Existing selector from source (PRIMARY).** Open the component and target what
+   is already there — an existing \`data-testid\`, \`id\`, \`name\`, \`role\`, or a stable
+   semantic CSS selector. Put it directly in the flow step, or give it a logical
+   name via the \`selectors\` alias map. Deterministic; works in \`strict\` mode:
+   \`\`\`json
+   "selectors": { "loginSubmit": "#login-form button[type=submit]" }
+   \`\`\`
+2. **Semantic selector** — accessible role/name or visible text when there is no
+   stable structural selector: \`role=button[name="Sign In"]\`, \`text=Sign In\`.
+3. **\`assisted\` mode (FALLBACK).** If a selector may drift, run the flow in
+   \`assisted\` mode so self-healing can recover it via \`aria-label\`/\`role\`/text at
+   run time. This is a resilience net, not a substitute for step 1, and it does
+   **not** run in \`strict\` mode — CI still needs the real selector.
+4. **LAST RESORT — add \`data-testid\` to source.** Only when the element genuinely
+   cannot be targeted (e.g. an icon-only control with no accessible name — which
+   is also a real a11y gap worth fixing). Say so in your summary; expect it in
+   \`source_changes\`:
+   \`\`\`diff
+   -<button type="submit"><Icon/></button>
+   +<button type="submit" data-testid="login-submit" aria-label="Sign in"><Icon/></button>
+   \`\`\`
 
 ---
 
@@ -296,6 +349,8 @@ ${failureList}
 | \`network_failure\` | API returned non-2xx. Check the backend or mock the endpoint. |
 | \`timeout\` | Operation took too long. Increase \`timeout\` on the step/assertion, or add a \`wait_for_selector\` step. |
 | \`assertion_failed\` | Generic fallback. Read \`fix_hint\` for specifics. |
+| \`source_edit_warning\` | You edited project source during the verify loop. If it wasn't a genuine bug fix, revert and use the config path (\`selectors\` alias / assisted mode). |
+| \`source_edit_blocked\` | \`sourceCodePolicy\` is \`block\` and project source changed. Revert the source edit and target the element via config, then re-run. |
 
 #### Retry logic
 
@@ -348,6 +403,13 @@ If the runtime is misbehaving, use these commands to diagnose and fix:
 
   // OPTIONAL — Number of retries on failure (default: 2)
   "retries": 2,
+
+  // OPTIONAL — What to do when project source is edited during a verify loop.
+  //   "warn"  → run still passes, but reports changed project files (default)
+  //   "block" → run FAILS with source_edit_blocked if project source changed
+  //   "off"   → no source-change detection
+  // Prefer fixing selectors via the "selectors" alias map or assisted mode.
+  "sourceCodePolicy": "warn",
 
   // OPTIONAL — Selector aliases. Map logical names to real selectors.
   "selectors": {
@@ -553,9 +615,17 @@ Follow these instructions when verifying UI and browser behavior:
 3. Read \`verfix.config.json\` to understand steps.
 4. Run \`verfix run --flow <id> --output json\` to verify.
 5. If failed: read \`failures[0].type\` and \`fix_hint\`.
-   - App bug: Fix app code.
-   - Flow issue: Update \`verfix.config.json\`.
+   - Flow/selector issue: fix in CONFIG first. PRIMARY: read the source and use
+     the element's EXISTING selector (data-testid it already has, id, role, name,
+     or stable CSS) in the flow step / \`selectors\` alias — deterministic, works in
+     strict mode. Assisted mode's self-healing is only a FALLBACK for drift (and
+     doesn't run in strict). Adding a new data-testid to source is a LAST RESORT.
+   - Real app bug (\`console_error\`, \`network_failure\`, wrong behavior): fix app code.
 6. Max 3 retry attempts. If failing, show \`timeline_url\` to human.
+
+> CONFIG-FIRST: don't rewrite project code to make a selector resolve. \`verfix run\`
+> reports \`source_changes\`; under \`sourceCodePolicy: "block"\` a project-source edit
+> fails the run (\`source_edit_blocked\`) until reverted.
 
 ### Section 4 — Configured Flows
 ${flowList}
@@ -596,9 +666,17 @@ Verfix is a local browser-verification runtime. Run browser flows to verify your
 3. Read \`verfix.config.json\` to understand steps.
 4. Run \`verfix run --flow <id> --output json\` to verify.
 5. If failed: read \`failures[0].type\` and \`fix_hint\`.
-   - App bug: Fix app code.
-   - Flow issue: Update \`verfix.config.json\`.
+   - Flow/selector issue: fix in CONFIG first. PRIMARY: read the source and use
+     the element's EXISTING selector (data-testid it already has, id, role, name,
+     or stable CSS) in the flow step / \`selectors\` alias — deterministic, works in
+     strict mode. Assisted mode's self-healing is only a FALLBACK for drift (and
+     doesn't run in strict). Adding a new data-testid to source is a LAST RESORT.
+   - Real app bug (\`console_error\`, \`network_failure\`, wrong behavior): fix app code.
 6. Max 3 retry attempts. If failing, show \`timeline_url\` to human.
+
+> CONFIG-FIRST: don't rewrite project code to make a selector resolve. \`verfix run\`
+> reports \`source_changes\`; under \`sourceCodePolicy: "block"\` a project-source edit
+> fails the run (\`source_edit_blocked\`) until reverted.
 
 ### Configured Flows
 ${flowList}
@@ -636,9 +714,17 @@ export function generateCodexInstructions(
 3. Read \`verfix.config.json\` to understand steps.
 4. Run \`verfix run --flow <id> --output json\` to verify.
 5. If failed: read \`failures[0].type\` and \`fix_hint\`.
-   - App bug: Fix app code.
-   - Flow issue: Update \`verfix.config.json\`.
+   - Flow/selector issue: fix in CONFIG first. PRIMARY: read the source and use
+     the element's EXISTING selector (data-testid it already has, id, role, name,
+     or stable CSS) in the flow step / \`selectors\` alias — deterministic, works in
+     strict mode. Assisted mode's self-healing is only a FALLBACK for drift (and
+     doesn't run in strict). Adding a new data-testid to source is a LAST RESORT.
+   - Real app bug (\`console_error\`, \`network_failure\`, wrong behavior): fix app code.
 6. Max 3 retry attempts. If failing, show \`timeline_url\` to human.
+
+> CONFIG-FIRST: don't rewrite project code to make a selector resolve. \`verfix run\`
+> reports \`source_changes\`; under \`sourceCodePolicy: "block"\` a project-source edit
+> fails the run (\`source_edit_blocked\`) until reverted.
 
 ### Configured Flows
 ${flowList}

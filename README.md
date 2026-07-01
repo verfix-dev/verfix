@@ -227,6 +227,7 @@ Execution path (Linux — container mode):
 - [Execution Modes](./docs/3-core-concepts/execution-modes.md)
 - [Observability & Timeline](./docs/1-introduction/observability-core.md)
 - [Agent Integrations](./docs/4-guides/agent-integrations.md)
+- [Config-First Verification](./docs/4-guides/config-first-verification.md)
 - [Full CLI Reference](./cli/README.md)
 
 ---

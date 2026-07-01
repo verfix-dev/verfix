@@ -13,6 +13,16 @@ Verfix configuration is managed via environment variables within the `.verfix/.e
 | `API_PORT` | `3611` | Port for the Go API. |
 | `DASHBOARD_PORT` | `3610` | Port for the Next.js UI. |
 
+## `verfix.config.json` options (selected)
+
+Beyond flows, a few config fields shape how targets are resolved and how source
+edits are governed:
+
+| Field | Default | Description |
+|---|---|---|
+| `selectors` | `{}` | Alias map of logical name → real selector. Steps referencing an alias are resolved at run time, so you can retarget elements without editing project source. |
+| `sourceCodePolicy` | `warn` | What happens when project source is edited during a verify loop: `warn` (report only), `block` (fail with `source_edit_blocked`), or `off`. See [Config-First Verification](../4-guides/config-first-verification.md). |
+
 ## External Dependencies
 
 By default, the Verfix Docker runtime includes embedded instances of Redis.
