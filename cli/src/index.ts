@@ -1127,7 +1127,7 @@ program
       console.log(chalk.gray('verfix install is for local mode. Use --server to manage the Docker runtime.'));
       return;
     }
-    const { isEngineInstalled, isChromiumInstalled, ensureChromium } = await import('./local-runner');
+    const { isEngineInstalled, ensureChromium } = await import('./local-runner');
     if (!isEngineInstalled()) {
       if (isJsonMode(opts)) {
         emitJsonError({ error: 'engine_not_installed', message: '@verfix/engine is not installed.', hint: 'Reinstall the CLI: npm install verfix' });
@@ -1135,17 +1135,9 @@ program
       console.error(chalk.red('@verfix/engine is not installed — run: npm install verfix'));
       process.exit(2);
     }
-    if (isChromiumInstalled()) {
-      if (isJsonMode(opts)) {
-        emitJson({ installed: true, browser: 'chromium', already: true });
-      } else {
-        console.log(chalk.green('  ✓ Chromium already installed'));
-      }
-      return;
-    }
     if (!isJsonMode(opts)) {
       console.log('');
-      console.log(chalk.bold('  Installing Chromium (~130MB, one-time)...'));
+      console.log(chalk.gray('  Ensuring Chromium is installed (skips if already present)...'));
       console.log('');
     }
     try {
@@ -1153,7 +1145,7 @@ program
       if (isJsonMode(opts)) {
         emitJson({ installed: true, browser: 'chromium' });
       } else {
-        console.log(chalk.green('  ✓ Chromium installed'));
+        console.log(chalk.green('  ✓ Chromium ready'));
       }
     } catch (e: any) {
       if (isJsonMode(opts)) {

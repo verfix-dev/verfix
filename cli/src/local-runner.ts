@@ -73,12 +73,34 @@ export function isEngineInstalled(): boolean {
   }
 }
 
-/** Whether the engine's Chromium (or a pinned channel browser) is launchable. */
+/**
+ * Whether the engine's Chromium (or a pinned channel browser) is launchable.
+ *
+ * Checks BOTH the full Chromium (what executablePath() reports) AND the
+ * headless shell directory (what headless launches actually use — a SEPARATE
+ * binary). A partial install — full Chromium present, headless shell absent —
+ * would pass a naive executablePath()-only check but crash at launch time with
+ * "Executable doesn't exist at chromium_headless_shell-XXXX/...". This is
+ * exactly the bug that caused silent crashes when the headless shell wasn't
+ * downloaded.
+ */
 export function isChromiumInstalled(browser?: LocalBrowserConfig): boolean {
   if (browser?.channel) return true;
   try {
     const execPath = resolveEnginePlaywright().chromium.executablePath();
-    return !!execPath && fs.existsSync(execPath);
+    if (!execPath || !fs.existsSync(execPath)) return false;
+    // Derive the headless shell directory from the full Chromium path and
+    // verify it exists. execPath looks like:
+    //   ~/.cache/ms-playwright/chromium-1228/chrome-linux/chrome
+    // The headless shell lives at:
+    //   ~/.cache/ms-playwright/chromium_headless_shell-1228/...
+    const revMatch = execPath.match(/chromium-(\d+)/);
+    if (revMatch) {
+      const cacheDir = path.dirname(path.dirname(path.dirname(execPath)));
+      const headlessShellDir = path.join(cacheDir, `chromium_headless_shell-${revMatch[1]}`);
+      if (!fs.existsSync(headlessShellDir)) return false;
+    }
+    return true;
   } catch {
     // executablePath() throws when the registry entry is missing
     return false;
@@ -142,12 +164,21 @@ export function detectInstalledBrowser(): DetectedBrowser | null {
 }
 
 /**
- * Ensure a Chromium the engine can launch exists, downloading it if needed.
- * Skipped entirely when config pins a browser channel (e.g. installed Chrome).
- * All progress goes to stderr — stdout stays pure for --output json.
+ * Ensure a Chromium the engine can launch exists. Skipped entirely when config
+ * pins a browser channel (e.g. installed Chrome). All progress goes to stderr
+ * — stdout stays pure for --output json.
+ *
+ * Always runs `playwright install chromium`, which is IDEMPOTENT: when the
+ * browser is fully installed it completes in <1s with no download; when pieces
+ * are missing (e.g. the headless shell that headless launches use, which is a
+ * separate binary from the full Chromium) it downloads just what's missing.
+ * This is more reliable than our own isChromiumInstalled() fast-path, which
+ * could report a false positive on a partial install and skip the download.
  */
 export async function ensureChromium(browser?: LocalBrowserConfig, skipDownload = false): Promise<void> {
-  if (isChromiumInstalled(browser)) return;
+  // A pinned channel (e.g. 'chrome') uses the user's installed browser — no
+  // Playwright download needed.
+  if (browser?.channel) return;
 
   if (skipDownload) {
     throw new BrowserNotInstalledError(
@@ -156,13 +187,15 @@ export async function ensureChromium(browser?: LocalBrowserConfig, skipDownload 
   }
 
   const { cliPath } = resolveEnginePlaywright();
-  console.error('Chromium not found — downloading (~130MB, one-time, cached in ~/.cache/ms-playwright)...');
+  // `playwright install chromium` is idempotent — fast no-op when fully
+  // installed, downloads only missing pieces otherwise (e.g. the headless
+  // shell). Its own progress output goes to stderr (stdio: ['ignore', 2, 2]).
   const res = spawnSync(process.execPath, [cliPath, 'install', 'chromium'], {
     stdio: ['ignore', 2, 2],
   });
   if (res.status !== 0) {
     throw new BrowserNotInstalledError(
-      'Chromium download failed. Set "browser": {"channel": "chrome"} in verfix.config.json to use your installed Chrome, or run: npx playwright install chromium',
+      'Chromium install failed. Set "browser": {"channel": "chrome"} in verfix.config.json to use your installed Chrome, or run: verfix install',
     );
   }
 }
@@ -231,6 +264,18 @@ export async function runLocal(payload: any, opts: LocalRunOptions): Promise<Exe
           break;
         }
         console.error(`Run crashed (${err.message}), retrying (attempt ${attempt + 1}/${totalAttempts})...`);
+        // Self-repair: if the browser binary is missing (partial install,
+        // version mismatch, headless shell not downloaded), re-run the
+        // idempotent installer before retrying. `playwright install chromium`
+        // only downloads what's missing, so this is fast if already complete.
+        if (/Executable doesn't exist/i.test(err.message)) {
+          console.error('Browser binary missing — repairing before retry...');
+          try {
+            await ensureChromium(opts.browser, false);
+          } catch {
+            // best-effort repair; if it fails, the retry will fail and be reported
+          }
+        }
         await new Promise(r => setTimeout(r, 1500 * Math.pow(2, attempt - 1)));
       }
     }

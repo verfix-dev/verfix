@@ -240,7 +240,8 @@ VERFIX_RUNNER=server verfix run --output json
 1. ✅ Done — `@verfix/engine@0.1.0` is published; the CLI now depends on
    `^0.1.0`, and the repo uses npm workspaces so local dev still live-links the
    `workers/` package. (The published tarball carries `^0.1.0`, not `file:`.)
-2. Bump the CLI to `0.3.0` (the `timeline_url: null` behavior change warrants
-   the minor bump + changelog).
+2. ✅ Done — CLI bumped to `0.3.1` (then `0.3.2` for the headless-shell crash
+   fix). The `timeline_url: null` behavior change + the packaging/install
+   fixes warranted the minor bump + changelog.
 3. Re-verify the server Docker image builds (`docker build -f
    Dockerfile.server-slim .`) since the workers package layout changed.

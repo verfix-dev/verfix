@@ -5,7 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased] — 0.3.0 (local-first)
+## [Unreleased]
+
+### Fixed
+- **Headless-shell crash on partial Playwright install.** `isChromiumInstalled()` only checked the full Chromium binary (`chromium.executablePath()`), but the engine launches headless by default — which uses a *separate* `chrome-headless-shell` binary. When the full Chromium was present but the headless shell was missing (partial install, interrupted download, or cache cleared), the check passed, `ensureChromium()` skipped the download, and the run crashed with `Executable doesn't exist at chromium_headless_shell-XXXX/...`. Two fixes: (1) `isChromiumInstalled()` now also verifies the `chromium_headless_shell-{rev}` directory exists; (2) `ensureChromium()` no longer uses the check as a fast-path — it always runs `playwright install chromium` (idempotent, <1s when complete, downloads only missing pieces); (3) the retry loop now self-repairs: if a launch fails with "Executable doesn't exist", it re-runs the installer before retrying.
+
+## [0.3.1] - 2026-07-04 (local-first)
 
 ### Changed — ⚡ Verfix is now local-first (config-compatible)
 - **`verfix run` executes in-process by default — no Docker, no Redis, no API server.** The verification engine was extracted from the workers package as **`@verfix/engine`** (`runVerification(payload, opts)`), and the CLI now calls it directly. A clean machine needs only Node 20+; the first run downloads Chromium once (~130MB, cached). Existing `verfix.config.json` files need **zero changes**.
