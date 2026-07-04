@@ -2,8 +2,20 @@
   "name": "@verfix/engine",
   "version": "0.1.0",
   "description": "Verfix verification engine — Playwright flows, typed assertions, AI healing. Transport-agnostic: used in-process by the verfix CLI and by the server-mode BullMQ worker.",
+  "keywords": [
+    "verfix",
+    "playwright",
+    "verification",
+    "browser-testing"
+  ],
+  "license": "ISC",
+  "author": "jyotiraditya",
+  "type": "commonjs",
   "main": "dist/src/engine.js",
   "types": "dist/src/engine.d.ts",
+  "directories": {
+    "test": "test"
+  },
   "files": [
     "dist"
   ],
@@ -19,15 +31,6 @@
     "test:assertions": "ts-node test/assertions/engine-flow-tagging.test.ts",
     "test:engine": "ts-node test/engine/transport-free.test.ts"
   },
-  "keywords": [
-    "verfix",
-    "playwright",
-    "verification",
-    "browser-testing"
-  ],
-  "author": "",
-  "license": "ISC",
-  "type": "commonjs",
   "dependencies": {
     "bullmq": "^5.76.9",
     "dotenv": "^17.4.2",
