@@ -108,11 +108,11 @@ Use this if you're working on `api/`, `workers/`, or `dashboard/`:
 git clone https://github.com/verfix-dev/verfix.git
 cd verfix
 
-# Install Node.js dependencies for all packages
-npm ci --prefix workers
-npm ci --prefix dashboard
-npm ci --prefix cli
-npm ci --prefix sdk
+# Install Node.js dependencies for the workspace packages (cli, workers, sdk).
+# npm workspaces live-links @verfix/engine (workers) into the cli automatically.
+npm install
+# Dashboard is kept outside the workspace set — install it separately.
+npm install --prefix dashboard
 
 # Start Postgres + Redis via Docker Compose
 make up
@@ -146,14 +146,13 @@ If you're only working on the CLI (commands, init wizard, output formatting), yo
 
 ```bash
 git clone https://github.com/verfix-dev/verfix.git
-cd verfix/cli
+cd verfix
 
-npm ci
+# Installs cli + workers + sdk and live-links the local @verfix/engine into the cli.
+npm install
 
-# Pull and start the runtime container
+cd cli
 npx ts-node src/index.ts init
-
-# Develop and test
 npx ts-node src/index.ts --help
 npx ts-node src/index.ts flows
 npx ts-node src/index.ts run --flow <id> --output json

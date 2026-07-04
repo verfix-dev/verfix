@@ -1,0 +1,14 @@
+{
+  "name": "verfix-monorepo",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Verfix monorepo — browser verification CLI + engine. Packages are published independently from their workspace directories; npm workspaces live-links @verfix/engine (workers) into the cli for local dev while the published cli tarball depends on ^0.1.0 from npm.",
+  "workspaces": [
+    "cli",
+    "workers",
+    "sdk"
+  ],
+  "engines": {
+    "node": ">=20.20.0"
+  }
+}

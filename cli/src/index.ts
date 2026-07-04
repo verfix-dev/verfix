@@ -209,7 +209,7 @@ program
     applyRunnerFlag(opts);
     if (getRunnerMode() === 'local') {
       // Local mode: never touch Docker or the API — read .verfix/runs/ instead.
-      const { readLocalResult, listLocalResults, isChromiumInstalled } = await import('./local-runner');
+      const { readLocalResult, listLocalResults, isChromiumInstalled, isEngineInstalled } = await import('./local-runner');
 
       if (executionId) {
         const result = readLocalResult(executionId);
@@ -234,13 +234,15 @@ program
       }
 
       const configFound = fs.existsSync(path.resolve(process.cwd(), DEFAULT_CONFIG));
-      const chromiumInstalled = isChromiumInstalled();
+      const engineInstalled = isEngineInstalled();
+      const chromiumInstalled = engineInstalled && isChromiumInstalled();
       const lastRun = listLocalResults()[0] ?? null;
 
       if (isJsonMode(opts)) {
         emitJson({
           runner: 'local',
           config_found: configFound,
+          engine_installed: engineInstalled,
           chromium_installed: chromiumInstalled,
           last_run: lastRun ? {
             execution_id: lastRun.executionId,
@@ -254,7 +256,12 @@ program
       console.log('');
       console.log(`  ${chalk.bold('Runner:')}    local (no Docker needed — use --server for the container runtime)`);
       console.log(`  ${chalk.bold('Config:')}    ${configFound ? chalk.green(DEFAULT_CONFIG) : chalk.red('not found — run: verfix init')}`);
-      console.log(`  ${chalk.bold('Chromium:')}  ${chromiumInstalled ? chalk.green('installed') : chalk.yellow('not installed (auto-downloads on first run)')}`);
+      if (!engineInstalled) {
+        console.log(`  ${chalk.bold('Engine:')}    ${chalk.red('not installed — reinstall: npm install verfix')}`);
+        console.log(`  ${chalk.bold('Chromium:')}  ${chalk.gray('n/a — engine missing')}`);
+      } else {
+        console.log(`  ${chalk.bold('Chromium:')}  ${chromiumInstalled ? chalk.green('installed') : chalk.yellow('not installed (run: verfix install)')}`);
+      }
       if (lastRun) {
         const icon = lastRun.passed ? chalk.green('passed') : chalk.red('failed');
         console.log(`  ${chalk.bold('Last run:')}  ${icon}  ${chalk.gray(lastRun.executionId)}  (verfix show ${lastRun.executionId})`);
@@ -477,13 +484,26 @@ async function runLocalDoctor(opts: any): Promise<never> {
     failures++;
   }
 
-  // 4. Chromium present (a miss is only a warning — verfix run auto-installs)
-  const { isChromiumInstalled } = await import('./local-runner');
-  const chromiumInstalled = isChromiumInstalled(config.browser);
-  if (chromiumInstalled) {
+  // 4. Engine module resolvable — the hard prerequisite for every local command.
+  //    A miss means the npm install is broken (e.g. a stale file: dependency),
+  //    which is fatal and must NOT be disguised as "Chromium not installed".
+  const { isChromiumInstalled, isEngineInstalled } = await import('./local-runner');
+  const engineInstalled = isEngineInstalled();
+  if (engineInstalled) {
+    printCheck(chalk.green('✓'), '@verfix/engine installed');
+  } else {
+    printCheck(chalk.red('✗'), '@verfix/engine not installed', 'Reinstall the CLI: npm install verfix');
+    failures++;
+  }
+
+  // 5. Chromium present (a miss is only a warning — verfix install / run fetches it)
+  const chromiumInstalled = engineInstalled && isChromiumInstalled(config.browser);
+  if (!engineInstalled) {
+    printCheck(chalk.gray('•'), chalk.gray('Chromium — skipped (engine missing)'));
+  } else if (chromiumInstalled) {
     printCheck(chalk.green('✓'), 'Chromium installed');
   } else {
-    printCheck(chalk.yellow('⚠'), 'Chromium not installed', 'verfix run downloads it on first use (~130MB), or run: npx playwright install chromium');
+    printCheck(chalk.yellow('⚠'), 'Chromium not installed', 'Run: verfix install  (or it auto-downloads on first verfix run)');
     warnings++;
   }
 
@@ -557,6 +577,7 @@ async function runLocalDoctor(opts: any): Promise<never> {
         config_found: configFound,
         config_valid: configValid,
         agents_md_found: agentsMdFound,
+        engine_installed: engineInstalled,
         chromium_installed: chromiumInstalled,
         base_url_reachable: baseUrlReachable,
         provider_configured: providerConfigured,
@@ -1094,6 +1115,55 @@ program
     scheduleBackgroundCheck(['npm', 'image']);
   });
 
+// ─── install command ────────────────────────────────────────────────────────
+
+program
+  .command('install')
+  .description('Download the Chromium browser the local runner needs (one-time, ~130MB)')
+  .option('-o, --output <format>', 'Output format: pretty | json', 'pretty')
+  .action(async (opts) => {
+    applyRunnerFlag(opts);
+    if (getRunnerMode() !== 'local') {
+      console.log(chalk.gray('verfix install is for local mode. Use --server to manage the Docker runtime.'));
+      return;
+    }
+    const { isEngineInstalled, isChromiumInstalled, ensureChromium } = await import('./local-runner');
+    if (!isEngineInstalled()) {
+      if (isJsonMode(opts)) {
+        emitJsonError({ error: 'engine_not_installed', message: '@verfix/engine is not installed.', hint: 'Reinstall the CLI: npm install verfix' });
+      }
+      console.error(chalk.red('@verfix/engine is not installed — run: npm install verfix'));
+      process.exit(2);
+    }
+    if (isChromiumInstalled()) {
+      if (isJsonMode(opts)) {
+        emitJson({ installed: true, browser: 'chromium', already: true });
+      } else {
+        console.log(chalk.green('  ✓ Chromium already installed'));
+      }
+      return;
+    }
+    if (!isJsonMode(opts)) {
+      console.log('');
+      console.log(chalk.bold('  Installing Chromium (~130MB, one-time)...'));
+      console.log('');
+    }
+    try {
+      await ensureChromium();
+      if (isJsonMode(opts)) {
+        emitJson({ installed: true, browser: 'chromium' });
+      } else {
+        console.log(chalk.green('  ✓ Chromium installed'));
+      }
+    } catch (e: any) {
+      if (isJsonMode(opts)) {
+        emitJsonError({ error: 'install_failed', message: e.message, hint: 'Set "browser": {"channel": "chrome"} in verfix.config.json to use installed Chrome, or run: npx playwright install chromium' });
+      }
+      console.error(chalk.red(e.message));
+      process.exit(2);
+    }
+  });
+
 // ─── run command ─────────────────────────────────────────────────────────────
 
 program
@@ -1111,6 +1181,7 @@ program
   .option('--show-browser', 'Show the browser window during verification runs (local mode only)', false)
   .option('--source-policy <policy>', 'Project-source edit policy: warn | block | off (overrides config)')
   .option('--reset-baseline', 'Reset the source-change baseline for this verify cycle', false)
+  .option('--skip-download', 'Do not auto-download Chromium on first run; fail fast if missing (local mode only)', false)
   .option('--server', 'Run via the Docker server runtime instead of locally', false)
   .action(async (opts) => {
     applyRunnerFlag(opts);
@@ -1253,6 +1324,7 @@ program
           headless: !opts.showBrowser,
           browser: config.browser,
           json: isJsonMode(opts),
+          skipDownload: opts.skipDownload,
         });
         runSpinner?.stop();
       } catch (e: any) {
@@ -1263,7 +1335,7 @@ program
             error: errName,
             message: e.message,
             hint: errName === 'browser_not_installed'
-              ? 'Set "browser": {"channel": "chrome"} in verfix.config.json to use your installed Chrome, or run: npx playwright install chromium'
+              ? 'Run: verfix install  (or set "browser": {"channel": "chrome"} in verfix.config.json to use installed Chrome)'
               : 'Re-run with --output pretty for details.',
           });
         }

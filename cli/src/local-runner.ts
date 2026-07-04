@@ -21,6 +21,8 @@ export interface LocalRunOptions {
   browser?: LocalBrowserConfig;
   /** JSON output mode: keep stdout pure by diverting engine logs to stderr. */
   json: boolean;
+  /** Skip the first-run Chromium download; fail fast with browser_not_installed instead. */
+  skipDownload?: boolean;
 }
 
 export class BrowserNotInstalledError extends Error {
@@ -53,6 +55,24 @@ export function playwrightCliPath(): string {
   return resolveEnginePlaywright().cliPath;
 }
 
+/**
+ * Whether the @verfix/engine runtime module itself can be resolved. This is the
+ * hard prerequisite for every local command — without it, `run` cannot load
+ * Playwright and `status`/`doctor` cannot even check Chromium. Distinct from
+ * isChromiumInstalled(): a missing engine is a packaging/install break (fatal,
+ * "reinstall verfix"), whereas a missing browser is a normal first-run state
+ * (auto-downloads). Checking this first stops `status` from misreporting a
+ * broken engine as the benign "Chromium not installed".
+ */
+export function isEngineInstalled(): boolean {
+  try {
+    require.resolve('@verfix/engine');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Whether the engine's Chromium (or a pinned channel browser) is launchable. */
 export function isChromiumInstalled(browser?: LocalBrowserConfig): boolean {
   if (browser?.channel) return true;
@@ -66,12 +86,74 @@ export function isChromiumInstalled(browser?: LocalBrowserConfig): boolean {
 }
 
 /**
+ * An installed Chrome/Edge the engine can drive via Playwright's `channel`
+ * option — reuses the user's browser and skips the ~130MB Chromium download.
+ */
+export interface DetectedBrowser {
+  /** Playwright channel string passed to the engine ('chrome' | 'msedge'). */
+  channel: string;
+  /** Detected executable path (shown to the user). */
+  path: string;
+  /** Human-readable name for prompts/logs. */
+  displayName: string;
+}
+
+// ponytail: naive per-OS path scan. Ceiling: a non-standard install location
+// (e.g. Chrome in a custom dir, or a portable build) won't be detected, and a
+// dangling symlink resolves to "not installed". Upgrade path: spawn the binary
+// with --version, but that's heavier and can hang — path scan is the right rung
+// for a one-time init prompt where a miss just falls back to the Chromium download.
+const INSTALLED_BROWSER_PATHS: Record<string, { channel: string; displayName: string; paths: string[] }[]> = {
+  darwin: [
+    { channel: 'chrome', displayName: 'Google Chrome', paths: ['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'] },
+    { channel: 'msedge', displayName: 'Microsoft Edge', paths: ['/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge'] },
+  ],
+  win32: [
+    { channel: 'chrome', displayName: 'Google Chrome', paths: [
+      'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+      'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+    ] },
+    { channel: 'msedge', displayName: 'Microsoft Edge', paths: [
+      'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
+      'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
+    ] },
+  ],
+  linux: [
+    { channel: 'chrome', displayName: 'Google Chrome', paths: ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable'] },
+    { channel: 'msedge', displayName: 'Microsoft Edge', paths: ['/usr/bin/microsoft-edge', '/usr/bin/microsoft-edge-stable'] },
+  ],
+};
+
+/**
+ * Detect an installed Chrome or Edge the engine could drive instead of
+ * downloading Chromium. Returns the first match (Chrome preferred over Edge),
+ * or null if none found. Used by `verfix init` to offer a skip-the-download path.
+ */
+export function detectInstalledBrowser(): DetectedBrowser | null {
+  const candidates = INSTALLED_BROWSER_PATHS[process.platform] || [];
+  for (const c of candidates) {
+    for (const p of c.paths) {
+      if (fs.existsSync(p)) {
+        return { channel: c.channel, displayName: c.displayName, path: p };
+      }
+    }
+  }
+  return null;
+}
+
+/**
  * Ensure a Chromium the engine can launch exists, downloading it if needed.
  * Skipped entirely when config pins a browser channel (e.g. installed Chrome).
  * All progress goes to stderr — stdout stays pure for --output json.
  */
-export async function ensureChromium(browser?: LocalBrowserConfig): Promise<void> {
+export async function ensureChromium(browser?: LocalBrowserConfig, skipDownload = false): Promise<void> {
   if (isChromiumInstalled(browser)) return;
+
+  if (skipDownload) {
+    throw new BrowserNotInstalledError(
+      'Chromium is not installed. Run: verfix install',
+    );
+  }
 
   const { cliPath } = resolveEnginePlaywright();
   console.error('Chromium not found — downloading (~130MB, one-time, cached in ~/.cache/ms-playwright)...');
@@ -97,7 +179,7 @@ export async function runLocal(payload: any, opts: LocalRunOptions): Promise<Exe
   fs.mkdirSync(runsDir, { recursive: true });
   pruneRuns(runsDir);
 
-  await ensureChromium(opts.browser);
+  await ensureChromium(opts.browser, opts.skipDownload);
 
   const engine = await import('@verfix/engine');
 

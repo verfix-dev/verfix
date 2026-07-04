@@ -428,15 +428,16 @@ If verification runs are misbehaving, use these commands to diagnose and fix:
 
 | Command | When to use |
 |---------|-------------|
-| \`verfix status\` | Check config, browser install, and the last run |
-| \`verfix doctor\` | Run diagnostics (Node, config, Chromium, app reachability) |
+| \`verfix status\` | Check config, engine, browser install, and the last run |
+| \`verfix doctor\` | Run diagnostics (Node, config, engine, Chromium, app reachability) |
+| \`verfix install\` | Download the Chromium browser the local runner needs (one-time) |
 | \`verfix show <execution_id>\` | Open the recorded Playwright trace of a run |
 
 **Recovery steps:**
 
 1. \`verfix doctor\` → Follow any suggestions it prints.
-2. Browser missing? It auto-downloads on the next \`verfix run\`, or install
-   explicitly: \`npx playwright install chromium\`.
+2. Browser missing? Run \`verfix install\` (one-time ~130MB download), or it
+   auto-downloads on the next \`verfix run\`.
 3. App unreachable? Start the dev server, or fix \`baseUrl\` in \`verfix.config.json\`.
 
 ---
