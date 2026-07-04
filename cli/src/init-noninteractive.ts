@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import chalk from 'chalk';
 import ora from 'ora';
-import { DEFAULT_CONFIG, getBrowserMode } from './constants';
+import { DEFAULT_CONFIG, getRunnerMode } from './constants';
 import { generateAgentsSection, generateAgentsStub } from './agents-md';
 import { detectAllAgentPlatforms } from './agent-platform';
 import { writeAgentsMd, writeVerfixInstructions, writePlatformAgentFiles } from './agent-writer';
@@ -14,11 +14,7 @@ import { waitForHealth } from './health';
 import { getRuntimePorts } from './runtime';
 import { PROVIDER_REGISTRY } from './providers/registry';
 import type { ProviderId } from './providers/types';
-import { saveAIConfig, parseEnvFile } from './config/loader';
-import {
-  extractWorkerFiles, ensurePlaywrightBrowser, startLocalWorker, isWorkerRunning,
-} from './worker-runner';
-import os from 'os';
+import { saveAIConfig } from './config/loader';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -97,12 +93,19 @@ function resolveApiKey(opts: NonInteractiveOptions): string | null {
   return null;
 }
 
-function resolveConfig(opts: NonInteractiveOptions): ResolvedConfig {
-  // Resolve API key
+export function resolveConfig(opts: NonInteractiveOptions): ResolvedConfig {
+  // Resolve mode first — strict needs no AI key at all
+  const modeValue = opts.mode || process.env.VERFIX_MODE || 'strict';
+  const validModes = ['strict', 'assisted', 'exploratory'];
+  if (!validModes.includes(modeValue)) {
+    throw new Error(`Invalid mode: '${modeValue}'. Valid modes: ${validModes.join(', ')}`);
+  }
+
+  // Resolve API key — required only for AI-backed modes
   const apiKey = resolveApiKey(opts);
 
-  if (!apiKey && !opts.dryRun) {
-    throw new Error('AI API key is required to bootstrap Verfix in non-interactive mode. Supply it via --ai-key CLI flag or VERFIX_AI_KEY environment variable.');
+  if (!apiKey && modeValue !== 'strict' && !opts.dryRun) {
+    throw new Error(`AI API key is required for '${modeValue}' mode. Supply it via --ai-key CLI flag or VERFIX_AI_KEY environment variable, or use --mode strict (no AI needed).`);
   }
 
   // Resolve provider
@@ -142,13 +145,6 @@ function resolveConfig(opts: NonInteractiveOptions): ResolvedConfig {
     || process.env.VERFIX_BASE_URL
     || 'http://localhost:3000';
 
-  // Resolve mode
-  const modeValue = opts.mode || process.env.VERFIX_MODE || 'assisted';
-  const validModes = ['strict', 'assisted', 'exploratory'];
-  if (!validModes.includes(modeValue)) {
-    throw new Error(`Invalid mode: '${modeValue}'. Valid modes: ${validModes.join(', ')}`);
-  }
-
   return {
     provider,
     model,
@@ -164,20 +160,11 @@ function resolveConfig(opts: NonInteractiveOptions): ResolvedConfig {
 
 export async function runNonInteractiveInit(opts: NonInteractiveOptions): Promise<void> {
   const cwd = process.cwd();
+  const runnerMode = getRunnerMode();
 
   console.log('');
   console.log(chalk.bold.cyan('  ⚡ Verfix Non-Interactive Setup'));
   console.log(chalk.gray('  ─────────────────────────────'));
-  console.log('');
-
-  // ── Auto-detect and recommend Browser Mode ──
-  const browserMode = getBrowserMode();
-  const platformName = os.platform() === 'darwin' ? 'macOS' : os.platform() === 'win32' ? 'Windows' : 'Linux';
-  if (browserMode === 'host') {
-    console.log(chalk.blue(`  ℹ  Detected OS: ${platformName}. Defaulting to 'host' (hybrid) browser mode for native localhost access.`));
-  } else {
-    console.log(chalk.blue(`  ℹ  Detected OS: Linux. Defaulting to 'container' browser mode (host networking supported natively).`));
-  }
   console.log('');
 
   // ── Step 1: Resolve and validate config ──
@@ -187,8 +174,8 @@ export async function runNonInteractiveInit(opts: NonInteractiveOptions): Promis
   if (opts.dryRun) {
     const dryRunOutput = {
       mode: 'dry-run',
-      provider: config.provider,
-      model: config.model,
+      provider: config.apiKey ? config.provider : '(none)',
+      model: config.apiKey ? config.model : '(none)',
       apiKey: config.apiKey ? maskApiKey(config.apiKey) : '(none)',
       baseUrl: config.baseUrl,
       verificationMode: config.mode,
@@ -213,38 +200,39 @@ export async function runNonInteractiveInit(opts: NonInteractiveOptions): Promis
     return;
   }
 
-  // ── Step 3: Save AI config to .verfix/.env ──
-  const spinner1 = ora('Saving AI configuration...').start();
-  saveAIConfig(cwd, config.provider, config.model, config.apiKey, browserMode);
-  spinner1.succeed(`AI configuration saved (${PROVIDER_REGISTRY[config.provider].displayName} / ${config.model})`);
+  // ── Step 3: Save AI config to .verfix/.env (only when a key was supplied) ──
+  const hasAI = Boolean(config.apiKey);
+  if (hasAI) {
+    const spinner1 = ora('Saving AI configuration...').start();
+    saveAIConfig(cwd, config.provider, config.model, config.apiKey);
+    spinner1.succeed(`AI configuration saved (${PROVIDER_REGISTRY[config.provider].displayName} / ${config.model})`);
+  } else {
+    console.log(chalk.gray('  ⏭ Strict mode — no AI key needed, skipping AI configuration'));
+  }
 
-  // Ensure getBrowserMode() sees the correct mode for pullImage() below
-  process.env.VERFIX_BROWSER_MODE = browserMode;
-
-  // ── Step 4: Docker runtime ──
-  if (!config.skipRuntime) {
+  // ── Step 4: Runtime — local mode just needs a browser; server mode needs Docker ──
+  if (runnerMode === 'local') {
+    if (config.skipRuntime) {
+      console.log(chalk.gray('  ⏭ Skipping browser check (--skip-runtime)'));
+    } else {
+      const { isChromiumInstalled, ensureChromium } = await import('./local-runner');
+      if (isChromiumInstalled()) {
+        console.log(chalk.green('  ✓ Chromium ready'));
+      } else {
+        try {
+          await ensureChromium();
+          console.log(chalk.green('  ✓ Chromium installed'));
+        } catch (e: any) {
+          console.log(chalk.yellow(`  ⚠ ${e.message}`));
+          console.log(chalk.gray('    verfix run will retry the download on first use'));
+        }
+      }
+    }
+  } else if (!config.skipRuntime) {
     const state = getContainerState();
     if (state?.status === 'running') {
       syncRuntimePortsFromContainer();
       console.log(chalk.green('  ✓ Verfix runtime is already running'));
-
-      if (getBrowserMode() === 'host') {
-        const workerState = isWorkerRunning();
-        if (workerState.running) {
-          console.log(chalk.green(`  ✓ Local worker is already running (PID: ${workerState.pid})`));
-        } else {
-          const workerSpinner = ora('Starting local worker...').start();
-          try {
-            extractWorkerFiles();
-            ensurePlaywrightBrowser();
-            const redisPort = process.env.REDIS_PORT ? parseInt(process.env.REDIS_PORT, 10) : 6379;
-            const workerPid = startLocalWorker(redisPort);
-            workerSpinner.succeed(`Local worker started on host (PID: ${workerPid})`);
-          } catch (err: any) {
-            workerSpinner.fail(`Failed to start local worker: ${err.message}`);
-          }
-        }
-      }
     } else {
       // Check Docker availability
       if (!isDockerInstalled() || !isDockerRunning()) {
@@ -270,20 +258,6 @@ export async function runNonInteractiveInit(opts: NonInteractiveOptions): Promis
             console.log(chalk.yellow('  ⚠ Continuing anyway. Check: verfix doctor'));
           } else {
             startSpinner.succeed('Runtime started and healthy');
-
-            if (getBrowserMode() === 'host') {
-              const workerSpinner = ora('Setting up local worker environment...').start();
-              try {
-                extractWorkerFiles();
-                ensurePlaywrightBrowser();
-                workerSpinner.text = 'Starting local worker...';
-                const redisPort = process.env.REDIS_PORT ? parseInt(process.env.REDIS_PORT, 10) : 6379;
-                const workerPid = startLocalWorker(redisPort);
-                workerSpinner.succeed(`Local worker started on host (PID: ${workerPid})`);
-              } catch (err: any) {
-                workerSpinner.fail(`Failed to start local worker: ${err.message}`);
-              }
-            }
           }
         } catch (e: any) {
           startSpinner.fail(`Failed to start runtime: ${e.message}`);
@@ -300,7 +274,7 @@ export async function runNonInteractiveInit(opts: NonInteractiveOptions): Promis
   const configData: Record<string, unknown> = {
     baseUrl: config.baseUrl,
     mode: config.mode,
-    ai: { provider: config.provider, model: config.model },
+    ...(hasAI ? { ai: { provider: config.provider, model: config.model } } : {}),
     flows: [],
   };
   fs.writeFileSync(configPath, JSON.stringify(configData, null, 2) + '\n', 'utf-8');
@@ -308,8 +282,7 @@ export async function runNonInteractiveInit(opts: NonInteractiveOptions): Promis
 
   // ── Step 6: Write .verfix/INSTRUCTIONS.md (full reference) + AGENTS.md stub ──
   const flowSummaries: { id: string }[] = [];
-  const runtimePorts = getRuntimePorts();
-  const verfixSection = generateAgentsSection(flowSummaries, config.mode, config.baseUrl, runtimePorts);
+  const verfixSection = generateAgentsSection(flowSummaries, config.mode, config.baseUrl);
 
   writeVerfixInstructions(cwd, verfixSection);
   console.log(chalk.green('  ✓ .verfix/INSTRUCTIONS.md created'));
@@ -337,10 +310,12 @@ export async function runNonInteractiveInit(opts: NonInteractiveOptions): Promis
   console.log('');
   console.log(chalk.bold.green('  Setup complete!'));
   console.log('');
-  console.log(chalk.green(`  ✓ AI configured: ${PROVIDER_REGISTRY[config.provider].displayName} / ${config.model}`));
+  if (hasAI) {
+    console.log(chalk.green(`  ✓ AI configured: ${PROVIDER_REGISTRY[config.provider].displayName} / ${config.model}`));
+  }
   console.log(chalk.green('  ✓ verfix.config.json created'));
   console.log(chalk.green('  ✓ AGENTS.md updated'));
-  if (!config.skipRuntime) {
+  if (runnerMode === 'server' && !config.skipRuntime) {
     const state = getContainerState();
     if (state?.status === 'running') {
       const ports = getRuntimePorts();

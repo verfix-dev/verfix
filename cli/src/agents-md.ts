@@ -23,7 +23,7 @@ Verfix is a local browser-verification runtime. After editing any UI component,
 form, route, or page, **verify browser behavior** before considering the task done:
 
 \`\`\`bash
-verfix status                          # is the runtime healthy?
+verfix status                          # is the setup healthy?
 verfix flows                           # the ONLY source of truth for flow IDs
 verfix run --flow <id> --output json   # verify the flow covering what you changed
 \`\`\`
@@ -57,7 +57,6 @@ export function generateAgentsSection(
   flows: Array<{ id: string; description?: string }>,
   mode: string,
   baseUrl: string,
-  runtimePorts: { apiPort: number; dashboardPort: number },
 ): string {
   const flowList = flows.map(f =>
     `- \`${f.id}\` — ${f.description || f.id.replace(/-/g, ' ') + ' flow'}`
@@ -72,21 +71,23 @@ export function generateAgentsSection(
 ### Verfix Setup (for AI agents)
 
 > If \`verfix.config.json\` doesn't exist in the project root, Verfix hasn't been
-> initialized yet. Run the following to bootstrap non-interactively:
+> initialized yet. Run the following to bootstrap non-interactively (no Docker,
+> no AI key needed — the default \`strict\` mode is fully deterministic):
 >
 > \`\`\`bash
-> npx verfix init --yes --ai-provider openai --ai-model gpt-5.4-mini --ai-key "$OPENAI_API_KEY" --base-url http://localhost:3000
+> npx verfix init --yes --base-url http://localhost:3000
 > \`\`\`
 >
-> **Flags:** \`--ai-provider\` (openai|anthropic|gemini|openrouter), \`--ai-model\`,
-> \`--ai-key\`, \`--base-url\`, \`--mode\` (strict|assisted|exploratory),
-> \`--skip-runtime\`, \`--skip-agent-files\`, \`--dry-run\`.
+> **Flags:** \`--base-url\`, \`--mode\` (strict|assisted|exploratory),
+> \`--skip-runtime\`, \`--skip-agent-files\`, \`--dry-run\`. AI flags — only for
+> assisted/exploratory modes: \`--ai-key\`, \`--ai-provider\`
+> (openai|anthropic|gemini|openrouter), \`--ai-model\`.
 >
 > **Env var fallbacks:** \`VERFIX_AI_PROVIDER\`, \`VERFIX_AI_MODEL\`, \`VERFIX_AI_KEY\`,
 > \`VERFIX_BASE_URL\`, \`VERFIX_MODE\`. Provider-specific keys (\`OPENAI_API_KEY\`,
 > \`ANTHROPIC_API_KEY\`, etc.) are also detected automatically.
 >
-> Ask the user for their API key if not already set in the environment.
+> Only ask the user for an API key when configuring assisted/exploratory mode.
 
 Verfix is a local browser-verification runtime. After editing any UI
 component, form, route, or page — **you must verify browser behavior**
@@ -125,15 +126,14 @@ before considering the task done.
 
 | Resource | Location |
 |----------|----------|
-| API | http://localhost:${runtimePorts.apiPort} |
-| Dashboard | http://localhost:${runtimePorts.dashboardPort} |
 | Config | \`verfix.config.json\` |
+| Run results & traces | \`.verfix/runs/\` (open with \`verfix show <execution_id>\`) |
 | Docs | https://verfix.dev/docs |
 
+Verfix runs verifications locally in-process — no runtime to start or stop.
+
 \`\`\`bash
-# Start / stop / check the runtime
-verfix start
-verfix stop
+# Check the setup (config, browser, last run)
 verfix status
 
 # Run a specific flow
@@ -147,6 +147,9 @@ verfix run --flow <flow-id> --mode strict --output json
 
 # Override URL for a single run
 verfix run --flow <flow-id> --url http://localhost:5173 --output json
+
+# Open the recorded Playwright trace of a run (for the human to inspect)
+verfix show <execution_id>
 \`\`\`
 
 ---
@@ -196,7 +199,7 @@ ${flowList}
 
 Follow these steps **in order** every time you need to verify a UI change:
 
-1. \`verfix status\` — Is the runtime healthy?
+1. \`verfix status\` — Is the setup healthy?
 2. \`verfix flows\` — What flows exist right now?
 3. Read \`verfix.config.json\` — Understand the structure of available flows.
 4. **Select an existing flow** — Reuse before creating. Pick the flow whose
@@ -212,8 +215,9 @@ Follow these steps **in order** every time you need to verify a UI change:
    - **Real app bug** (\`console_error\`, \`network_failure\`, wrong behavior) →
      fix the application code. This is a legitimate source edit.
 8. **Fix and retry** — Go back to step 6.
-9. **After 3 failed attempts** → Stop retrying. Show the \`timeline_url\` to the
-   human and let them inspect the visual timeline on the dashboard.
+9. **After 3 failed attempts** → Stop retrying. Give the human the \`show_command\`
+   from the JSON output (\`verfix show <execution_id>\`) so they can inspect the
+   recorded Playwright trace.
 
 #### Edit → verify → fix loop
 
@@ -227,7 +231,8 @@ Follow these steps **in order** every time you need to verify a UI change:
       flow selector string → project source only as last resort), go to step 2
    c. Real app bug (console_error, network_failure, wrong behavior) → fix the
       app code, go to step 2
-5. After 3 failed attempts → stop, show timeline_url to user
+5. After 3 failed attempts → stop, give the user the show_command
+   (verfix show <execution_id>) to inspect the trace
 
 > Note: \`verfix run\` reports \`source_changes\` — project files edited during this
 > loop. If you see your feature files there and it wasn't a genuine bug fix,
@@ -374,11 +379,18 @@ Every \`verfix run --output json\` returns this exact shape:
       "fix_hint": "Selector \\"[data-testid=submit]\\" not found in DOM. Add a stable data-testid or update the selector."
     }
   ],
-  "timeline_url": "http://localhost:${runtimePorts.dashboardPort}/?executionId=exec_abc123",
+  "timeline_url": null,
+  "trace_path": "/absolute/path/to/.verfix/runs/exec_abc123_trace.zip",
+  "show_command": "verfix show exec_abc123",
   "exit_code": 1,
   "execution_id": "exec_abc123"
 }
 \`\`\`
+
+> \`timeline_url\` is always present but \`null\` in local runs (it points at the
+> dashboard only when running against a server runtime). \`trace_path\` and
+> \`show_command\` are the local-run equivalents — pass \`show_command\` to the
+> human when they need to see what the browser did.
 
 #### Failure type reference
 
@@ -405,27 +417,27 @@ ${failureList}
 1. Read failures[0].type
 2. Apply the fix strategy from the table above
 3. Re-run:  verfix run --flow <id> --output json
-4. If still failing after 3 attempts → stop, show timeline_url to user
+4. If still failing after 3 attempts → stop, give the user the show_command
 \`\`\`
 
 ---
 
-### Section 8 — Runtime Recovery
+### Section 8 — Recovery
 
-If the runtime is misbehaving, use these commands to diagnose and fix:
+If verification runs are misbehaving, use these commands to diagnose and fix:
 
 | Command | When to use |
 |---------|-------------|
-| \`verfix status\` | Check if the runtime is running and healthy |
-| \`verfix doctor\` | Run diagnostics (Docker, ports, config, health) |
-| \`verfix logs\` | View runtime logs for errors or crashes |
+| \`verfix status\` | Check config, browser install, and the last run |
+| \`verfix doctor\` | Run diagnostics (Node, config, Chromium, app reachability) |
+| \`verfix show <execution_id>\` | Open the recorded Playwright trace of a run |
 
 **Recovery steps:**
 
-1. \`verfix status\` → If not running, run \`verfix start\`.
-2. \`verfix doctor\` → Follow any suggestions it prints.
-3. \`verfix logs\` → Look for crash traces or port conflicts.
-4. If all else fails: \`verfix stop && verfix start\` to restart.
+1. \`verfix doctor\` → Follow any suggestions it prints.
+2. Browser missing? It auto-downloads on the next \`verfix run\`, or install
+   explicitly: \`npx playwright install chromium\`.
+3. App unreachable? Start the dev server, or fix \`baseUrl\` in \`verfix.config.json\`.
 
 ---
 

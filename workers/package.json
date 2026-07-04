@@ -1,18 +1,30 @@
 {
-  "name": "workers",
-  "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "name": "@verfix/engine",
+  "version": "0.1.0",
+  "description": "Verfix verification engine — Playwright flows, typed assertions, AI healing. Transport-agnostic: used in-process by the verfix CLI and by the server-mode BullMQ worker.",
+  "main": "dist/src/engine.js",
+  "types": "dist/src/engine.d.ts",
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "dev": "ts-node src/index.ts",
-    "test": "npm run test:registry && npm run test:openai && npm run test:formats && npm run test:assertions",
+    "build": "tsc -p tsconfig.build.json",
+    "prepublishOnly": "npm run build",
+    "test": "npm run test:registry && npm run test:openai && npm run test:formats && npm run test:assertions && npm run test:engine",
     "test:registry": "ts-node test/ai/adapters/registry.test.ts",
     "test:openai": "ts-node test/ai/adapters/openai.test.ts",
     "test:formats": "ts-node test/ai/adapters/message-format.test.ts",
     "test:smoke": "ts-node scripts/test-ai-provider.ts",
-    "test:assertions": "ts-node test/assertions/engine-flow-tagging.test.ts"
+    "test:assertions": "ts-node test/assertions/engine-flow-tagging.test.ts",
+    "test:engine": "ts-node test/engine/transport-free.test.ts"
   },
-  "keywords": [],
+  "keywords": [
+    "verfix",
+    "playwright",
+    "verification",
+    "browser-testing"
+  ],
   "author": "",
   "license": "ISC",
   "type": "commonjs",

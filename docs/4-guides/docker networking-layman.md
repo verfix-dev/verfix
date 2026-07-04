@@ -1,3 +1,7 @@
+> **⚠️ Server mode only.** By default Verfix now runs the browser directly on
+> your machine (no Docker), so this whole problem doesn't exist on the default
+> path. This explainer only applies to the opt-in `--server` Docker runtime.
+
 ## The Core Problem: Two Different Worlds
 
 Think of your machine and the Docker container as **two separate apartments in the same building**.

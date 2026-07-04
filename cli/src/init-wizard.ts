@@ -4,7 +4,7 @@ import chalk from 'chalk';
 import ora from 'ora';
 import { input, select, checkbox, confirm, password } from '@inquirer/prompts';
 import {
-  CONTAINER_NAME, DEFAULT_CONFIG, getBrowserMode,
+  DEFAULT_CONFIG, getRunnerMode,
 } from './constants';
 import {
   generateAgentsSection,
@@ -22,11 +22,7 @@ import { getRuntimePorts } from './runtime';
 import { PROVIDER_REGISTRY, getAllProviders, getProviderChoices, detectProviderFromModel } from './providers/registry';
 import type { ProviderId } from './providers/types';
 import { detectLegacyConfig } from './config/migration';
-import { saveAIConfig, updateAIConfigInFile, parseEnvFile } from './config/loader';
-import {
-  extractWorkerFiles, ensurePlaywrightBrowser, startLocalWorker, isWorkerRunning,
-} from './worker-runner';
-import os from 'os';
+import { saveAIConfig, updateAIConfigInFile } from './config/loader';
 
 // ─── Port scanning ───────────────────────────────────────────────────────────
 
@@ -327,144 +323,15 @@ async function getProviderImpl(provider: ProviderId): Promise<{
 
 export async function runInitWizard(): Promise<void> {
   const cwd = process.cwd();
+  const runnerMode = getRunnerMode();
 
   console.log('');
   console.log(chalk.bold.cyan('  ⚡ Verfix Setup Wizard'));
   console.log(chalk.gray('  ─────────────────────────────'));
   console.log('');
 
-  // ── Auto-detect and recommend Browser Mode ──
-  const browserMode = getBrowserMode();
-  const platformName = os.platform() === 'darwin' ? 'macOS' : os.platform() === 'win32' ? 'Windows' : 'Linux';
-  if (browserMode === 'host') {
-    console.log(chalk.blue(`  ℹ  Detected OS: ${platformName}. Recommending 'host' (hybrid) browser mode for native localhost access.`));
-  } else {
-    console.log(chalk.blue(`  ℹ  Detected OS: Linux. Recommending 'container' browser mode (host networking supported natively).`));
-  }
-  console.log('');
 
-  // ── Step 1: Check Docker ──
-  const dockerSpinner = ora('Checking Docker...').start();
-  if (!isDockerRunning()) {
-    dockerSpinner.fail('Docker is not running. Start Docker Desktop and re-run verfix init.');
-    throw new Error('Docker is not running');
-  }
-  dockerSpinner.succeed('Docker is running');
-  console.log('');
-
-  // ── Step 2: Provider-Aware AI Config ──
-  const aiConfig = await runProviderFlow(cwd);
-
-  let aiApiKey = '';
-  let aiModel = '';
-  let aiProvider: ProviderId | undefined;
-
-  // ── Step 2.5: Browser Mode Preference ──
-  console.log('');
-  const isLinux = os.platform() === 'linux';
-  const recommendedMode = isLinux ? 'container' : 'host';
-  const selectedBrowserMode = await select({
-    message: 'Select browser execution mode:',
-    choices: [
-      {
-        name: `host - run workers on your host machine for native localhost access${!isLinux ? ` (Recommended on ${platformName})` : ''}`,
-        value: 'host',
-      },
-      {
-        name: `container - run workers inside Docker${isLinux ? ' (Recommended on Linux)' : ''}`,
-        value: 'container',
-      },
-    ],
-    default: recommendedMode,
-  }) as 'host' | 'container';
-
-  if (aiConfig) {
-    aiProvider = aiConfig.provider;
-    aiApiKey = aiConfig.apiKey;
-    aiModel = aiConfig.model;
-
-    // Persist to .verfix/.env
-    saveAIConfig(cwd, aiProvider, aiModel, aiApiKey, selectedBrowserMode);
-    console.log(chalk.green('  ✓ AI configuration saved'));
-  } else {
-    // Save browser mode even if AI setup is skipped
-    const envDir = path.join(cwd, '.verfix');
-    if (!fs.existsSync(envDir)) fs.mkdirSync(envDir, { recursive: true });
-    const env = parseEnvFile(cwd);
-    env['VERFIX_BROWSER_MODE'] = selectedBrowserMode;
-    const lines = Object.entries(env).map(([key, val]) => `${key}=${val}`);
-    fs.writeFileSync(path.join(envDir, '.env'), lines.join('\n') + '\n', 'utf-8');
-    console.log(chalk.green('  ✓ Browser mode configuration saved'));
-  }
-
-  // Ensure getBrowserMode() sees the just-saved mode for pullImage() below
-  process.env.VERFIX_BROWSER_MODE = selectedBrowserMode;
-
-  // ── Step 3: Pull + Start Runtime ──
-  console.log('');
-  const state = getContainerState();
-  if (state?.status === 'running') {
-    syncRuntimePortsFromContainer();
-    console.log(chalk.green('  ✓ Verfix runtime is already running'));
-
-    if (getBrowserMode() === 'host') {
-      const workerState = isWorkerRunning();
-      if (workerState.running) {
-        console.log(chalk.green(`  ✓ Local worker is already running (PID: ${workerState.pid})`));
-      } else {
-        const workerSpinner = ora('Starting local worker...').start();
-        try {
-          extractWorkerFiles();
-          ensurePlaywrightBrowser();
-          const redisPort = process.env.REDIS_PORT ? parseInt(process.env.REDIS_PORT, 10) : 6379;
-          const workerPid = startLocalWorker(redisPort);
-          workerSpinner.succeed(`Local worker started on host (PID: ${workerPid})`);
-        } catch (err: any) {
-          workerSpinner.fail(`Failed to start local worker: ${err.message}`);
-        }
-      }
-    }
-  } else {
-    const pullSpinner = ora('Pulling verfix runtime (this takes ~2 min on first run)...').start();
-    try {
-      pullImage();
-      pullSpinner.succeed('Image pulled');
-    } catch (e: any) {
-      pullSpinner.fail(`Failed to pull image: ${e.message}`);
-      throw new Error(`Failed to pull image: ${e.message}`);
-    }
-
-    const startSpinner = ora('Starting runtime...').start();
-    try {
-      await startContainer({ aiApiKey, aiModel, aiProvider });
-      startSpinner.text = 'Waiting for health check...';
-      const healthy = await waitForHealth();
-      if (!healthy) {
-        startSpinner.fail('Runtime started but health check failed after 30s');
-        throw new Error('Runtime started but health check failed');
-      }
-      startSpinner.succeed('Runtime started and healthy');
-
-      if (getBrowserMode() === 'host') {
-        const workerSpinner = ora('Setting up local worker environment...').start();
-        try {
-          extractWorkerFiles();
-          ensurePlaywrightBrowser();
-          workerSpinner.text = 'Starting local worker...';
-          const redisPort = process.env.REDIS_PORT ? parseInt(process.env.REDIS_PORT, 10) : 6379;
-          const workerPid = startLocalWorker(redisPort);
-          workerSpinner.succeed(`Local worker started on host (PID: ${workerPid})`);
-        } catch (err: any) {
-          workerSpinner.fail(`Failed to start local worker: ${err.message}`);
-        }
-      }
-    } catch (e: any) {
-      startSpinner.fail(`Failed to start runtime: ${e.message}`);
-      throw new Error(`Failed to start runtime: ${e.message}`);
-    }
-  }
-
-  // ── Step 4: Detect or ask base URL ──
+  // ── Step 1: Detect or ask base URL ──
   let baseUrl = 'http://localhost:3000';
   const detectedPort = await detectAppPort();
   if (detectedPort) {
@@ -481,18 +348,67 @@ export async function runInitWizard(): Promise<void> {
     baseUrl = await input({ message: 'What URL is your app running on?', default: baseUrl });
   }
 
-  // ── Step 5: Select mode ──
+  // ── Step 2: Select mode ──
   const mode = await select({
-    message: 'Verification mode (Preferred)',
+    message: 'Verification mode',
     choices: [
-      { name: 'Assisted — deterministic with AI fallback (recommended)', value: 'assisted' },
-      { name: 'Strict — fully deterministic, best for CI', value: 'strict' },
+      { name: 'Strict — fully deterministic, no AI key needed (recommended)', value: 'strict' },
+      { name: 'Assisted — deterministic with AI fallback', value: 'assisted' },
       { name: 'Exploratory — natural language tasks', value: 'exploratory' },
     ],
-    default: 'assisted',
+    default: 'strict',
   });
 
-  // ── Step 6: Write verfix.config.json ──
+  // ── Step 3: Provider-Aware AI Config (only modes that use AI) ──
+  let aiConfig: { provider: ProviderId; model: string; apiKey: string } | null = null;
+  if (mode !== 'strict') {
+    aiConfig = await runProviderFlow(cwd);
+  } else {
+    console.log(chalk.gray('  ⏭ Strict mode is fully deterministic — no AI key needed'));
+    console.log('');
+  }
+
+  let aiApiKey = '';
+  let aiModel = '';
+  let aiProvider: ProviderId | undefined;
+  if (aiConfig) {
+    aiProvider = aiConfig.provider;
+    aiApiKey = aiConfig.apiKey;
+    aiModel = aiConfig.model;
+  }
+
+  if (runnerMode === 'local') {
+    // ── Step 4 (local): persist AI config + make sure a browser exists ──
+    // No Docker, no runtime container — verifications run in-process.
+    if (aiConfig) {
+      saveAIConfig(cwd, aiConfig.provider, aiConfig.model, aiConfig.apiKey);
+      console.log(chalk.green('  ✓ AI configuration saved'));
+    }
+
+    const { isChromiumInstalled, ensureChromium } = await import('./local-runner');
+    if (isChromiumInstalled()) {
+      console.log(chalk.green('  ✓ Chromium ready'));
+    } else {
+      const download = await confirm({
+        message: 'Download Chromium for verification runs now? (~130MB, one-time, cached in ~/.cache/ms-playwright)',
+        default: true,
+      });
+      if (download) {
+        try {
+          await ensureChromium();
+          console.log(chalk.green('  ✓ Chromium installed'));
+        } catch (e: any) {
+          console.log(chalk.yellow(`  ⚠ ${e.message}`));
+        }
+      } else {
+        console.log(chalk.gray('  ⏭ Skipped — verfix run downloads it on first use'));
+      }
+    }
+  } else {
+    await runServerRuntimeSetup(cwd, aiConfig);
+  }
+
+  // ── Step 7: Write verfix.config.json ──
   const configPath = path.join(cwd, DEFAULT_CONFIG);
   let writeConfig = true;
 
@@ -520,11 +436,10 @@ export async function runInitWizard(): Promise<void> {
     }
   }
 
-  // ── Step 7: Write .verfix/INSTRUCTIONS.md (full reference) + AGENTS.md stub ──
+  // ── Step 8: Write .verfix/INSTRUCTIONS.md (full reference) + AGENTS.md stub ──
   const agentsPath = path.join(cwd, 'AGENTS.md');
   const flowSummaries: { id: string }[] = [];
-  const runtimePorts = getRuntimePorts();
-  const verfixSection = generateAgentsSection(flowSummaries, mode, baseUrl, runtimePorts);
+  const verfixSection = generateAgentsSection(flowSummaries, mode, baseUrl);
   const verfixStub = generateAgentsStub();
 
   // The full reference always goes to the file Verfix owns.
@@ -566,7 +481,7 @@ export async function runInitWizard(): Promise<void> {
     }
   }
 
-  // ── Step 8: Platform-specific agent files ──
+  // ── Step 9: Platform-specific agent files ──
   // AGENTS.md (written above) is the universal standard read by Codex, Cursor,
   // Copilot coding agent, Kilo, opencode, Zed, Jules, and 20+ others. The files
   // below are only for tools that don't read AGENTS.md natively.
@@ -654,7 +569,7 @@ export async function runInitWizard(): Promise<void> {
     }
   }
 
-  // ── Step 9: README.md ──
+  // ── Step 10: README.md ──
   const readmePath = path.join(cwd, 'README.md');
   const README_VERFIX_ANCHOR = '<!-- verfix -->';
   let readmeUpdated = false;
@@ -699,7 +614,9 @@ export async function runInitWizard(): Promise<void> {
   console.log('');
   console.log(chalk.bold.green('  Setup complete!'));
   console.log('');
-  console.log(chalk.green('  ✓ Runtime started'));
+  if (runnerMode === 'server') {
+    console.log(chalk.green('  ✓ Runtime started'));
+  }
   if (aiProvider) {
     console.log(chalk.green(`  ✓ AI configured: ${PROVIDER_REGISTRY[aiProvider].displayName} / ${aiModel}`));
   }
@@ -716,7 +633,71 @@ export async function runInitWizard(): Promise<void> {
   console.log(`    Edit ${chalk.cyan('verfix.config.json')} and add a flow to the ${chalk.cyan('flows')} array`);
   console.log(`    Then run: ${chalk.cyan('verfix run --flow <id> --output json')}`);
   console.log('');
-  console.log(`  Dashboard: ${chalk.cyan(`http://localhost:${runtimePorts.dashboardPort}`)}`);
+  if (runnerMode === 'server') {
+    console.log(`  Dashboard: ${chalk.cyan(`http://localhost:${getRuntimePorts().dashboardPort}`)}`);
+  } else {
+    console.log(`  Traces:    ${chalk.cyan('verfix show <execution_id>')} ${chalk.gray('after a run')}`);
+  }
   console.log(`  Docs:      ${chalk.cyan('https://verfix.dev/docs')}`);
   console.log('');
+}
+
+/**
+ * Server-mode init (--server / VERFIX_RUNNER=server): today's Docker runtime
+ * flow — check Docker, pull the image, start the container.
+ */
+async function runServerRuntimeSetup(
+  cwd: string,
+  aiConfig: { provider: ProviderId; model: string; apiKey: string } | null,
+): Promise<void> {
+  // ── Check Docker ──
+  const dockerSpinner = ora('Checking Docker...').start();
+  if (!isDockerRunning()) {
+    dockerSpinner.fail('Docker is not running. Start Docker Desktop and re-run verfix init.');
+    throw new Error('Docker is not running');
+  }
+  dockerSpinner.succeed('Docker is running');
+  console.log('');
+
+  if (aiConfig) {
+    // Persist to .verfix/.env
+    saveAIConfig(cwd, aiConfig.provider, aiConfig.model, aiConfig.apiKey);
+    console.log(chalk.green('  ✓ AI configuration saved'));
+  }
+
+  // ── Pull + Start Runtime ──
+  console.log('');
+  const state = getContainerState();
+  if (state?.status === 'running') {
+    syncRuntimePortsFromContainer();
+    console.log(chalk.green('  ✓ Verfix runtime is already running'));
+  } else {
+    const pullSpinner = ora('Pulling verfix runtime (this takes ~2 min on first run)...').start();
+    try {
+      pullImage();
+      pullSpinner.succeed('Image pulled');
+    } catch (e: any) {
+      pullSpinner.fail(`Failed to pull image: ${e.message}`);
+      throw new Error(`Failed to pull image: ${e.message}`);
+    }
+
+    const startSpinner = ora('Starting runtime...').start();
+    try {
+      await startContainer({
+        aiApiKey: aiConfig?.apiKey ?? '',
+        aiModel: aiConfig?.model ?? '',
+        aiProvider: aiConfig?.provider,
+      });
+      startSpinner.text = 'Waiting for health check...';
+      const healthy = await waitForHealth();
+      if (!healthy) {
+        startSpinner.fail('Runtime started but health check failed after 30s');
+        throw new Error('Runtime started but health check failed');
+      }
+      startSpinner.succeed('Runtime started and healthy');
+    } catch (e: any) {
+      startSpinner.fail(`Failed to start runtime: ${e.message}`);
+      throw new Error(`Failed to start runtime: ${e.message}`);
+    }
+  }
 }

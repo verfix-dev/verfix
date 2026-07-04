@@ -73,7 +73,6 @@ export function saveAIConfig(
   provider: ProviderId,
   model: string,
   apiKey: string,
-  browserMode?: 'host' | 'container',
 ): void {
   const def = PROVIDER_REGISTRY[provider]
   const envDir = path.join(cwd, '.verfix')
@@ -81,14 +80,11 @@ export function saveAIConfig(
 
   // Read existing variables first so we don't discard them (in case user had custom ones)
   const env = parseEnvFile(cwd)
-  
+
   // Set new values
   env['AI_PROVIDER'] = provider
   env[def.envVar] = apiKey
   env['AI_MODEL'] = model
-  if (browserMode) {
-    env['VERFIX_BROWSER_MODE'] = browserMode
-  }
 
   const lines = Object.entries(env).map(([key, val]) => `${key}=${val}`)
   fs.writeFileSync(path.join(envDir, '.env'), lines.join('\n') + '\n', 'utf-8')

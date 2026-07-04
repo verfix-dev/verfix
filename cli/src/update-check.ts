@@ -20,7 +20,7 @@ import path from 'path';
 import { spawnSync, spawn } from 'child_process';
 import chalk from 'chalk';
 import os from 'os';
-import { getDockerImage } from './constants';
+import { getDockerImage, getRunnerMode } from './constants';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -167,10 +167,9 @@ export function showPendingNotifications(): void {
     }
   }
 
-  // Docker image update notification.
-  // Validate against the CURRENT local digest: if the local image already
-  // matches the cached remote digest, the update was applied and the banner
-  // is stale.
+  // Docker image update notification — server runtime only. In local mode the
+  // image is irrelevant noise (and checking it would spawn docker).
+  if (getRunnerMode() === 'local') return;
   const imageCache = readCache<ImageCache>(IMAGE_CACHE_FILE);
   if (imageCache && imageCache.hasUpdate && imageCache.remoteDigest) {
     const localDigest = getLocalImageDigest(DOCKER_IMAGE);
@@ -196,6 +195,8 @@ export function showPendingNotifications(): void {
  * @param kinds - which checks to run: 'npm', 'image', or both
  */
 export function scheduleBackgroundCheck(kinds: ('npm' | 'image')[] = ['npm', 'image']): void {
+  // The image check only matters for the server runtime.
+  if (getRunnerMode() === 'local') kinds = kinds.filter(k => k !== 'image');
   // Only spawn if at least one check is due
   const npmDue = kinds.includes('npm') && (() => {
     const c = readCache<NpmCache>(NPM_CACHE_FILE);

@@ -4,7 +4,10 @@
 No. Verfix is the *execution infrastructure* for AI agents. We provide the observability, retry mechanisms, and structured timelines that allow AI agents to confidently interact with browsers.
 
 ## Can I use it without AI?
-Yes. `Strict Mode` relies purely on deterministic selectors and bypasses all LLM interactions, functioning similarly to a highly-observable Playwright runner.
+Yes. `Strict Mode` (the default) relies purely on deterministic selectors and bypasses all LLM interactions, functioning similarly to a highly-observable Playwright runner. It needs no AI key at all.
+
+## Do I need Docker?
+No. By default `verfix run` executes entirely in-process on Node.js 20+ and stores results + Playwright traces under `.verfix/runs/`. Docker is only needed for the opt-in server runtime (`--server`), which exists for the future hosted CI product.
 
 ## Does it run in the cloud?
-Verfix is designed to be local-first and orchestrates via Docker. You can deploy it to your own cloud infrastructure, but we do not currently host a SaaS platform.
+Verfix is local-first. You can run the opt-in server runtime on your own infrastructure, but we do not currently host a SaaS platform (a hosted dashboard is planned).

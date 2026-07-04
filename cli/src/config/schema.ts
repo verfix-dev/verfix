@@ -48,6 +48,14 @@ export const VerfixConfigSchema = z.object({
   selectors: z.record(z.string(), z.string()).optional(),
   metadata: z.record(z.string(), z.unknown()).optional(),
   assertions: z.array(FlowAssertionSchema).optional(),
+  // Local-mode browser options.
+  //   channel  → reuse an installed browser (e.g. 'chrome') and skip the
+  //              Playwright Chromium download entirely
+  //   headless → default headlessness for local runs (--show-browser overrides)
+  browser: z.object({
+    channel: z.string().optional(),
+    headless: z.boolean().optional(),
+  }).optional(),
 })
 
 export type ProviderId = z.infer<typeof ProviderIdSchema>

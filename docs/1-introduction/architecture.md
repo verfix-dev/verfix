@@ -1,14 +1,36 @@
 # Architecture
 
-Verfix is designed as a highly scalable, event-driven, local-first execution runtime. This document outlines the system architecture, lifecycle patterns, and infrastructure components.
+Verfix is designed as a local-first execution runtime. This document outlines the system architecture, lifecycle patterns, and infrastructure components.
 
 ---
 
-## Browser Execution Modes
+## Local Mode (the default)
 
-Verfix supports two browser execution modes:
+`verfix run` executes the verification engine (`@verfix/engine`) **in-process**
+— no Docker, no queue, no API server:
 
-### Container Mode (default on Linux)
+```
+       [ CLI / SDK / Agent ]
+                |
+        (in-process call)
+                |
+       ┌────────────────────┐
+       │  @verfix/engine    │  Playwright + Chromium on the host
+       │  (Node.js)         │
+       └────────────────────┘
+                |
+       .verfix/runs/<id>.json + trace zip   →   verfix show <id>
+```
+
+Everything below this line describes the **opt-in Docker server runtime**
+(`--server` / `VERFIX_RUNNER=server`), kept for the future hosted CI product.
+Server mode is container-only — the old hybrid host-worker mode was removed.
+
+---
+
+## Server Mode — Browser Execution
+
+### Container Mode (server mode)
 
 Workers and Playwright run inside a single Docker image alongside the API, Dashboard, Redis, and PostgreSQL.
 

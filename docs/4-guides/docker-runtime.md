@@ -1,7 +1,12 @@
-# Docker Runtime
+# Docker Runtime (server mode — opt-in)
 
-Verfix operates entirely within a local-first Docker runtime. All services
-run inside Docker, with two architecture variants depending on the host platform.
+> **⚠️ Opt-in.** The default Verfix experience needs **no Docker**: `verfix run`
+> drives the browser in-process and stores results under `.verfix/runs/`. The
+> Docker runtime below is the opt-in **server mode** (`--server` /
+> `VERFIX_RUNNER=server`), kept for the future hosted CI product. It is
+> container-only — the hybrid host-worker mode has been removed.
+
+Verfix's server mode runs all services inside Docker.
 
 ---
 

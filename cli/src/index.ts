@@ -8,12 +8,8 @@ import Ajv from 'ajv';
 import fs from 'fs';
 import path from 'path';
 import {
-  CONTAINER_NAME, DEFAULT_CONFIG, HEALTH_ENDPOINT, getBrowserMode,
+  CONTAINER_NAME, DEFAULT_CONFIG, HEALTH_ENDPOINT, VERFIX_HOME, getRunnerMode,
 } from './constants';
-import {
-  extractWorkerFiles, ensurePlaywrightBrowser, startLocalWorker, stopLocalWorker, isWorkerRunning, getWorkerHeadlessState,
-} from './worker-runner';
-
 import {
   isDockerInstalled, isDockerRunning, getContainerState,
   startContainer, stopContainer, pullImage, pullImageIfMissing,
@@ -77,19 +73,44 @@ function refreshRuntimePortsFromContainerIfRunning(): void {
   }
 }
 
+/** The --server flag routes a command at the Docker runtime for this invocation. */
+function applyRunnerFlag(opts: { server?: boolean }): void {
+  if (opts.server) process.env.VERFIX_RUNNER = 'server';
+}
+
+/**
+ * One-time notice for users upgrading from the Docker-based CLI: their old
+ * runtime container keeps running until they reclaim it. Printed to stderr so
+ * --output json stays pure; a flag file makes it fire once per machine.
+ */
+function maybeShowDockerMigrationNotice(): void {
+  const flagFile = path.join(VERFIX_HOME, 'local-mode-notice-shown');
+  try {
+    if (fs.existsSync(flagFile)) return;
+    if (isDockerInstalled() && getContainerState()) {
+      console.error(chalk.yellow(
+        `ℹ Verfix now runs verifications locally by default — no Docker needed. Your old '${CONTAINER_NAME}' container is still around: reclaim it with \`verfix stop --server\`, or keep the server runtime by setting VERFIX_RUNNER=server in .verfix/.env.`,
+      ));
+    }
+    fs.mkdirSync(VERFIX_HOME, { recursive: true });
+    fs.writeFileSync(flagFile, new Date().toISOString() + '\n', 'utf-8');
+  } catch {
+    // best-effort notice
+  }
+}
+
 // ─── start command ───────────────────────────────────────────────────────────
 
 program
   .command('start')
-  .description('Start the Verfix runtime container')
-  .option('--show-browser', 'Show the browser window during verification runs (hybrid mode only)', false)
+  .description('Start the Verfix server runtime container (local mode needs no runtime)')
+  .option('--server', 'Target the Docker server runtime', false)
   .action(async (opts) => {
-    if (opts.showBrowser) {
-      if (getBrowserMode() !== 'host') {
-        console.warn(chalk.yellow('⚠ --show-browser is only supported in hybrid mode. Ignoring.'));
-      } else {
-        process.env.PLAYWRIGHT_HEADLESS = 'false';
-      }
+    applyRunnerFlag(opts);
+    if (getRunnerMode() === 'local') {
+      console.log('Local mode needs no runtime — just run: verfix run --flow <id> --output json');
+      console.log(chalk.gray('Use --server to start the Docker server runtime instead.'));
+      return;
     }
     trackEvent('cli_start', { status: 'attempted' });
     if (!isDockerInstalled()) {
@@ -114,31 +135,6 @@ program
         const runningPorts = getRuntimePorts();
         spinner.succeed('Verfix runtime is already running');
 
-        if (getBrowserMode() === 'host') {
-          const workerState = isWorkerRunning();
-          if (workerState.running && !opts.showBrowser) {
-            console.log(`    Worker:    running on host (PID: ${workerState.pid})`);
-          } else {
-            try {
-              extractWorkerFiles();
-              ensurePlaywrightBrowser();
-              if (workerState.running && opts.showBrowser) {
-                console.log('    Worker:    restarting local worker with browser visible...');
-              } else {
-                console.log('    Worker:    starting local worker...');
-              }
-              const redisPort = process.env.REDIS_PORT ? parseInt(process.env.REDIS_PORT, 10) : 6379;
-              const workerPid = startLocalWorker(redisPort);
-              console.log(`    Worker:    started on host (PID: ${workerPid})`);
-            } catch (err: any) {
-              console.error(chalk.red(`    Worker:    failed to start: ${err.message}`));
-              trackEvent('cli_start', { status: 'worker_failed', error: err.message });
-              await flushTelemetry();
-              process.exit(2);
-            }
-          }
-        }
-
         console.log(`    API:       ${chalk.cyan(`http://localhost:${runningPorts.apiPort}`)}`);
         console.log(`    Dashboard: ${chalk.cyan(`http://localhost:${runningPorts.dashboardPort}`)}`);
         showPendingNotifications();
@@ -160,22 +156,6 @@ program
       spinner.succeed('Verfix runtime is running');
       const startedPorts = getRuntimePorts();
 
-      if (getBrowserMode() === 'host') {
-        try {
-          extractWorkerFiles();
-          ensurePlaywrightBrowser();
-          console.log('    Worker:    starting local worker...');
-          const redisPort = process.env.REDIS_PORT ? parseInt(process.env.REDIS_PORT, 10) : 6379;
-          const workerPid = startLocalWorker(redisPort);
-          console.log(`    Worker:    started on host (PID: ${workerPid})`);
-        } catch (err: any) {
-          console.error(chalk.red(`    Worker:    failed to start: ${err.message}`));
-          trackEvent('cli_start', { status: 'worker_failed', error: err.message });
-          await flushTelemetry();
-          process.exit(2);
-        }
-      }
-
       console.log(`    API:       ${chalk.cyan(`http://localhost:${startedPorts.apiPort}`)}`);
       console.log(`    Dashboard: ${chalk.cyan(`http://localhost:${startedPorts.dashboardPort}`)}`);
       showPendingNotifications();
@@ -194,8 +174,15 @@ program
 
 program
   .command('stop')
-  .description('Stop the Verfix runtime container')
-  .action(() => {
+  .description('Stop the Verfix server runtime container (local mode needs no runtime)')
+  .option('--server', 'Target the Docker server runtime', false)
+  .action((opts) => {
+    applyRunnerFlag(opts);
+    if (getRunnerMode() === 'local') {
+      console.log('Local mode has no runtime to stop.');
+      console.log(chalk.gray('Use --server to stop the Docker server runtime container.'));
+      return;
+    }
     let stoppedContainer = false;
     try {
       stoppedContainer = stopContainer();
@@ -203,23 +190,8 @@ program
       // ignore
     }
 
-    let stoppedWorker = false;
-    if (getBrowserMode() === 'host') {
-      try {
-        stoppedWorker = stopLocalWorker();
-      } catch (e: any) {
-        // ignore
-      }
-    }
-
-    if (stoppedContainer || stoppedWorker) {
-      if (stoppedContainer && stoppedWorker) {
-        console.log(chalk.green('✓ Runtime container and local worker stopped'));
-      } else if (stoppedContainer) {
-        console.log(chalk.green('✓ Runtime container stopped'));
-      } else {
-        console.log(chalk.green('✓ Local worker stopped'));
-      }
+    if (stoppedContainer) {
+      console.log(chalk.green('✓ Runtime container stopped'));
     } else {
       console.log(chalk.gray('Runtime is not running'));
     }
@@ -229,10 +201,72 @@ program
 
 program
   .command('status')
-  .description('Check runtime, API, and dashboard status')
+  .description('Check Verfix setup status (or the server runtime with --server)')
   .argument('[executionId]', 'Optional execution ID to check')
   .option('-o, --output <format>', 'Output format: pretty | json', 'pretty')
+  .option('--server', 'Check the Docker server runtime', false)
   .action(async (executionId, opts) => {
+    applyRunnerFlag(opts);
+    if (getRunnerMode() === 'local') {
+      // Local mode: never touch Docker or the API — read .verfix/runs/ instead.
+      const { readLocalResult, listLocalResults, isChromiumInstalled } = await import('./local-runner');
+
+      if (executionId) {
+        const result = readLocalResult(executionId);
+        if (!result) {
+          if (isJsonMode(opts)) {
+            emitJsonError({ error: 'status_lookup_failed', message: `No local run found for ${executionId}`, hint: 'Local results live in .verfix/runs/. List them with: verfix list' });
+          }
+          console.error(chalk.red(`No local run found for ${executionId} under .verfix/runs/`));
+          process.exit(2);
+        }
+        if (isJsonMode(opts)) {
+          emitJson(result);
+        } else {
+          console.log('');
+          console.log(`  ${chalk.bold('Execution:')} ${result!.executionId}`);
+          console.log(`  ${chalk.bold('Status:')}    ${result!.passed ? chalk.green(result!.status) : chalk.red(result!.status)}`);
+          if (result!.duration_ms) console.log(`  ${chalk.bold('Duration:')}  ${result!.duration_ms}ms`);
+          console.log(`  ${chalk.bold('Trace:')}     verfix show ${result!.executionId}`);
+          console.log('');
+        }
+        return;
+      }
+
+      const configFound = fs.existsSync(path.resolve(process.cwd(), DEFAULT_CONFIG));
+      const chromiumInstalled = isChromiumInstalled();
+      const lastRun = listLocalResults()[0] ?? null;
+
+      if (isJsonMode(opts)) {
+        emitJson({
+          runner: 'local',
+          config_found: configFound,
+          chromium_installed: chromiumInstalled,
+          last_run: lastRun ? {
+            execution_id: lastRun.executionId,
+            passed: lastRun.passed,
+            completed_at: lastRun.completed_at,
+          } : null,
+        });
+        return;
+      }
+
+      console.log('');
+      console.log(`  ${chalk.bold('Runner:')}    local (no Docker needed — use --server for the container runtime)`);
+      console.log(`  ${chalk.bold('Config:')}    ${configFound ? chalk.green(DEFAULT_CONFIG) : chalk.red('not found — run: verfix init')}`);
+      console.log(`  ${chalk.bold('Chromium:')}  ${chromiumInstalled ? chalk.green('installed') : chalk.yellow('not installed (auto-downloads on first run)')}`);
+      if (lastRun) {
+        const icon = lastRun.passed ? chalk.green('passed') : chalk.red('failed');
+        console.log(`  ${chalk.bold('Last run:')}  ${icon}  ${chalk.gray(lastRun.executionId)}  (verfix show ${lastRun.executionId})`);
+      } else {
+        console.log(`  ${chalk.bold('Last run:')}  ${chalk.gray('none yet')}`);
+      }
+      console.log('');
+      showPendingNotifications();
+      scheduleBackgroundCheck(['npm', 'image']);
+      return;
+    }
+
     refreshRuntimePortsFromContainerIfRunning();
     const apiBase = await resolveApiBase();
     const runtimePorts = getRuntimePorts();
@@ -267,17 +301,12 @@ program
     const dashReachable = await isDashboardReachable();
 
     if (isJsonMode(opts)) {
-      const browserMode = getBrowserMode();
-      const workerState = browserMode === 'host' ? isWorkerRunning() : null;
       emitJson({
         runtime: runtimeStatus,
         api: apiHealthy ? 'healthy' : 'unreachable',
         api_url: `http://localhost:${runtimePorts.apiPort}`,
         dashboard: dashReachable ? 'healthy' : 'unreachable',
         dashboard_url: `http://localhost:${runtimePorts.dashboardPort}`,
-        browser_mode: browserMode,
-        worker: workerState ? (workerState.running ? 'running' : 'stopped') : 'container',
-        worker_pid: workerState?.pid || null,
         image: state?.image || null,
         uptime: state?.startedAt && runtimeStatus === 'running' ? formatUptime(state.startedAt) : null,
       });
@@ -288,15 +317,6 @@ program
     console.log(`  ${chalk.bold('Runtime:')}    ${runtimeStatus === 'running' ? chalk.green(runtimeStatus) : chalk.red(runtimeStatus)}`);
     console.log(`  ${chalk.bold('API:')}        ${apiHealthy ? chalk.green('healthy') : chalk.red('unreachable')}   (http://localhost:${runtimePorts.apiPort})`);
     console.log(`  ${chalk.bold('Dashboard:')}  ${dashReachable ? chalk.green('healthy') : chalk.red('unreachable')}   (http://localhost:${runtimePorts.dashboardPort})`);
-    
-    const browserMode = getBrowserMode();
-    if (browserMode === 'host') {
-      const workerState = isWorkerRunning();
-      console.log(`  ${chalk.bold('Browser Mode:')} host (hybrid)`);
-      console.log(`  ${chalk.bold('Worker:')}      ${workerState.running ? chalk.green('running') : chalk.red('stopped')}${workerState.pid ? ` (PID: ${workerState.pid})` : ''}`);
-    } else {
-      console.log(`  ${chalk.bold('Browser Mode:')} container`);
-    }
 
     if (state?.image) {
       console.log(`  ${chalk.bold('Image:')}      ${state.image}`);
@@ -313,9 +333,18 @@ program
 
 program
   .command('logs')
-  .description('Tail Verfix runtime container logs')
+  .description('Tail Verfix server runtime logs (local runs live in .verfix/runs/)')
   .option('--tail <n>', 'Number of lines to show', '50')
+  .option('--server', 'Target the Docker server runtime', false)
   .action((opts) => {
+    applyRunnerFlag(opts);
+    if (getRunnerMode() === 'local') {
+      console.log('Local mode has no runtime logs. Each run is persisted under .verfix/runs/:');
+      console.log(`  ${chalk.cyan('verfix list')}                  ${chalk.gray('recent runs')}`);
+      console.log(`  ${chalk.cyan('verfix show <execution_id>')}   ${chalk.gray('open the Playwright trace')}`);
+      console.log(chalk.gray('Use --server to tail the Docker runtime container logs.'));
+      return;
+    }
     if (!getContainerState()) {
       console.error(chalk.red(`Container '${CONTAINER_NAME}' is not running. Start it with 'verfix start'.`));
       process.exit(2);
@@ -332,8 +361,16 @@ program
 
 program
   .command('update')
-  .description('Pull latest image and restart the runtime')
-  .action(async () => {
+  .description('Update Verfix (npm in local mode; image pull + restart with --server)')
+  .option('--server', 'Update the Docker server runtime image', false)
+  .action(async (opts) => {
+    applyRunnerFlag(opts);
+    if (getRunnerMode() === 'local') {
+      console.log('Local mode updates through npm:');
+      console.log(`  ${chalk.cyan('npm install -g verfix@latest')}   ${chalk.gray('(or npx verfix@latest for always-current)')}`);
+      console.log(chalk.gray('Use --server to pull the latest Docker runtime image.'));
+      return;
+    }
     if (!isDockerInstalled()) {
       console.error(chalk.red('✗ Docker is not installed.'));
       process.exit(2);
@@ -354,13 +391,6 @@ program
 
     // Stop existing container if running
     stopContainer();
-    if (getBrowserMode() === 'host') {
-      try {
-        stopLocalWorker();
-      } catch (e: any) {
-        // ignore
-      }
-    }
 
     const startSpinner = ora('Starting runtime...').start();
     try {
@@ -374,20 +404,6 @@ program
       startSpinner.succeed('Verfix runtime is running (updated)');
       const startedPorts = getRuntimePorts();
 
-      if (getBrowserMode() === 'host') {
-        try {
-          extractWorkerFiles();
-          ensurePlaywrightBrowser();
-          console.log('    Worker:    starting local worker...');
-          const redisPort = process.env.REDIS_PORT ? parseInt(process.env.REDIS_PORT, 10) : 6379;
-          const workerPid = startLocalWorker(redisPort);
-          console.log(`    Worker:    started on host (PID: ${workerPid})`);
-        } catch (err: any) {
-          console.error(chalk.red(`    Worker:    failed to start: ${err.message}`));
-          process.exit(2);
-        }
-      }
-
       console.log(`    API:       ${chalk.cyan(`http://localhost:${startedPorts.apiPort}`)}`);
       console.log(`    Dashboard: ${chalk.cyan(`http://localhost:${startedPorts.dashboardPort}`)}`);
       // Clear stale image cache — user just updated, so no banner needed next run
@@ -400,12 +416,189 @@ program
 
 // ─── doctor command ──────────────────────────────────────────────────────────
 
+/**
+ * Local-mode diagnostics: everything `verfix run` needs on this machine, and
+ * nothing it doesn't. Docker is surfaced as informational only — a machine
+ * without Docker is a fully healthy local setup.
+ */
+async function runLocalDoctor(opts: any): Promise<never> {
+  if (!isJsonMode(opts)) {
+    console.log('');
+    console.log(chalk.bold('  Verfix Doctor (local mode)'));
+    console.log(chalk.gray('  ─────────────────────────────'));
+    console.log('');
+  }
+
+  let failures = 0;
+  let warnings = 0;
+
+  function printCheck(icon: string, label: string, hint?: string): void {
+    if (isJsonMode(opts)) return;
+    console.log(`  ${icon} ${label}`);
+    if (hint) console.log(chalk.gray(`    ${hint}`));
+  }
+
+  // 1. Node version
+  const nodeMajor = parseInt(process.versions.node.split('.')[0], 10);
+  const nodeOk = nodeMajor >= 20;
+  if (nodeOk) {
+    printCheck(chalk.green('✓'), `Node ${process.versions.node}`);
+  } else {
+    printCheck(chalk.red('✗'), `Node ${process.versions.node} — Verfix needs Node 20+`, 'Upgrade at https://nodejs.org');
+    failures++;
+  }
+
+  // 2. Config exists and validates
+  const configPath = path.resolve(process.cwd(), DEFAULT_CONFIG);
+  const configFound = fs.existsSync(configPath);
+  let configValid = false;
+  let config: any = {};
+  if (configFound) {
+    try {
+      config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+      validateConfigSchema(config, configPath);
+      configValid = true;
+      printCheck(chalk.green('✓'), `${DEFAULT_CONFIG} valid`);
+    } catch (e: any) {
+      printCheck(chalk.red('✗'), `${DEFAULT_CONFIG} invalid`, e.message.split('\n')[0]);
+      failures++;
+    }
+  } else {
+    printCheck(chalk.red('✗'), `${DEFAULT_CONFIG} not found`, 'Run: verfix init (or verfix init --yes for non-interactive)');
+    failures++;
+  }
+
+  // 3. AGENTS.md exists
+  const agentsMdFound = fs.existsSync(path.resolve(process.cwd(), 'AGENTS.md'));
+  if (agentsMdFound) {
+    printCheck(chalk.green('✓'), 'AGENTS.md found');
+  } else {
+    printCheck(chalk.red('✗'), 'AGENTS.md not found', 'Run: verfix init (or verfix init --yes for non-interactive)');
+    failures++;
+  }
+
+  // 4. Chromium present (a miss is only a warning — verfix run auto-installs)
+  const { isChromiumInstalled } = await import('./local-runner');
+  const chromiumInstalled = isChromiumInstalled(config.browser);
+  if (chromiumInstalled) {
+    printCheck(chalk.green('✓'), 'Chromium installed');
+  } else {
+    printCheck(chalk.yellow('⚠'), 'Chromium not installed', 'verfix run downloads it on first use (~130MB), or run: npx playwright install chromium');
+    warnings++;
+  }
+
+  // 5. App base URL reachable (only a warning — the app may just not be running)
+  let baseUrlReachable: boolean | null = null;
+  const baseUrl = config.baseUrl || config.url;
+  if (baseUrl) {
+    try {
+      await axios.get(baseUrl, { timeout: 2000, validateStatus: () => true });
+      baseUrlReachable = true;
+      printCheck(chalk.green('✓'), `App reachable at ${baseUrl}`);
+    } catch {
+      baseUrlReachable = false;
+      printCheck(chalk.yellow('⚠'), `App not reachable at ${baseUrl}`, 'Start your dev server before verfix run');
+      warnings++;
+    }
+  }
+
+  // 6. AI provider — a hard requirement only when the mode actually uses AI
+  const mode = config.mode || 'strict';
+  let providerConfigured: boolean | null = null;
+  let keyFound: boolean | null = null;
+  let keyFormatValid: boolean | null = null;
+  if (mode === 'strict') {
+    printCheck(chalk.gray('•'), chalk.gray('AI key not needed (strict mode)'));
+  } else {
+    const { PROVIDER_REGISTRY } = await import('./providers/registry');
+    const { loadAIConfig, loadApiKey } = await import('./config/loader');
+    const aiConfig = loadAIConfig(process.cwd());
+    providerConfigured = aiConfig !== null;
+    if (!aiConfig) {
+      printCheck(chalk.red('✗'), `No AI provider configured (mode is '${mode}')`, 'Run: verfix init to configure AI, or switch to mode: strict');
+      failures++;
+    } else {
+      const def = PROVIDER_REGISTRY[aiConfig.provider];
+      const apiKey = loadApiKey(process.cwd(), aiConfig.provider);
+      keyFound = !!apiKey;
+      if (!apiKey) {
+        printCheck(chalk.red('✗'), 'AI API key not found', `Set ${def.envVar} in .verfix/.env or as environment variable`);
+        failures++;
+      } else {
+        keyFormatValid = def.keyPattern.test(apiKey);
+        if (keyFormatValid) {
+          printCheck(chalk.green('✓'), `AI configured: ${aiConfig.provider} / ${aiConfig.model}`);
+        } else {
+          printCheck(chalk.red('✗'), `API key format invalid for ${def.displayName}`, `Key should ${def.keyPatternHint}. Check ${def.envVar}`);
+          failures++;
+        }
+      }
+    }
+  }
+
+  // 7. Docker — purely informational in local mode, never a failure
+  printCheck(chalk.gray('•'), chalk.gray(`Docker ${isDockerInstalled() ? 'installed' : 'not installed'} — optional (server mode only, see --server)`));
+
+  const finish = async (exitCode: number) => {
+    try {
+      trackEvent('cli_doctor', { failures, warnings, passed: failures === 0, runner: 'local' });
+      await flushTelemetry();
+    } catch {
+      // ignore
+    }
+    process.exit(exitCode);
+  };
+
+  if (isJsonMode(opts)) {
+    emitJson({
+      runner: 'local',
+      checks: {
+        node_ok: nodeOk,
+        config_found: configFound,
+        config_valid: configValid,
+        agents_md_found: agentsMdFound,
+        chromium_installed: chromiumInstalled,
+        base_url_reachable: baseUrlReachable,
+        provider_configured: providerConfigured,
+        key_found: keyFound,
+        key_format_valid: keyFormatValid,
+      },
+      mode,
+      failures,
+      warnings,
+      passed: failures === 0,
+    });
+    return finish(failures > 0 ? 1 : 0);
+  }
+
+  console.log('');
+  if (failures === 0 && warnings === 0) {
+    console.log(chalk.bold.green('  All checks passed!'));
+  } else if (failures === 0) {
+    console.log(chalk.bold.yellow(`  All checks passed (${warnings} warning(s))`));
+  } else {
+    console.log(chalk.bold.red(`  ${failures} check(s) failed`));
+    if (warnings > 0) console.log(chalk.yellow(`  ${warnings} warning(s)`));
+  }
+  console.log('');
+  showPendingNotifications();
+  scheduleBackgroundCheck(['npm', 'image']);
+  return finish(failures > 0 ? 1 : 0);
+}
+
 program
   .command('doctor')
   .description('Run diagnostic checks on the Verfix setup')
   .option('-o, --output <format>', 'Output format: pretty | json', 'pretty')
   .option('--check-connectivity', 'Also test API key connectivity (makes a live API call)', false)
+  .option('--server', 'Diagnose the Docker server runtime instead of local mode', false)
   .action(async (opts) => {
+    applyRunnerFlag(opts);
+    if (getRunnerMode() === 'local') {
+      // Runs before ANY docker spawn — a docker-less machine must never error.
+      await runLocalDoctor(opts);
+      return;
+    }
     refreshRuntimePortsFromContainerIfRunning();
     const runtimePorts = getRuntimePorts();
     if (!isJsonMode(opts)) {
@@ -713,15 +906,14 @@ program
       bootstrap: {
         description: 'Run this command to initialize Verfix non-interactively',
         command: 'npx verfix init --yes',
-        required_flags: {
-          '--ai-key': 'API key (or set VERFIX_AI_KEY / OPENAI_API_KEY / ANTHROPIC_API_KEY / GEMINI_API_KEY env var)',
-        },
+        required_flags: {},
         optional_flags: {
+          '--ai-key': 'API key — only required for assisted/exploratory modes (or set VERFIX_AI_KEY / OPENAI_API_KEY / ANTHROPIC_API_KEY / GEMINI_API_KEY env var)',
           '--ai-provider': 'openai | anthropic | gemini | openrouter (auto-detected from key format if omitted)',
           '--ai-model': 'Model ID (uses provider default if omitted)',
           '--base-url': 'App URL (default: http://localhost:3000)',
-          '--mode': 'strict | assisted | exploratory (default: assisted)',
-          '--skip-runtime': 'Skip Docker container startup',
+          '--mode': 'strict | assisted | exploratory (default: strict — no AI key needed)',
+          '--skip-runtime': 'Skip runtime setup (Chromium download in local mode; Docker start in server mode)',
           '--skip-agent-files': 'Skip writing .cursorrules/CLAUDE.md/CODEX.md',
           '--dry-run': 'Preview without writing files',
         },
@@ -734,8 +926,9 @@ program
         },
         provider_env_vars: ['OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'GEMINI_API_KEY', 'OPENROUTER_API_KEY'],
         examples: [
-          'npx verfix init --yes --ai-key $OPENAI_API_KEY --skip-runtime',
-          'VERFIX_AI_KEY=$ANTHROPIC_API_KEY npx verfix init --yes',
+          'npx verfix init --yes',
+          'npx verfix init --yes --mode assisted --ai-key $OPENAI_API_KEY',
+          'VERFIX_AI_KEY=$ANTHROPIC_API_KEY npx verfix init --yes --mode assisted',
           'npx verfix init --yes --ai-provider openai --ai-model gpt-5.4-mini --ai-key sk-... --base-url http://localhost:3000',
         ],
       },
@@ -756,10 +949,12 @@ program
   .option('--ai-key <key>', 'API key string')
   .option('--base-url <url>', 'App URL (e.g. http://localhost:3000)')
   .option('--mode <mode>', 'Verification mode: strict | assisted | exploratory')
-  .option('--skip-runtime', 'Don\'t start Docker container')
+  .option('--skip-runtime', 'Skip runtime setup (Docker start in server mode, Chromium download in local mode)')
   .option('--skip-agent-files', 'Don\'t write .cursorrules/CLAUDE.md/CODEX.md')
   .option('--dry-run', 'Preview what would happen, don\'t write anything')
+  .option('--server', 'Set up the Docker server runtime (legacy flow)', false)
   .action(async (opts) => {
+    applyRunnerFlag(opts);
     let telemetryCaptured = false;
 
     const captureTelemetry = async (exitCode: number, errorMsg?: string) => {
@@ -913,12 +1108,14 @@ program
   .option('--dashboard <url>', 'Dashboard base URL for timeline links')
   .option('--timeout <ms>', 'Timeout in milliseconds', '15000')
   .option('--retries <n>', 'Number of retries on failure', '2')
-  .option('--show-browser', 'Show the browser window during verification runs (hybrid mode only)', false)
+  .option('--show-browser', 'Show the browser window during verification runs (local mode only)', false)
   .option('--source-policy <policy>', 'Project-source edit policy: warn | block | off (overrides config)')
   .option('--reset-baseline', 'Reset the source-change baseline for this verify cycle', false)
+  .option('--server', 'Run via the Docker server runtime instead of locally', false)
   .action(async (opts) => {
-    if (opts.showBrowser && getBrowserMode() !== 'host') {
-      console.warn(chalk.yellow('⚠ --show-browser is only supported in hybrid mode. Ignoring.'));
+    applyRunnerFlag(opts);
+    if (opts.showBrowser && getRunnerMode() === 'server') {
+      console.warn(chalk.yellow('⚠ --show-browser is only supported in local mode. Ignoring.'));
     }
 
     let trackMode = opts.mode || 'strict';
@@ -943,10 +1140,6 @@ program
       process.exit(exitCode);
     };
 
-    refreshRuntimePortsFromContainerIfRunning();
-    const apiBase = await resolveApiBase();
-    const runtimePorts = getRuntimePorts();
-    const dashboardBase = buildDashboardBase(runtimePorts);
     // Load config file if provided or found in cwd
     let config: any = {};
     const configPath = opts.config
@@ -1008,49 +1201,11 @@ program
     });
     const sourceGate = buildSourceFinding(sourceChanges, sourcePolicy);
 
-    // If browser mode is host, make sure the local worker is running with the requested headfulness
-    if (getBrowserMode() === 'host') {
-      const workerState = isWorkerRunning();
-      const currentHeadless = getWorkerHeadlessState();
-      const requestedHeadless = !opts.showBrowser;
-
-      if (!workerState.running || currentHeadless !== requestedHeadless) {
-        if (!isJsonMode(opts)) {
-          if (workerState.running) {
-            console.log(chalk.yellow(`  ⚠  Restarting local worker to run in ${requestedHeadless ? 'headless' : 'headful'} mode...`));
-          } else {
-            console.log(chalk.yellow('  ⚠  Local worker is not running. Starting it now...'));
-          }
-        }
-        try {
-          extractWorkerFiles();
-          ensurePlaywrightBrowser();
-          // Pass the requested headless env variable
-          process.env.PLAYWRIGHT_HEADLESS = String(requestedHeadless);
-          const redisPort = process.env.REDIS_PORT ? parseInt(process.env.REDIS_PORT, 10) : 6379;
-          startLocalWorker(redisPort);
-        } catch (err: any) {
-          if (isJsonMode(opts)) {
-            emitJsonError({ error: 'worker_start_failed', message: `Local worker failed to start: ${err.message}`, hint: 'Try starting the runtime explicitly: verfix start' });
-          }
-          console.error(chalk.red(`  ✗ Failed to start local worker: ${err.message}`));
-          await finishTelemetryAndExit(2, 'worker_start_failed');
-        }
-      }
-    }
-
-    // Rewrite localhost → host.docker.internal so Playwright inside the
-    // container can reach the user's app running on the host machine.
-    const resolved = await resolveJobUrl(baseUrl);
-    const targetUrl = resolved.url;
-    const activeProxy = resolved.proxy;
-    if (resolved.rewritten && !isJsonMode(opts)) {
-      console.log(chalk.gray(`  ℹ  Target URL: ${baseUrl} → ${targetUrl} (host.docker.internal)`));
-    }
+    const runnerMode = getRunnerMode();
 
     const payload: any = {
-      url: targetUrl,
-      task: opts.task || config.task || (opts.flow ? `Verify flow ${opts.flow}` : `Verify ${targetUrl}`),
+      url: baseUrl,
+      task: opts.task || config.task || (opts.flow ? `Verify flow ${opts.flow}` : `Verify ${baseUrl}`),
       mode: opts.mode || selectedFlows[0]?.mode || config.mode || 'strict',
       assertions,
       flows: flows.length > 0 ? flows : undefined,
@@ -1067,7 +1222,6 @@ program
         emitJsonError({ error: 'missing_url', message: '--url is required (or set baseUrl in config file)', hint: 'Pass --url <url> or add baseUrl to your config.' });
       }
       console.error(chalk.red('Error: --url is required (or set baseUrl in config file)'));
-      if (activeProxy) activeProxy.close();
       await finishTelemetryAndExit(2, 'missing_url');
     }
 
@@ -1078,63 +1232,116 @@ program
       console.log(`  ${chalk.gray('Task:')}    ${payload.task}`);
       console.log(`  ${chalk.gray('URL:')}     ${payload.url}`);
       console.log(`  ${chalk.gray('Mode:')}    ${payload.mode}`);
+      console.log(`  ${chalk.gray('Runner:')}  ${runnerMode}`);
       console.log(`  ${chalk.gray('Checks:')}  ${(payload.assertions || []).length} assertion(s)`);
       console.log('');
     }
 
-    const submitSpinner = opts.output === 'pretty' ? ora('Submitting job...').start() : null;
-
-    let executionId = '';
-    try {
-      const res = await axios.post(`${apiBase}/api/v1/verify`, payload);
-      executionId = res.data.executionId;
-      submitSpinner?.succeed(`Job queued: ${chalk.bold(executionId)}`);
-    } catch (e: any) {
-      submitSpinner?.fail('Failed to submit job');
-      if (isJsonMode(opts)) {
-        emitJsonError({ error: 'submit_failed', message: e.message, hint: 'Check that the runtime is running: verfix status' });
-      }
-      console.error(chalk.red(e.message));
-      if (activeProxy) activeProxy.close();
-      await finishTelemetryAndExit(2, 'submit_failed');
-    }
-
-    // Poll for result
-    const pollSpinner = opts.output === 'pretty' ? ora('Running verification...').start() : null;
-
     let result: any = null;
-    const maxWait = 120000;
-    const pollInterval = 2000;
-    const startTime = Date.now();
+    let timelineUrl: string | null = null;
+    let activeProxy: { close: () => void } | null = null;
 
-    while (Date.now() - startTime < maxWait) {
-      await sleep(pollInterval);
+    if (runnerMode === 'local') {
+      // ── Local mode: drive the engine in-process. No Docker, no Redis, no API,
+      // no URL rewriting — the browser runs on this machine and reaches
+      // localhost natively.
+      maybeShowDockerMigrationNotice();
+      const runSpinner = opts.output === 'pretty' ? ora('Running verification (local)...').start() : null;
       try {
-        const res = await axios.get(`${apiBase}/api/v1/executions/${executionId}`);
-        const data = res.data;
-        if (data.status === 'completed' || data.status === 'failed') {
-          result = data;
-          break;
+        const { runLocal } = await import('./local-runner');
+        result = await runLocal(payload, {
+          headless: !opts.showBrowser,
+          browser: config.browser,
+          json: isJsonMode(opts),
+        });
+        runSpinner?.stop();
+      } catch (e: any) {
+        runSpinner?.fail('Verification failed to run');
+        const errName = e?.name === 'BrowserNotInstalledError' ? 'browser_not_installed' : 'run_failed';
+        if (isJsonMode(opts)) {
+          emitJsonError({
+            error: errName,
+            message: e.message,
+            hint: errName === 'browser_not_installed'
+              ? 'Set "browser": {"channel": "chrome"} in verfix.config.json to use your installed Chrome, or run: npx playwright install chromium'
+              : 'Re-run with --output pretty for details.',
+          });
         }
-      } catch {
-        // keep polling
+        console.error(chalk.red(e.message));
+        await finishTelemetryAndExit(2, errName);
       }
-    }
+    } else {
+      // ── Server mode: submit to the containerized API and poll.
+      refreshRuntimePortsFromContainerIfRunning();
+      const apiBase = await resolveApiBase();
+      const runtimePorts = getRuntimePorts();
+      const dashboardBase = buildDashboardBase(runtimePorts);
 
-    pollSpinner?.stop();
-
-    if (!result) {
-      if (isJsonMode(opts)) {
-        emitJsonError({ error: 'poll_timeout', message: 'Timed out waiting for result. Job may still be running.', hint: `Run: verfix status ${executionId}` });
+      // Rewrite localhost → host.docker.internal so Playwright inside the
+      // container can reach the user's app running on the host machine.
+      const resolved = await resolveJobUrl(baseUrl);
+      payload.url = resolved.url;
+      activeProxy = resolved.proxy ?? null;
+      if (resolved.rewritten && !isJsonMode(opts)) {
+        console.log(chalk.gray(`  ℹ  Target URL: ${baseUrl} → ${resolved.url} (host.docker.internal)`));
       }
-      console.error(chalk.yellow('⚠ Timed out waiting for result. Job may still be running.'));
-      console.log(`  Run: verfix status ${executionId}`);
-      if (activeProxy) activeProxy.close();
-      await finishTelemetryAndExit(2, 'poll_timeout');
+
+      const submitSpinner = opts.output === 'pretty' ? ora('Submitting job...').start() : null;
+
+      let executionId = '';
+      try {
+        const res = await axios.post(`${apiBase}/api/v1/verify`, payload);
+        executionId = res.data.executionId;
+        submitSpinner?.succeed(`Job queued: ${chalk.bold(executionId)}`);
+      } catch (e: any) {
+        submitSpinner?.fail('Failed to submit job');
+        if (isJsonMode(opts)) {
+          emitJsonError({ error: 'submit_failed', message: e.message, hint: 'Check that the runtime is running: verfix status' });
+        }
+        console.error(chalk.red(e.message));
+        if (activeProxy) activeProxy.close();
+        await finishTelemetryAndExit(2, 'submit_failed');
+      }
+
+      // Poll for result
+      const pollSpinner = opts.output === 'pretty' ? ora('Running verification...').start() : null;
+
+      const maxWait = 120000;
+      const pollInterval = 2000;
+      const startTime = Date.now();
+
+      while (Date.now() - startTime < maxWait) {
+        await sleep(pollInterval);
+        try {
+          const res = await axios.get(`${apiBase}/api/v1/executions/${executionId}`);
+          const data = res.data;
+          if (data.status === 'completed' || data.status === 'failed') {
+            result = data;
+            break;
+          }
+        } catch {
+          // keep polling
+        }
+      }
+
+      pollSpinner?.stop();
+
+      if (!result) {
+        if (isJsonMode(opts)) {
+          emitJsonError({ error: 'poll_timeout', message: 'Timed out waiting for result. Job may still be running.', hint: `Run: verfix status ${executionId}` });
+        }
+        console.error(chalk.yellow('⚠ Timed out waiting for result. Job may still be running.'));
+        console.log(`  Run: verfix status ${executionId}`);
+        if (activeProxy) activeProxy.close();
+        await finishTelemetryAndExit(2, 'poll_timeout');
+      }
+
+      timelineUrl = buildTimelineUrl(opts.dashboard || dashboardBase, executionId);
     }
 
     trackDurationMs = result.duration_ms || 0;
-    const timelineUrl = buildTimelineUrl(opts.dashboard || dashboardBase, executionId);
+    const tracePath = runnerMode === 'local' ? (result.artifacts?.trace ?? null) : undefined;
+    const showCommand = runnerMode === 'local' ? `verfix show ${result.executionId}` : undefined;
 
     if (isJsonMode(opts)) {
       const failures = buildFailures(result);
@@ -1149,7 +1356,10 @@ program
         passed,
         failures,
         source_changes: sourceChanges.status === 'ok' ? sourceChanges : undefined,
+        // Contract stability: timeline_url stays present but is null in local
+        // mode (no dashboard); trace_path/show_command are the local additions.
         timeline_url: timelineUrl,
+        ...(runnerMode === 'local' ? { trace_path: tracePath, show_command: showCommand } : {}),
         exit_code: passed ? 0 : 1,
         execution_id: result.executionId,
         raw: result,
@@ -1195,7 +1405,11 @@ program
     }
 
     console.log('');
-    console.log(`${chalk.gray('Timeline:')} ${timelineUrl}`);
+    if (runnerMode === 'local') {
+      console.log(`${chalk.gray('Show trace:')} ${chalk.cyan(showCommand)}`);
+    } else {
+      console.log(`${chalk.gray('Timeline:')} ${timelineUrl}`);
+    }
 
     const errors = (result.console_logs || []).filter((l: any) => l.type === 'error');
     if (errors.length > 0) {
@@ -1230,12 +1444,56 @@ program
     await finishTelemetryAndExit(prettyPassed ? 0 : 1);
   });
 
+// ─── show command ─────────────────────────────────────────────────────────────
+
+program
+  .command('show [executionId]')
+  .description('Open the Playwright trace viewer for a local run (newest run if no id given)')
+  .action(async (executionId?: string) => {
+    const { findTraceZip, playwrightCliPath } = await import('./local-runner');
+    const traceZip = findTraceZip(executionId);
+
+    if (!traceZip) {
+      console.error(chalk.red(executionId
+        ? `No trace found for execution ${executionId} under .verfix/runs/`
+        : 'No local runs found under .verfix/runs/. Run a verification first: verfix run --output json'));
+      process.exit(2);
+    }
+
+    console.log(chalk.gray(`Opening trace: ${traceZip}`));
+    const { spawnSync } = await import('child_process');
+    const res = spawnSync(process.execPath, [playwrightCliPath(), 'show-trace', traceZip], {
+      stdio: 'inherit',
+    });
+    process.exit(res.status ?? 0);
+  });
+
 // ─── list command ─────────────────────────────────────────────────────────────
 
 program
   .command('list')
   .description('List recent verification executions')
-  .action(async () => {
+  .option('--server', 'List executions from the Docker server runtime', false)
+  .action(async (opts) => {
+    applyRunnerFlag(opts);
+    if (getRunnerMode() === 'local') {
+      const { listLocalResults } = await import('./local-runner');
+      const runs = listLocalResults();
+      if (runs.length === 0) {
+        console.log(chalk.gray('  No local runs found. Run a verification first: verfix run --output json'));
+        return;
+      }
+      console.log('');
+      console.log(chalk.bold('  Recent Executions (local):'));
+      for (const r of runs) {
+        const icon = r.passed ? chalk.green('✅') : chalk.red('❌');
+        console.log(`    ${icon} ${chalk.gray(r.executionId)}  ${chalk.bold(r.task ?? '')}  ${chalk.gray(r.url ?? '')}`);
+      }
+      console.log('');
+      console.log(chalk.gray('  Open a trace: verfix show <execution_id>'));
+      console.log('');
+      return;
+    }
     refreshRuntimePortsFromContainerIfRunning();
     const apiBase = await resolveApiBase();
     try {
@@ -1279,9 +1537,7 @@ async function resolveJobUrl(url: string): Promise<{ url: string; rewritten: boo
   if (!url) return { url, rewritten: false };
   // Host network mode (Linux): localhost resolves correctly inside container.
   if (isHostNetworkMode()) return { url, rewritten: false };
-  // Host browser mode: workers run on the host, so localhost is reachable natively.
-  if (getBrowserMode() === 'host') return { url, rewritten: false };
-  
+
   // Bridge mode (Mac/Windows): intercept localhost / 127.0.0.1
   const match = url.match(/^(https?:\/\/)(localhost|127\.0\.0\.1)(:\d+)?(.*)$/);
   if (match) {

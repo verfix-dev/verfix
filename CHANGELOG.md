@@ -5,7 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [Unreleased] — 0.3.0 (local-first)
+
+### Changed — ⚡ Verfix is now local-first (config-compatible)
+- **`verfix run` executes in-process by default — no Docker, no Redis, no API server.** The verification engine was extracted from the workers package as **`@verfix/engine`** (`runVerification(payload, opts)`), and the CLI now calls it directly. A clean machine needs only Node 20+; the first run downloads Chromium once (~130MB, cached). Existing `verfix.config.json` files need **zero changes**.
+- **Strict mode needs no AI key.** `verfix init` defaults to `strict` and only asks for a provider/key when you pick `assisted`/`exploratory`. Non-interactive `init --yes` completes with zero credentials.
+- **Results live in `.verfix/runs/`.** Each run persists `<id>.json` plus a full Playwright trace zip (screenshots, network, console); the newest 20 runs are kept. New commands: **`verfix show [id]`** opens the trace viewer, **`verfix list`** lists recent runs locally.
+- **JSON contract:** `timeline_url` is still present but `null` in local runs; additive `trace_path` and `show_command` fields point at the recorded trace. Server-mode output is unchanged.
+- **The Docker server runtime is opt-in** via `--server` (on `init`, `run`, `start`, `stop`, `status`, `logs`, `update`, `doctor`, `list`) or `VERFIX_RUNNER=server` in `.verfix/.env`. In local mode, `start`/`stop`/`logs`/`update` print what to do instead; `status` reports config/browser/last-run; `doctor` runs a local check set (Node ≥20, config valid, Chromium, app reachability — Docker is informational only and never a failure).
+- **New optional config `browser: { channel?, headless? }`** — `"channel": "chrome"` reuses your installed Chrome and skips the Chromium download.
+- A one-time notice tells upgrading users their old runtime container can be reclaimed with `verfix stop --server`.
+
+### Removed
+- **Hybrid host-worker mode** (`cli/src/worker-runner.ts`, `VERFIX_BROWSER_MODE`, slim-image auto-selection). Local mode covers its use case natively — the browser runs on your machine and reaches localhost directly. Server mode is container-only. `Dockerfile.server-slim` stays in the repo for the future hosted product.
 
 ### Added
 - **Lightweight agent instructions (stub + reference split):** `verfix init` no longer injects the full ~580-line instruction block into `AGENTS.md`. The full reference (flow schema, verification workflow, failure table, flow-writing guide) is now written to a standalone **`.verfix/INSTRUCTIONS.md`**, and `AGENTS.md` carries only a compact ~30-line stub (identity, the config-first rule, core commands) that points to it. This keeps projects that already have an `AGENTS.md` from being bloated, and loads the detail on demand. The stub is self-sufficient for the core loop: it tells the agent to verify the specific page it edited, and to create a new flow (reading source for the route + selectors) when none covers the change.
