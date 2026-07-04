@@ -1,4 +1,10 @@
-# Hybrid Mode Architecture & Troubleshooting Guide
+# Hybrid Mode Architecture & Troubleshooting Guide (REMOVED)
+
+> **⚠️ Hybrid mode no longer exists.** Local mode (the default since the
+> local-first release) runs the browser in-process on your machine — which is
+> what hybrid mode approximated, minus the Docker API/Redis half. Server mode
+> (`--server`) is container-only. This document is kept for historical
+> reference only.
 
 This guide details the design, technical architecture, and troubleshooting history of **Hybrid Mode** in Verfix. 
 

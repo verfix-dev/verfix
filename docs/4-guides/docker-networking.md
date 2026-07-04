@@ -1,5 +1,12 @@
 # Docker Networking & Browser Execution Modes
 
+> **⚠️ Server mode only.** Since the local-first release, `verfix run` executes
+> the browser **in-process on your machine by default** — there is no container
+> and none of this networking applies. This guide is only relevant when using
+> the opt-in Docker server runtime (`--server` / `VERFIX_RUNNER=server`). The
+> hybrid "host" browser mode described below has been **removed**; server mode
+> is container-only.
+
 Verfix supports two browser execution modes to handle the networking challenge of
 running Playwright workers alongside your local development server:
 

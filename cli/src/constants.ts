@@ -7,59 +7,45 @@ import path from 'path';
 export const HEALTH_ENDPOINT = '/api/v1/health';
 
 export const DOCKER_IMAGE = 'ghcr.io/verfix-dev/verfix-server:latest';
-export const DOCKER_IMAGE_SLIM = 'ghcr.io/verfix-dev/verfix-server-slim:latest';
 export const CONTAINER_NAME = 'verfix';
 export const DEFAULT_CONFIG = 'verfix.config.json';
 
 export const VOLUMES = {
   data: 'verfix-data:/var/lib/postgresql/15/main',
-  slimData: 'verfix-slim-data:/app/data',
   artifacts: 'verfix-artifacts:/app/workers/artifacts',
 };
 
-/**
- * Returns the Docker image to pull/run based on the browser mode.
- * - 'host' (hybrid, default on macOS/Windows) → slim image (SQLite, no browser).
- * - 'container' (default on Linux)            → full image (PostgreSQL + Chromium).
- */
+// Server mode is container-only now that local verifications run in-process
+// (the hybrid host-worker mode and its slim image are gone). These stay as
+// functions so a future slim/hosted image can slot back in without touching
+// callers.
 export function getDockerImage(): string {
-  return getBrowserMode() === 'host' ? DOCKER_IMAGE_SLIM : DOCKER_IMAGE;
+  return DOCKER_IMAGE;
 }
 
-/**
- * Returns the data volume to mount based on the browser mode.
- * - Slim image (host mode)     → verfix-slim-data:/app/data (SQLite file)
- * - Full image (container mode)→ verfix-data:/var/lib/postgresql/15/main (PostgreSQL)
- */
 export function getDataVolume(): string {
-  return getBrowserMode() === 'host' ? VOLUMES.slimData : VOLUMES.data;
+  return VOLUMES.data;
 }
 
-export type BrowserMode = 'host' | 'container';
+export type RunnerMode = 'local' | 'server';
 
 /**
- * Where the browser (Playwright + Chromium) runs.
- * - 'host': Workers + browser on the host machine. All localhost ports accessible natively.
- *           Default on macOS and Windows where --network=host doesn't reach the real host.
- * - 'container': Workers + browser inside Docker. Default on Linux where --network=host works.
+ * How `verfix run` executes a verification:
+ * - 'local':  in-process engine (Playwright on the host). No Docker, no Redis,
+ *             no API server.
+ * - 'server': today's container stack (Go API + Redis + workers). Needed for
+ *             the dashboard/timeline and the future hosted CI product.
  *
- * Override: VERFIX_BROWSER_MODE=host|container
+ * Override: VERFIX_RUNNER=local|server (the --server flag sets this env var).
  */
-export function getBrowserMode(): BrowserMode {
-  const override = process.env.VERFIX_BROWSER_MODE;
-  if (override === 'host' || override === 'container') return override;
-  return os.platform() === 'linux' ? 'container' : 'host';
+export function getRunnerMode(): RunnerMode {
+  const override = process.env.VERFIX_RUNNER;
+  if (override === 'local' || override === 'server') return override;
+  return 'local';
 }
 
-// ─── Host-mode paths ─────────────────────────────────────────────────────────
-// When workers run on the host, these paths store extracted worker code,
-// artifacts, and the worker PID file.
+/** Machine-level Verfix state (update caches, one-time notice flags). */
 export const VERFIX_HOME = path.join(os.homedir(), '.verfix');
-export const HOST_WORKER_DIR = path.join(VERFIX_HOME, 'worker');
-export const HOST_ARTIFACTS_DIR = path.join(VERFIX_HOME, 'artifacts');
-export const HOST_WORKER_PID_FILE = path.join(VERFIX_HOME, 'worker.pid');
-
-
 
 export const SCAFFOLD_FLOWS: Record<string, { steps: any[]; assertions: any[] }> = {
   login: {

@@ -1,6 +1,6 @@
 # Getting Started
 
-Verfix is a local-first AI verification runtime. This guide will walk you through setting up Verfix and running your first verification flow.
+Verfix is a local-first AI verification runtime. This guide will walk you through setting up Verfix and running your first verification flow. All you need is Node.js 20+ — no Docker, no services.
 
 ## 1. Installation
 
@@ -13,33 +13,15 @@ npx verfix init
 > **Tip:** For non-interactive environments, CI/CD pipelines, or AI coding agents, pass the `--yes` (or `-y`) flag: `npx verfix init --yes`. See the main README for all available configuration flags and environment variables.
 
 This command will:
-1. Create a `verfix.config.json` file for your configuration.
-2. Add a short Verfix stub to `AGENTS.md` — the universal instructions standard read natively by Codex, Cursor, GitHub Copilot, Kilo, opencode, Zed, Jules, and 20+ other agents — that points coding agents at the full reference in `.verfix/INSTRUCTIONS.md`. This keeps an existing `AGENTS.md` from being bloated: the detailed schema, workflow, and flow-writing guide live in the standalone file, loaded on demand. For tools that don't read `AGENTS.md` natively, verfix also writes the same stub to any detected `CLAUDE.md` (Claude Code), `.github/copilot-instructions.md` (Copilot IDE), or `.clinerules/verfix.md` (Cline).
+1. Detect your app's local URL and ask for the verification mode (default `strict` — fully deterministic, no AI key needed).
+2. Make sure a Chromium browser is available (downloads it once if missing, ~130MB, cached in `~/.cache/ms-playwright`).
+3. Create a `verfix.config.json` file for your configuration.
+4. Add a short Verfix stub to `AGENTS.md` — the universal instructions standard read natively by Codex, Cursor, GitHub Copilot, Kilo, opencode, Zed, Jules, and 20+ other agents — that points coding agents at the full reference in `.verfix/INSTRUCTIONS.md`. This keeps an existing `AGENTS.md` from being bloated: the detailed schema, workflow, and flow-writing guide live in the standalone file, loaded on demand. For tools that don't read `AGENTS.md` natively, verfix also writes the same stub to any detected `CLAUDE.md` (Claude Code), `.github/copilot-instructions.md` (Copilot IDE), or `.clinerules/verfix.md` (Cline).
 
-## 2. Starting the Runtime
+There is no runtime to start: `verfix run` executes the browser engine
+in-process and exits when it's done.
 
-Verfix runs entirely locally via Docker. The easiest way to start it is with
-the CLI — it automatically configures network settings for your platform:
-
-```bash
-npx verfix start
-```
-
-Or run the interactive setup wizard which pulls the image, starts the runtime,
-and walks you through config (or bypass with `--yes`):
-
-```bash
-npx verfix init
-```
-
-This spins up the Go API, Next.js Dashboard, Redis, and the database (PostgreSQL or SQLite depending on mode). On macOS/Windows, Playwright workers run natively on your machine alongside your browser for direct localhost access.
-
-> **Note:** The runtime needs to reach your app's dev server (e.g.
-> `localhost:3002`). The CLI handles this automatically — you don't need to
-> change how your app starts. See [Docker Networking](../4-guides/docker-networking.md)
-> for the technical details.
-
-## 3. Your First Verification
+## 2. Your First Verification
 
 Open the `verfix.config.json` file generated in step 1 and add a simple configuration:
 
@@ -65,10 +47,26 @@ Alternatively, you can specify the config explicitly:
 npx verfix run -c verfix.config.json
 ```
 
-## 4. Access the Dashboard
+## 3. Inspect the Recorded Trace
 
-Once the execution completes, open the Dashboard to view the Execution Intelligence Timeline:
+Every run records a full Playwright trace (screenshots, network requests,
+console output) under `.verfix/runs/`. Open the most recent one in the
+Playwright trace viewer:
 
+```bash
+npx verfix show
 ```
-http://localhost:3610
+
+Or a specific run by its execution id (printed in the run output):
+
+```bash
+npx verfix show exec_abc123
 ```
+
+`npx verfix list` shows the recent runs, and `npx verfix status` summarizes your
+setup (config, browser, last run).
+
+> **Server runtime (optional):** the Docker-based runtime with the timeline
+> dashboard still exists for the future hosted product. Opt in with
+> `npx verfix init --server` / `npx verfix run --server`. See
+> [Docker Runtime](../4-guides/docker-runtime.md).

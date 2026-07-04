@@ -37,46 +37,42 @@ Be respectful. We follow the [Contributor Covenant](https://www.contributor-cove
 Understanding how the pieces fit will make any contribution faster:
 
 ```
-CLI (npm: verfix)
-  └── sends jobs to →
-        API (Go + Fiber, :3611)
-          └── queues jobs in →
-                Redis (BullMQ)
-                  └── consumed by →
-                        Workers (Node.js + Playwright, host or container)
-                          └── writes results to →
-                                PostgreSQL / SQLite
-                                  └── served by →
-                                        API → CLI output
-                                        Dashboard (Next.js, :3610)
+Local mode (the default — what `verfix run` does):
+  CLI (npm: verfix)
+    └── calls in-process →
+          @verfix/engine (workers/ package, Playwright)
+            └── writes results + trace to →
+                  <project>/.verfix/runs/   →   CLI output (verfix show <id>)
+
+Server mode (opt-in via --server, future hosted CI product):
+  CLI → API (Go + Fiber, :3611) → Redis (BullMQ) → Workers (container)
+        → PostgreSQL → API → CLI output + Dashboard (Next.js, :3610)
 ```
 
-### Networking Layer
+### Networking Layer (server mode only)
 
-Verfix uses two browser execution modes depending on the platform. Workers can
-run **inside Docker** (container mode) or **directly on the host machine**
-(host mode, macOS/Windows default).
+Local mode has no Docker networking: the browser runs in the CLI process and
+reaches `localhost` natively. In server mode, workers run inside the container
+(container-only — the old hybrid host-worker mode was removed):
 
 | Platform | Strategy |
 |----------|----------|
-| **Linux (container mode)** | `--network=host` — container shares host network namespace (IPv4 + IPv6) |
-| **macOS/Windows (host mode)** | Slim Docker image (API + Redis + SQLite); workers run natively on host with direct `localhost` access |
-| **macOS/Windows (container mode)** | Bridge + `host.docker.internal` alias provided by Docker Desktop |
+| **Linux** | `--network=host` — container shares host network namespace (IPv4 + IPv6) |
+| **macOS/Windows** | Bridge + `host.docker.internal` alias provided by Docker Desktop |
 | **Linux (manual run)** | `/etc/hosts` injection via `ip route` at container startup |
 
 See [`docs/4-guides/docker-networking.md`](docs/4-guides/docker-networking.md)
 for the full technical breakdown. **Read it before touching any of:**
-`cli/src/docker.ts`, `cli/src/index.ts` (resolveJobUrl, host mode start/stop),
-`cli/src/worker-runner.ts`, `cli/src/constants.ts` (browser mode selection),
+`cli/src/docker.ts`, `cli/src/index.ts` (resolveJobUrl),
 `scripts/server-start.sh`, `scripts/server-start-slim.sh`, `Dockerfile.server`,
 `Dockerfile.server-slim`.
 
 | Package | Language | Role |
 |---------|----------|------|
-| `cli/` | TypeScript | npm package `verfix` — runtime lifecycle, flow runner, init wizard |
-| `api/` | Go (Fiber) | HTTP API — job ingestion, queue dispatch, execution state |
-| `workers/` | TypeScript (Playwright) | Browser execution engine — flows, assertions, AI healing |
-| `dashboard/` | Next.js | Execution timeline observability UI |
+| `cli/` | TypeScript | npm package `verfix` — flow runner (local + server), init wizard, `verfix show` |
+| `api/` | Go (Fiber) | HTTP API — job ingestion, queue dispatch, execution state (server mode) |
+| `workers/` | TypeScript (Playwright) | npm package `@verfix/engine` — browser execution engine (flows, assertions, AI healing); `src/index.ts` is the BullMQ adapter for server mode |
+| `dashboard/` | Next.js | Execution timeline observability UI (server mode) |
 | `sdk/` | TypeScript | Thin programmatic wrapper around the CLI JSON contract |
 
 ---
@@ -95,8 +91,8 @@ for the full technical breakdown. **Read it before touching any of:**
 
 ## Prerequisites
 
-- [Docker Desktop](https://docs.docker.com/get-docker/) (running)
 - Node.js 20+
+- [Docker Desktop](https://docs.docker.com/get-docker/) *(only needed for server-mode changes — the default local path needs no Docker)*
 - Go 1.22+ *(only needed for `api/` changes)*
 - `make` *(optional, convenience targets in Makefile)*
 
@@ -376,37 +372,43 @@ cd api && gofmt -l .     # should print nothing (no unformatted files)
 
 ---
 
-### Step 4 — CLI Smoke Test (required for CLI changes)
+### Step 4 — Local CLI Smoke Test (required for CLI or engine changes; no Docker)
 
-Uses the pre-built runtime image (no Docker build needed). Requires Docker
-running and a local web app on any port.
+This exercises the default local path end-to-end: real Chromium, in-process
+engine, persisted trace. Requires a local web app on any port (or use the
+`cli/test/local-run.test.ts` script, which spins up its own).
 
 ```bash
 # From the cli/ directory:
 
-# 1. Start the runtime
-npx ts-node src/index.ts start
-# Expected: "✅ Verfix runtime is running"
-
-# 2. Check overall status
-npx ts-node src/index.ts status
-# Expected: Runtime: running, API: healthy, Dashboard: healthy
-
-# 3. Run doctor (all checks must pass)
+# 1. Run doctor (must exit 0 — Docker is informational only in local mode)
 npx ts-node src/index.ts doctor
-# Expected: "All checks passed!"
+# Expected: "All checks passed!" (warnings are OK)
 
-# 4. Run a quick verification against a real URL
+# 2. Run a quick verification against a real URL
 npx ts-node src/index.ts run \
   --url http://localhost:<YOUR_APP_PORT> \
   --output json
-# Expected: "passed": true
+# Expected: "passed": true, "timeline_url": null, "trace_path": ".../.verfix/runs/..."
 
-# 5. Check logs look sane (no crashes)
-npx ts-node src/index.ts logs --tail 30
+# 3. Open the recorded trace
+npx ts-node src/index.ts show
+# Expected: Playwright trace viewer opens
 
-# 6. Stop the runtime
-npx ts-node src/index.ts stop
+# 4. Run the automated e2e + JSON-purity suites
+npx ts-node test/local-run.test.ts
+cd .. && bash cli/test/json-purity.sh   # from repo root, after `cd cli && npm run build`
+```
+
+For **server-mode changes**, additionally smoke the container path:
+
+```bash
+# From the cli/ directory (Docker running):
+npx ts-node src/index.ts start --server
+npx ts-node src/index.ts status --server
+npx ts-node src/index.ts run --server --url http://localhost:<YOUR_APP_PORT> --output json
+npx ts-node src/index.ts logs --server --tail 30
+npx ts-node src/index.ts stop --server
 ```
 
 ---

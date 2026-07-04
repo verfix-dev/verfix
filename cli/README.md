@@ -27,9 +27,9 @@
 
 AI coding agents write code fast — but they can't verify that it actually works in a browser. **Verfix** bridges that gap.
 
-It's a local-first runtime that gives coding agents deterministic browser verification. Define browser flows in JSON, run them from the CLI, and get structured pass/fail results that agents can parse and act on automatically. On macOS/Windows, workers run natively on your machine for direct localhost access; on Linux, they run efficiently inside Docker.
+It's a local-first runtime that gives coding agents deterministic browser verification. Define browser flows in JSON, run them from the CLI, and get structured pass/fail results that agents can parse and act on automatically. Everything runs in a single Node.js process on your machine — no Docker, no services.
 
-**No cloud. No accounts. One command to start.**
+**No cloud. No accounts. No Docker. One command to start.**
 
 ```
 npx verfix init
@@ -41,8 +41,7 @@ npx verfix init
 
 ### Prerequisites
 
-- **Docker** — [install here](https://docs.docker.com/get-docker/)
-- **Node.js** 20+
+- **Node.js** 20+ (that's it)
 
 ### 1. Initialize
 
@@ -53,9 +52,9 @@ npx verfix init
 ```
 
 This will:
-- Pull and start the Verfix runtime container
-- Ask for your AI API key (optional — for Assisted/Exploratory modes)
 - Detect your app's port automatically
+- Ask for the verification mode (default `strict` — fully deterministic, no AI key needed)
+- Download Chromium if needed (~130MB, one-time, cached in `~/.cache/ms-playwright`)
 - Scaffold `verfix.config.json` with starter flows
 - Create/update `AGENTS.md` with verification instructions for coding agents
 
@@ -71,15 +70,22 @@ Output:
 {
   "passed": true,
   "failures": [],
-  "timeline_url": "http://localhost:3610/?executionId=exec_abc123",
+  "timeline_url": null,
+  "trace_path": "/your/project/.verfix/runs/exec_abc123_trace.zip",
+  "show_command": "verfix show exec_abc123",
   "exit_code": 0,
   "execution_id": "exec_abc123"
 }
 ```
 
-### 3. Open the Dashboard
+### 3. Open the recorded trace
 
-Visit **http://localhost:3610** (or the port in `.verfix/runtime.json`) to see execution timelines, screenshots, and event replays.
+```bash
+npx verfix show exec_abc123    # or just `verfix show` for the newest run
+```
+
+Every run records a full Playwright trace — screenshots of each step, network
+requests, and console output — persisted under `.verfix/runs/` (newest 20 kept).
 
 ---
 
@@ -93,42 +99,25 @@ Interactive setup wizard. Configures the runtime, scaffolds flows, and generates
 verfix init
 ```
 
-### `verfix start`
+### `verfix show`
 
-Start the Verfix runtime container. Pulls the image if not present, waits for health check.
-
-```bash
-verfix start
-# ✓ Verfix runtime is running
-#     API:       http://localhost:3611
-#     Dashboard: http://localhost:3610
-```
-
-Default runtime ports are `3610` (dashboard) and `3611` (API).
-If they are occupied, Verfix automatically picks the next free pair (`3612/3613`, etc.) and persists them to `.verfix/runtime.json`.
-
-### `verfix stop`
-
-Stop and remove the runtime container.
+Open the Playwright trace viewer for a run (newest run if no id given).
 
 ```bash
-verfix stop
-# ✓ Runtime stopped
+verfix show                  # newest run
+verfix show exec_abc123      # specific run
 ```
 
 ### `verfix status`
 
-Check runtime, API, and dashboard health at a glance.
+Check your setup at a glance.
 
 ```bash
 verfix status
-#   Runtime:    running
-#   API:        healthy   (http://localhost:3611)
-#   Dashboard:  healthy   (http://localhost:3610)
-#   Browser Mode: host (hybrid)
-#   Worker:      running (PID: 12345)
-#   Image:      ghcr.io/verfix-dev/verfix-server-slim:latest
-#   Uptime:     2h 14m
+#   Runner:    local (no Docker needed — use --server for the container runtime)
+#   Config:    verfix.config.json
+#   Chromium:  installed
+#   Last run:  passed  exec_abc123  (verfix show exec_abc123)
 ```
 
 ### `verfix run`
@@ -145,7 +134,7 @@ verfix run --flow login --output pretty
 # Override URL and mode
 verfix run --flow checkout --url http://localhost:5173 --mode strict
 
-# Show the browser window (host mode only)
+# Show the browser window
 verfix run --flow checkout --show-browser
 
 # Run against a custom config
@@ -161,43 +150,37 @@ verfix run --config path/to/verfix.config.json --flow signup
 | `-c, --config <path>` | Config file path | `./verfix.config.json` |
 | `--timeout <ms>` | Timeout per flow | `15000` |
 | `--retries <n>` | Retries on failure | `2` |
-| `--dashboard <url>` | Dashboard URL for links | `http://localhost:3610` |
-| `--show-browser` | Show browser window (host mode only) | `false` |
-
-### `verfix logs`
-
-Tail container logs in real-time.
-
-```bash
-verfix logs
-verfix logs --tail 100
-```
-
-### `verfix update`
-
-Pull the latest image and restart.
-
-```bash
-verfix update
-# ✔ Image updated
-# ✔ Verfix runtime is running (updated)
-```
+| `--show-browser` | Show browser window (local mode) | `false` |
+| `--server` | Run via the Docker server runtime | `false` |
 
 ### `verfix doctor`
 
-Run diagnostic checks on your setup. Returns the number of failures as exit code.
+Run diagnostic checks on your setup. Exits non-zero on failures.
 
 ```bash
 verfix doctor
-#   ✓ Docker installed
-#   ✓ Docker daemon running
-#   ✓ Container running
-#   ✓ API healthy
-#   ✓ Dashboard reachable
-#   ✓ verfix.config.json found
+#   ✓ Node 24.15.0
+#   ✓ verfix.config.json valid
 #   ✓ AGENTS.md found
+#   ✓ Chromium installed
+#   ✓ App reachable at http://localhost:3000
+#   • AI key not needed (strict mode)
+#   • Docker installed — optional (server mode only, see --server)
 #
 #   All checks passed!
+```
+
+### Server runtime commands (`--server`)
+
+The Docker server runtime (API + queue + timeline dashboard — the base of the
+future hosted product) is opt-in. `start`, `stop`, `logs`, and `update` manage
+it; pass `--server` (or set `VERFIX_RUNNER=server`):
+
+```bash
+verfix start --server        # pull + start the container
+verfix run --server ...      # run through the API/queue
+verfix logs --server         # tail container logs
+verfix stop --server         # stop and remove the container
 ```
 
 ### `verfix flows`
@@ -343,11 +326,16 @@ Every `verfix run --output json` returns this shape — stable, parseable, and d
       "fix_hint": "Element not found. Check that the selector matches a visible DOM element."
     }
   ],
-  "timeline_url": "http://localhost:3610/?executionId=exec_abc123",
+  "timeline_url": null,
+  "trace_path": "/your/project/.verfix/runs/exec_abc123_trace.zip",
+  "show_command": "verfix show exec_abc123",
   "exit_code": 1,
   "execution_id": "exec_abc123"
 }
 ```
+
+`timeline_url` is `null` in local runs (it points at the dashboard only in
+server mode); `trace_path`/`show_command` point at the recorded Playwright trace.
 
 ### Failure Types
 
@@ -376,7 +364,7 @@ Verfix is designed for AI coding agent loops. The config is a **flow library** �
 3. If passed → move to next task
 4. If !passed → read failures[0].fix_hint → apply fix → retry
 5. If no matching flow exists → agent creates one in verfix.config.json
-6. After 3 failures → stop and show timeline_url for human review
+6. After 3 failures → stop and give the human the show_command (verfix show <id>) for trace review
 ```
 
 ### `AGENTS.md`
@@ -396,79 +384,37 @@ Running `verfix init` generates an `AGENTS.md` file with instructions that codin
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `VERIFY_API` | Override API base URL | `http://localhost:3611` |
-| `VERIFY_DASHBOARD` | Override Dashboard URL | `http://localhost:3610` |
-| `AI_API_KEY` | API key for AI-powered modes | — |
-| `AI_MODEL` | AI model for assisted/exploratory | `gpt-4o-mini` |
+| `VERFIX_RUNNER` | `local` (in-process) or `server` (Docker runtime) | `local` |
+| `AI_PROVIDER` + provider key (e.g. `OPENAI_API_KEY`) | AI credentials for assisted/exploratory modes | — |
+| `AI_MODEL` | AI model for assisted/exploratory | provider default |
 
 ---
 
 ## Architecture
 
-Verfix uses two Docker images depending on the host platform. On Linux,
-workers and Playwright run inside the container with host networking. On
-macOS/Windows, a slim image runs only the server (API, Redis, SQLite) while
-workers and Chromium run natively on the host machine.
-
-### Container Mode (Linux)
+By default the CLI runs the verification engine (`@verfix/engine`,
+Playwright-based) directly in-process:
 
 ```
-┌──────────────────────────────────────────────┐
-│              verfix container                │
-│                                              │
-│  ┌─────────┐  ┌──────────┐  ┌────────────┐  │
-│  │ Go API  │  │  Redis   │  │ PostgreSQL │  │
-│  │  :3611  │  │  Queue   │  │   Store    │  │
-│  └────┬────┘  └────┬─────┘  └─────┬──────┘  │
-│       │            │              │          │
-│       v            v              │          │
-│  ┌──────────────────────┐        │          │
-│  │  Playwright Workers  │────────┘          │
-│  │  + Chromium headless │                   │
-│  └──────────────────────┘                   │
-│                                              │
-│  ┌──────────────────────┐                   │
-│  │  Next.js Dashboard   │                   │
-│  │       :3610          │                   │
-│  └──────────────────────┘                   │
-└──────────────────────────────────────────────┘
-        ▲
-        │  CLI / SDK / Agent
-        │
    verfix run --flow login
+        │
+        v
+┌──────────────────────────────┐
+│   CLI process (Node.js)      │
+│                              │
+│   @verfix/engine             │
+│   + Chromium (headless)      │
+└──────────────┬───────────────┘
+               v
+   .verfix/runs/<id>.json + trace zip
+               │
+               v
+       verfix show <id>
 ```
 
-### Host Mode (macOS/Windows)
-
-```
-┌──────────────────────────────────────────────┐
-│      Docker Container (slim image)           │
-│                                              │
-│  ┌─────────┐  ┌──────────┐  ┌────────────┐  │
-│  │ Go API  │  │  Redis   │  │   SQLite   │  │
-│  │  :3611  │  │  Queue   │  │   Store    │  │
-│  └─────────┘  └──────────┘  └────────────┘  │
-│                                              │
-│  ┌──────────────────────┐                   │
-│  │  Next.js Dashboard   │                   │
-│  │       :3610          │                   │
-│  └──────────────────────┘                   │
-└──────────────────┬───────────────────────────┘
-                   │ 127.0.0.1:6379
-                   │
-┌──────────────────┴───────────────────────────┐
-│         Your Machine (host)                  │
-│                                              │
-│  Playwright Workers + Chromium               │
-│  (native localhost access)                   │
-└──────────────────────────────────────────────┘
-```
-
-- **API** (`:3611` by default) — Receives verification jobs, queues them, serves results
-- **Workers** — Pulls jobs from Redis, executes Playwright flows, captures artifacts
-- **Dashboard** (`:3610` by default) — Visual execution timeline with screenshots, events, and replays
-- **PostgreSQL** — Persistent execution history
-- **Redis** — Job queue (BullMQ)
+An opt-in Docker **server runtime** (`--server`) packages a Go API, Redis
+queue, containerized workers, PostgreSQL, and the timeline dashboard — the
+foundation of the future hosted CI product.
 
 ---
 
@@ -477,8 +423,8 @@ workers and Chromium run natively on the host machine.
 | Dependency | Version |
 |------------|---------|
 | Node.js | ≥ 20.20.0 |
-| Docker | ≥ 20.10 |
-| Disk space | ~1 GB (slim image) / ~2 GB (full image) |
+| Disk space | ~130 MB (Chromium, one-time, shared across projects) |
+| Docker | only for the opt-in `--server` runtime |
 
 ---
 

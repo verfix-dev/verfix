@@ -1,16 +1,17 @@
 {
   "name": "verfix",
   "version": "0.2.11",
-  "description": "Browser verification CLI for AI coding agents — run deterministic browser flows, assert UI state, and get structured failure reports. Local-first, Docker-powered.",
+  "description": "Browser verification CLI for AI coding agents — run deterministic browser flows, assert UI state, and get structured failure reports. Local-first: needs only Node 20+, no Docker.",
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "dev": "ts-node src/index.ts",
     "prepublishOnly": "npm run build",
-    "test": "npm run test:providers && npm run test:migration && npm run test:noninteractive",
+    "test": "npm run test:providers && npm run test:migration && npm run test:noninteractive && npm run test:local-run",
     "test:providers": "ts-node test/providers.test.ts",
     "test:migration": "ts-node test/config-migration.test.ts",
-    "test:noninteractive": "ts-node test/noninteractive.test.ts"
+    "test:noninteractive": "ts-node test/noninteractive.test.ts",
+    "test:local-run": "ts-node test/local-run.test.ts"
   },
   "bin": {
     "verfix": "dist/index.js"
@@ -46,6 +47,7 @@
   "type": "commonjs",
   "dependencies": {
     "@inquirer/prompts": "^8.4.3",
+    "@verfix/engine": "file:../workers",
     "ajv": "^8.17.1",
     "axios": "^1.16.1",
     "chalk": "^5.6.2",

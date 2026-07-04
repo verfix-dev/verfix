@@ -11,7 +11,25 @@ import {
   detectProviderFromKey,
   getDefaultModel,
   maskApiKey,
+  resolveConfig,
 } from '../src/init-noninteractive';
+
+const AI_ENV_VARS = [
+  'VERFIX_AI_KEY', 'VERFIX_AI_PROVIDER', 'VERFIX_AI_MODEL', 'VERFIX_MODE',
+  'OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'GEMINI_API_KEY', 'OPENROUTER_API_KEY',
+];
+
+/** Run fn with all AI-related env vars scrubbed, restoring them afterwards. */
+function withScrubbedEnv(fn: () => void) {
+  const saved: Record<string, string | undefined> = {};
+  for (const v of AI_ENV_VARS) { saved[v] = process.env[v]; delete process.env[v]; }
+  try { fn(); } finally {
+    for (const v of AI_ENV_VARS) {
+      if (saved[v] === undefined) delete process.env[v];
+      else process.env[v] = saved[v];
+    }
+  }
+}
 
 function test_detect_provider_from_key() {
   // Test OpenAI patterns
@@ -63,12 +81,52 @@ function test_mask_api_key() {
   console.log('✓ maskApiKey() safely masks keys without leaking intermediate bytes');
 }
 
+function test_strict_needs_no_key() {
+  withScrubbedEnv(() => {
+    // Default mode is strict and resolves with zero credentials
+    const config = resolveConfig({ yes: true });
+    assert.strictEqual(config.mode, 'strict');
+    assert.strictEqual(config.apiKey, '');
+  });
+
+  console.log('✓ resolveConfig() defaults to strict and needs no AI key');
+}
+
+function test_ai_modes_require_key() {
+  withScrubbedEnv(() => {
+    // assisted/exploratory without a key must throw
+    for (const mode of ['assisted', 'exploratory']) {
+      assert.throws(() => resolveConfig({ yes: true, mode }), /AI API key is required/);
+    }
+    // dry-run is exempt
+    const dryRun = resolveConfig({ yes: true, mode: 'assisted', dryRun: true });
+    assert.strictEqual(dryRun.mode, 'assisted');
+  });
+
+  console.log('✓ resolveConfig() requires an AI key only for assisted/exploratory');
+}
+
+function test_key_with_default_mode_still_configures_ai() {
+  withScrubbedEnv(() => {
+    // A supplied key is still picked up even though strict doesn't need it
+    const config = resolveConfig({ yes: true, aiKey: 'sk-ant-api03-abc' });
+    assert.strictEqual(config.mode, 'strict');
+    assert.strictEqual(config.provider, 'anthropic');
+    assert.strictEqual(config.apiKey, 'sk-ant-api03-abc');
+  });
+
+  console.log('✓ resolveConfig() still auto-configures AI when a key is supplied in strict mode');
+}
+
 // ─── Run all tests ────────────────────────────────────────────────────────────
 
 const tests = [
   test_detect_provider_from_key,
   test_get_default_model,
   test_mask_api_key,
+  test_strict_needs_no_key,
+  test_ai_modes_require_key,
+  test_key_with_default_mode_still_configures_ai,
 ];
 
 let passed = 0;

@@ -6,48 +6,21 @@ import Redis from 'ioredis';
 import * as fs from 'fs';
 import * as path from 'path';
 
-import { JobPayload, ExecutionResult, ConsoleLine, NetworkRequest, AssertionDefinition } from './assertions/types';
-import { runAssertions } from './assertions/engine';
-import { collectArtifacts } from './artifacts/collector';
+import { JobPayload, ExecutionResult } from './assertions/types';
+import { runVerification } from './engine';
 import { startArtifactCleanup } from './artifacts/cleanup';
-import { EventTracker } from './artifacts/event-tracker';
-import { executeFlow } from './browser/flow-executor';
-import { withRetry, waitForStableDOM } from './reliability/retry';
 import { pool } from './browser/pool';
-import { generateFailureSummary } from './ai/summarizer';
-import { runExploration } from './ai/exploration';
 
-// ─── Host URL resolution ──────────────────────────────────────────────────────
+// This file is the server-mode transport: Redis list ingestion from the Go API,
+// BullMQ queueing/retries, and result persistence to Redis. The verification
+// work itself lives in ./engine (transport-agnostic, also called in-process by
+// the local CLI).
 //
-// Two modes depending on how the container was started:
-//
-// ── VERFIX_HOST_NETWORK=1 (Linux, --network=host) ───────────────────────
-// The container shares the host network namespace. 'localhost' inside the
-// container IS the host's localhost — both IPv4 (127.0.0.1) and IPv6 (::1).
-// No URL rewriting needed; apps bound to any loopback interface are reachable.
-//
-// ── Bridge mode (Mac / Windows Docker Desktop) ────────────────────────
-// Docker runs in a VM. 'localhost' resolves to the container itself.
-// We rewrite job URLs to 'host.docker.internal' which points to the host.
-
-const IS_HOST_NETWORK = process.env.VERFIX_HOST_NETWORK === '1';
-const IS_DOCKER =
-  !IS_HOST_NETWORK && (
-    process.env.IN_DOCKER === '1' ||
-    fs.existsSync('/.dockerenv')
-  );
-
-function resolveTargetUrl(rawUrl: string): string {
-  // Host network mode: localhost IS the host, no rewrite needed.
-  if (IS_HOST_NETWORK) return rawUrl;
-  // Not in Docker: running locally, no rewrite needed.
-  if (!IS_DOCKER) return rawUrl;
-  // Bridge mode: rewrite localhost → host.docker.internal.
-  return rawUrl.replace(
-    /\/\/(localhost|127\.0\.0\.1)(:\d+)?/g,
-    '//host.docker.internal$2',
-  );
-}
+// ponytail: bullmq/ioredis stay as regular dependencies of @verfix/engine even
+// though only this transport file uses them — the Docker runtime stage installs
+// with `npm ci --omit=dev` (Dockerfile.server:101) and needs them. Ceiling:
+// ~10MB of dead disk weight in local CLI installs. Upgrade path: split a
+// separate transport package when the hosted product ships.
 
 const redisHost = process.env.REDIS_HOST || '127.0.0.1';
 const redisPort = parseInt(process.env.REDIS_PORT || '6379', 10);
@@ -102,12 +75,6 @@ if (!fs.existsSync(artifactsDir)) {
   fs.mkdirSync(artifactsDir, { recursive: true });
 }
 
-// Bound how many console/network entries we retain per job. A chatty page can
-// otherwise grow these arrays without limit, bloating worker memory and the
-// JSON payload persisted to Redis. We keep the most recent entries.
-const MAX_CONSOLE_LOGS = parseInt(process.env.MAX_CONSOLE_LOGS || '2000');
-const MAX_NETWORK_REQUESTS = parseInt(process.env.MAX_NETWORK_REQUESTS || '2000');
-
 // ─── Queue ────────────────────────────────────────────────────────────────────
 
 const verifyQueue = new Queue('verify-jobs', { connection });
@@ -138,265 +105,20 @@ async function adapterLoop() {
 // ─── Worker ───────────────────────────────────────────────────────────────────
 
 async function processJob(job: Job<JobPayload>): Promise<ExecutionResult> {
-    const data = job.data;
-    const startTime = Date.now();
+  const data = job.data;
 
-    console.log(`\n🚀 Processing: ${data.id}`);
-    console.log(`   Task:   "${data.task}"`);
-    console.log(`   URL:    ${data.url}`);
-    console.log(`   Mode:   ${data.mode || 'strict'}`);
-    console.log(`   Checks: ${(data.assertions || []).length} assertions`);
-
-    await setResult(data.id, {
-      executionId: data.id,
-      status: 'running',
-      task: data.task,
-      url: data.url,
-      passed: false,
-      duration_ms: 0,
-      retry_count: job.attemptsMade,
-      assertions: [],
-      artifacts: {},
-      console_logs: [],
-      network_requests: [],
-      created_at: new Date(startTime).toISOString(),
-    });
-
-    const consoleLogs: ConsoleLine[] = [];
-    const networkRequests: NetworkRequest[] = [];
-    let executionResult: ExecutionResult;
-    const tracker = new EventTracker(data.id, artifactsDir, data.mode || 'strict');
-
-    // Acquire browser from pool (respects concurrency limit)
-    const browser = await pool.acquire();
-
-    try {
-      const harPath = path.join(artifactsDir, `${data.id}.har`);
-      const context = await browser.newContext({
-        recordHar: { path: harPath },
-      });
-
-      await context.tracing.start({ screenshots: true, snapshots: true, sources: true });
-
-      const page = await context.newPage();
-      const requestStartTimes = new Map<any, number>();
-
-      page.on('console', msg => {
-        const ts = new Date().toISOString();
-        if (consoleLogs.length >= MAX_CONSOLE_LOGS) consoleLogs.shift();
-        consoleLogs.push({ type: msg.type(), text: msg.text(), timestamp: ts });
-      });
-      page.on('request', request => {
-        requestStartTimes.set(request, Date.now());
-      });
-      page.on('response', response => {
-        const status = response.status();
-        const request = response.request();
-        const start = requestStartTimes.get(request);
-        const timingMs = start ? Math.max(0, Date.now() - start) : 0;
-        requestStartTimes.delete(request);
-        if (networkRequests.length >= MAX_NETWORK_REQUESTS) networkRequests.shift();
-        networkRequests.push({
-          url: response.url(),
-          method: request.method(),
-          status,
-          timing_ms: Math.round(timingMs),
-          timestamp: new Date().toISOString(),
-        });
-      });
-      page.on('crash', () => console.error(`💥 Page crashed in job ${data.id}`));
-
-      const timeout = data.timeout || 15000;
-      const targetUrl = resolveTargetUrl(data.url);
-      if (targetUrl !== data.url) {
-        console.log(`   ℹ️  URL rewritten for Docker: ${data.url} → ${targetUrl}`);
-      }
-
-      console.log(`\n🌐 Navigating to ${targetUrl}...`);
-      try {
-        await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout });
-      } catch (err: any) {
-        if ((err.message.includes('ERR_CONNECTION_REFUSED') || err.message.includes('ERR_CONNECTION_RESET') || err.message.includes('ERR_EMPTY_RESPONSE')) && targetUrl.includes('host.docker.internal')) {
-          throw new Error(`Verfix could not reach your local server from inside Docker. Ensure your app is running and your Windows/Mac Firewall is not blocking Docker connections. Original error: ${err.message}`);
-        }
-        throw err;
-      }
-      await waitForStableDOM(page, 400, 8000);
-      const navEvent = tracker.pushEvent('navigation', `navigate ${targetUrl}`, { url: targetUrl }, { category: 'info' });
-      await tracker.captureStateSync(page, navEvent.id, 'step');
-      const domEvent = tracker.pushEvent('dom_change', 'DOM stabilized after navigation', { url: targetUrl }, { category: 'info' });
-      await tracker.captureStateSync(page, domEvent.id, 'step');
-
-      let passed = false;
-      let assertionResults: any[] = [];
-
-      if (data.mode === 'exploratory') {
-        console.log('\n🧭 Running in EXPLORATORY mode...');
-        const expRes = await runExploration(page, data.task, tracker);
-        passed = expRes.passed;
-        assertionResults = [{
-          type: 'exploration_result',
-          passed: expRes.passed,
-          duration_ms: expRes.duration_ms,
-          error: expRes.error,
-          details: { log: expRes.log }
-        }];
-      } else {
-        const defaultAssertions: AssertionDefinition[] = [
-          { type: 'page_loaded' },
-          { type: 'no_console_errors' },
-        ];
-        let ranFlowAssertions = false;
-
-        if (data.flows && data.flows.length > 0) {
-          console.log('\n▶ Executing flows...');
-          for (const flow of data.flows) {
-            await executeFlow(page, flow, data, tracker);
-            await waitForStableDOM(page, 400, 5000);
-            tracker.pushEvent('dom_change', `DOM stabilized after flow ${flow.name}`, { flow: flow.name }, { category: 'info' });
-
-            if (flow.assertions && flow.assertions.length > 0) {
-              ranFlowAssertions = true;
-              console.log(`\n🔍 Running ${flow.assertions.length} flow assertion(s)...`);
-              const flowResults = await runAssertions(
-                page, flow.assertions, consoleLogs, networkRequests, artifactsDir, data.id, data.mode, data.task, tracker, flow.name
-              );
-              assertionResults.push(...flowResults);
-            }
-          }
-        }
-
-        if (data.assertions && data.assertions.length > 0) {
-          console.log(`\n🔍 Running ${data.assertions.length} assertion(s)...`);
-          const baseResults = await runAssertions(
-            page, data.assertions, consoleLogs, networkRequests, artifactsDir, data.id, data.mode, data.task, tracker
-          );
-          assertionResults.push(...baseResults);
-        } else if (!ranFlowAssertions) {
-          console.log(`\n🔍 Running ${defaultAssertions.length} assertion(s)...`);
-          const baseResults = await runAssertions(
-            page, defaultAssertions, consoleLogs, networkRequests, artifactsDir, data.id, data.mode, data.task, tracker
-          );
-          assertionResults.push(...baseResults);
-        }
-
-        passed = assertionResults.every(r => r.passed);
-      }
-
-      console.log('\n📦 Collecting artifacts...');
-      const artifacts = await collectArtifacts(
-        page, context, artifactsDir, data.id, consoleLogs, networkRequests, !passed,
-      );
-
-      const duration = Date.now() - startTime;
-
-      // On failure, do a synchronous final-state capture for debugging
-      if (!passed) {
-        await tracker.captureStateSync(page, undefined, 'failure');
-      }
-
-      executionResult = {
-        executionId: data.id,
-        status: 'completed',
-        task: data.task,
-        url: data.url,
-        mode: data.mode || 'strict',
-        passed,
-        duration_ms: duration,
-        retry_count: job.attemptsMade,
-        events: tracker.getEvents(),
-        assertions: assertionResults,
-        artifacts,
-        console_logs: consoleLogs,
-        network_requests: networkRequests,
-        created_at: new Date(startTime).toISOString(),
-        completed_at: new Date().toISOString(),
-      };
-
-      console.log(`\n${passed ? '✅ PASSED' : '❌ FAILED'} — ${data.id} (${duration}ms)\n`);
-
-      // Cleanup page and context (not browser — it's pooled)
-      try {
-        await page.close().catch(() => {});
-        await Promise.race([
-          context.close(),
-          new Promise((_, reject) => setTimeout(() => reject(new Error('context.close timeout')), 3000))
-        ]);
-        // recordHar only flushes the HAR file to disk once the context closes,
-        // so it must be picked up here rather than during artifact collection.
-        const harPath = path.join(artifactsDir, `${data.id}.har`);
-        if (fs.existsSync(harPath)) {
-          executionResult.artifacts.har = harPath;
-        }
-      } catch (e: any) {
-        console.warn(`⚠ Could not gracefully close context: ${e.message}`);
-      }
-
-    } catch (error: any) {
-      const duration = Date.now() - startTime;
-      console.error(`\n💥 Job crashed: ${error.message}`);
-
-      executionResult = {
-        executionId: data.id,
-        status: 'failed',
-        task: data.task,
-        url: data.url,
-        mode: data.mode || 'strict',
-        passed: false,
-        duration_ms: duration,
-        retry_count: job.attemptsMade,
-        events: tracker.getEvents(),
-        assertions: [],
-        artifacts: {},
-        console_logs: consoleLogs,
-        network_requests: networkRequests,
-        error: error.message,
-        created_at: new Date(startTime).toISOString(),
-        completed_at: new Date().toISOString(),
-      };
-    } finally {
-      pool.release();
-    }
-
-    await setResult(data.id, executionResult);
-
-    // ─── Phase 4: Async Failure Summarization ──────────────────────────────
-    if (!executionResult.passed && executionResult.status === 'completed') {
-      generateFailureSummary(
-        data.task,
-        data.url,
-        executionResult.assertions,
-        consoleLogs,
-        networkRequests
-      ).then(async (summary) => {
-        if (summary) {
-          executionResult.ai_summary = summary;
-          await setResult(data.id, executionResult);
-        }
-      }).catch(err => {
-        // Detached, best-effort enrichment — never let it surface as an
-        // unhandled rejection or block job completion.
-        console.warn(`⚠ Failed to generate/persist AI summary for ${data.id}: ${err.message}`);
-      });
-    }
-
-    return executionResult;
-}
-
-// Hard wall-clock guard so a hung navigation, flow, or AI exploration can never
-// pin a worker slot forever. On timeout the job rejects, BullMQ retries it, and
-// once retries are exhausted the `failed` handler reconciles the status.
-function runJobWithTimeout(job: Job<JobPayload>): Promise<ExecutionResult> {
-  const base = job.data.timeout || 15000;
-  const hardTimeoutMs = Math.max(base * 4, 60000);
-  let timer: ReturnType<typeof setTimeout>;
-  const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(
-      () => reject(new Error(`Job exceeded hard timeout of ${hardTimeoutMs}ms`)),
-      hardTimeoutMs,
-    );
+  // The engine owns the hard wall-clock timeout: on breach it rejects, BullMQ
+  // retries the job, and once retries are exhausted the `failed` handler
+  // reconciles the status.
+  const result = await runVerification(data, {
+    artifactsDir,
+    attempt: job.attemptsMade,
+    awaitSummary: false,
+    onUpdate: r => setResult(data.id, r),
   });
-  return Promise.race([processJob(job), timeout]).finally(() => clearTimeout(timer));
+
+  await setResult(data.id, result);
+  return result;
 }
 
 // NOTE: this concurrency is the primary in-flight limiter. The BrowserPool is
@@ -404,7 +126,7 @@ function runJobWithTimeout(job: Job<JobPayload>): Promise<ExecutionResult> {
 // semaphore never actually blocks — it exists purely as a defensive backstop.
 const worker = new Worker(
   'verify-jobs',
-  (job: Job<JobPayload>) => runJobWithTimeout(job),
+  (job: Job<JobPayload>) => processJob(job),
   {
     connection,
     concurrency: parseInt(process.env.MAX_CONCURRENCY || '3'),

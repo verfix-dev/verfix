@@ -1,5 +1,12 @@
 import { Browser, chromium } from 'playwright';
 
+export interface BrowserLaunchOptions {
+  /** Launch headless. Defaults to PLAYWRIGHT_HEADLESS env (headless unless 'false'). */
+  headless?: boolean;
+  /** Playwright browser channel, e.g. 'chrome' to reuse an installed Chrome. */
+  channel?: string;
+}
+
 /**
  * A simple browser pool that reuses a single Browser instance across jobs.
  * Each job gets its own isolated BrowserContext and Page.
@@ -16,13 +23,13 @@ class BrowserPool {
     this.maxConcurrency = maxConcurrency;
   }
 
-  async acquire(): Promise<Browser> {
+  async acquire(launchOpts?: BrowserLaunchOptions): Promise<Browser> {
     // Wait if at concurrency limit
     while (this.active >= this.maxConcurrency) {
       await new Promise<void>(r => this.waiters.push(r));
     }
     this.active++;
-    return this.getBrowser();
+    return this.getBrowser(launchOpts);
   }
 
   release(): void {
@@ -31,7 +38,7 @@ class BrowserPool {
     if (waiter) waiter();
   }
 
-  private async getBrowser(): Promise<Browser> {
+  private async getBrowser(launchOpts?: BrowserLaunchOptions): Promise<Browser> {
     if (this.browser && this.browser.isConnected()) return this.browser;
 
     if (this.launching) {
@@ -40,16 +47,17 @@ class BrowserPool {
           if (!this.launching) { clearInterval(check); r(); }
         }, 100);
       });
-      return this.getBrowser();
+      return this.getBrowser(launchOpts);
     }
 
     this.launching = true;
     try {
       // headless: true  → required in Docker/CI (no display server)
       // headless: false → set PLAYWRIGHT_HEADLESS=false in local .env to watch the browser
-      const headless = process.env.PLAYWRIGHT_HEADLESS !== 'false';
+      const headless = launchOpts?.headless ?? (process.env.PLAYWRIGHT_HEADLESS !== 'false');
       this.browser = await chromium.launch({
         headless,
+        channel: launchOpts?.channel,
         args: [
           '--no-sandbox',
           '--disable-dev-shm-usage',

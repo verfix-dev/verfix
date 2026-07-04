@@ -1,10 +1,14 @@
 # Installation
 
-Verfix is designed to be installed globally or per-project via npm, relying on Docker to run the actual infrastructure.
+Verfix runs entirely on your machine with Node.js — no Docker, no services to
+manage. The first run downloads a Chromium browser (~130MB, one-time, cached in
+`~/.cache/ms-playwright`).
 
 ## Requirements
 - **Node.js**: v20 or newer
-- **Docker**: Docker Desktop or Docker Engine installed and running
+
+That's the whole list. (Docker is only needed for the opt-in `--server` runtime
+used by the future hosted product.)
 
 ## Global Installation (CLI)
 
@@ -28,4 +32,6 @@ Whether installed globally or locally, you must initialize Verfix in your projec
 npx verfix init
 ```
 
-This creates the necessary `.verfix/` local configuration directory and prepares your `.env` file.
+This detects your app's URL, scaffolds `verfix.config.json`, writes agent
+instructions (`AGENTS.md` + `.verfix/INSTRUCTIONS.md`), and makes sure a
+browser is available. The default `strict` mode needs no AI key.

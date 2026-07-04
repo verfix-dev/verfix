@@ -48,16 +48,16 @@ Developers still manually open browsers, click through flows, and debug regressi
 | **Exploratory** | Natural language task — AI navigates, reasons, and verifies on its own. |
 
 - **Flow Library** — `verfix.config.json` holds as many independent flows as your app needs
-- **Structured Output** — every run returns typed JSON with `passed`, `failures[]`, `fix_hint`, and `timeline_url`
-- **Execution Timeline** — high-fidelity event-driven observability: every action, navigation, console error, and network request
-- **Docker-powered** — entire stack runs locally with one command, no cloud required
+- **Structured Output** — every run returns typed JSON with `passed`, `failures[]`, `fix_hint`, and a Playwright trace
+- **Recorded Traces** — every run captures a full Playwright trace (screenshots, network, console); open it with `verfix show`
+- **Local-first** — runs entirely in-process on Node.js 20+. No Docker, no services, no cloud. Strict mode needs no AI key.
 - **AI Coding Agent Ready** — ships with an `AGENTS.md` generator so Claude, Cursor, and Codex know exactly how to use it
 
 ---
 
 ## Quick Start
 
-**Requirements:** [Docker Desktop](https://www.docker.com/products/docker-desktop/) (running), Node.js 20+
+**Requirements:** Node.js 20+ (that's it — no Docker)
 
 ```bash
 # In your project directory
@@ -65,9 +65,9 @@ npx verfix init
 ```
 
 The interactive wizard will:
-1. Ask for your AI API key (needed for Assisted/Exploratory mode)
-2. Start the Docker runtime (pulls image on first run, ~2 min)
-3. Detect your app's local URL
+1. Detect your app's local URL
+2. Ask for the verification mode (default `strict` — fully deterministic, no AI key)
+3. Download Chromium if needed (~130MB, one-time, cached)
 4. Scaffold a `verfix.config.json` flow library
 5. Generate or update `AGENTS.md` for your coding agent
 
@@ -90,17 +90,19 @@ npx verfix run --mode exploratory --task "verify the login page loads and shows 
 {
   "passed": true,
   "failures": [],
-  "timeline_url": "http://localhost:3610/?executionId=exec_abc123",
+  "timeline_url": null,
+  "trace_path": "/your/project/.verfix/runs/exec_abc123_trace.zip",
+  "show_command": "verfix show exec_abc123",
   "exit_code": 0,
   "execution_id": "exec_abc123"
 }
 ```
 
-Runtime defaults:
-- Dashboard: `http://localhost:3610`
-- API: `http://localhost:3611`
-- If occupied, Verfix automatically tries the next pair (`3612/3613`, `3614/3615`, ...)
-- Resolved ports persist in `.verfix/runtime.json`
+Results and Playwright traces are persisted under `.verfix/runs/` (newest 20 runs kept). Open a recorded trace any time:
+
+```bash
+npx verfix show exec_abc123   # or just `verfix show` for the newest run
+```
 
 ---
 
@@ -151,24 +153,28 @@ npx verfix agent-setup       # Output machine-readable bootstrap instructions fo
 npx verfix flows             # List all flows in verfix.config.json
 npx verfix run               # Run all flows
 npx verfix run --flow <id>   # Run a specific flow
-npx verfix start             # Start the runtime manually
-npx verfix stop              # Stop the runtime
-npx verfix status            # Check runtime health
-npx verfix logs              # Tail runtime logs
+npx verfix show [id]         # Open the Playwright trace viewer for a run
+npx verfix list              # List recent runs
+npx verfix status            # Check setup health (config, browser, last run)
 npx verfix doctor            # Diagnose common setup issues
-npx verfix update            # Pull latest runtime image
 ```
 
-Run any command with `--help` for full option details.
+Run any command with `--help` for full option details. The Docker **server runtime** (API + dashboard, used by the future hosted product) is opt-in: pass `--server` to `init`, `run`, `start`, `stop`, `status`, `logs`, or `update`.
 
 ### Non-Interactive Bootstrapping (for CI/CD & AI Agents)
 
-For non-interactive environments, you can pass the `--yes` (or `-y`) flag to bypass interactive prompts:
+For non-interactive environments, pass the `--yes` (or `-y`) flag. The default `strict` mode needs zero credentials:
+
+```bash
+npx verfix init --yes --base-url http://localhost:3000
+```
+
+To enable AI-backed modes (assisted/exploratory), supply a key:
 
 ```bash
 npx verfix init --yes \
+  --mode assisted \
   --ai-provider anthropic \
-  --ai-model claude-3-5-sonnet-latest \
   --ai-key $ANTHROPIC_API_KEY \
   --base-url http://localhost:3000
 ```
@@ -178,7 +184,7 @@ Alternatively, you can use environment variables:
 ```bash
 export VERFIX_AI_KEY="your-api-key"
 export VERFIX_AI_PROVIDER="anthropic" # Optional, auto-detected from key if omitted
-npx verfix init --yes
+npx verfix init --yes --mode assisted
 ```
 
 #### Dry-run Mode
@@ -191,18 +197,22 @@ npx verfix init --yes --ai-key sk-ant-... --dry-run
 
 ## Architecture
 
-On macOS/Windows, Verfix runs the server (API + Dashboard + Redis + SQLite) in
-a lightweight Docker container and executes browser workers natively on the host
-machine for direct localhost access. On Linux, the full stack runs inside a
-single container with host networking.
+By default Verfix runs everything locally in a single Node.js process — the CLI
+calls the verification engine (`@verfix/engine`, Playwright-based) directly and
+persists results + traces to `.verfix/runs/`:
 
 ```
-Execution path (macOS/Windows — host mode):
-  CLI → API (Docker slim) → Redis (bridge) → Worker (host) → Browser
-         └──────────────────────────────────────────────────────┘
+Execution path (local mode — the default):
+  CLI → @verfix/engine (in-process) → Browser → .verfix/runs/<id>.json + trace
+```
 
-Execution path (Linux — container mode):
-  CLI → API (Docker full) → Redis (host net) → Worker (container) → Browser
+The Docker **server runtime** (Go API + Redis queue + containerized workers +
+timeline dashboard) still exists for the future hosted CI product and is opt-in
+via `--server`:
+
+```
+Execution path (server mode, --server):
+  CLI → API (Docker) → Redis → Worker (container) → Browser → Postgres → Dashboard
 ```
 
 ---
