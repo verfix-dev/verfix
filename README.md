@@ -252,7 +252,7 @@ See **[CONTRIBUTING.md](./CONTRIBUTING.md)** for local setup, architecture overv
 # Quick start for contributors
 git clone https://github.com/verfix-dev/verfix.git
 cd verfix
-npm ci --prefix cli && npm ci --prefix workers && npm ci --prefix sdk
+npm install   # workspaces: installs + live-links cli <-> workers <-> sdk
 ```
 
 ---

@@ -237,8 +237,9 @@ VERFIX_RUNNER=server verfix run --output json
 
 ## Still to do before release
 
-1. Publish `@verfix/engine@0.1.0` to npm, then switch the CLI's dependency from
-   `"file:../workers"` to the published version.
+1. ✅ Done — `@verfix/engine@0.1.0` is published; the CLI now depends on
+   `^0.1.0`, and the repo uses npm workspaces so local dev still live-links the
+   `workers/` package. (The published tarball carries `^0.1.0`, not `file:`.)
 2. Bump the CLI to `0.3.0` (the `timeline_url: null` behavior change warrants
    the minor bump + changelog).
 3. Re-verify the server Docker image builds (`docker build -f

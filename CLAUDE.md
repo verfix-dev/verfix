@@ -108,7 +108,7 @@ Local mode is the default — this runs the engine in-process. `"passed": true` 
 ### Full server stack (server-mode changes only)
 
 ```bash
-npm ci --prefix cli && npm ci --prefix workers && npm ci --prefix dashboard && npm ci --prefix sdk
+npm install && npm install --prefix dashboard
 make up
 make api        # :3611
 make workers    # :3611

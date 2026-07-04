@@ -377,6 +377,10 @@ export async function runInitWizard(): Promise<void> {
     aiModel = aiConfig.model;
   }
 
+  // browserChannel is set when the user opts to reuse an installed Chrome/Edge
+  // instead of the bundled Chromium; persisted to config.browser.channel below.
+  let browserChannel: string | undefined;
+
   if (runnerMode === 'local') {
     // ── Step 4 (local): persist AI config + make sure a browser exists ──
     // No Docker, no runtime container — verifications run in-process.
@@ -385,23 +389,48 @@ export async function runInitWizard(): Promise<void> {
       console.log(chalk.green('  ✓ AI configuration saved'));
     }
 
-    const { isChromiumInstalled, ensureChromium } = await import('./local-runner');
+    const { isChromiumInstalled, ensureChromium, detectInstalledBrowser } = await import('./local-runner');
     if (isChromiumInstalled()) {
       console.log(chalk.green('  ✓ Chromium ready'));
     } else {
-      const download = await confirm({
-        message: 'Download Chromium for verification runs now? (~130MB, one-time, cached in ~/.cache/ms-playwright)',
-        default: true,
-      });
-      if (download) {
-        try {
-          await ensureChromium();
-          console.log(chalk.green('  ✓ Chromium installed'));
-        } catch (e: any) {
-          console.log(chalk.yellow(`  ⚠ ${e.message}`));
+      const detected = detectInstalledBrowser();
+      if (detected) {
+        // Offer the installed browser — but make the determinism tradeoff explicit
+        // so the choice is informed. Chromium stays the default (opt-in to Chrome).
+        console.log(chalk.gray(`  ℹ Found ${detected.displayName} at ${detected.path}`));
+        console.log(chalk.gray('    The bundled Chromium is recommended for reliable verification (pinned version,'));
+        console.log(chalk.gray('    no policies/extensions). Chrome/Edge work for quick local checks but can vary'));
+        console.log(chalk.gray('    by version/policy and are less deterministic — prefer Chromium for CI.'));
+        const useInstalled = await confirm({
+          message: `Use ${detected.displayName} instead of downloading Chromium? (saves ~130MB)`,
+          default: false,
+        });
+        if (useInstalled) {
+          browserChannel = detected.channel;
+          console.log(chalk.green(`  ✓ Using ${detected.displayName} (browser.channel: "${detected.channel}")`));
+        } else {
+          try {
+            await ensureChromium();
+            console.log(chalk.green('  ✓ Chromium installed'));
+          } catch (e: any) {
+            console.log(chalk.yellow(`  ⚠ ${e.message}`));
+          }
         }
       } else {
-        console.log(chalk.gray('  ⏭ Skipped — verfix run downloads it on first use'));
+        const download = await confirm({
+          message: 'Download Chromium for verification runs now? (~130MB, one-time, cached in ~/.cache/ms-playwright)',
+          default: true,
+        });
+        if (download) {
+          try {
+            await ensureChromium();
+            console.log(chalk.green('  ✓ Chromium installed'));
+          } catch (e: any) {
+            console.log(chalk.yellow(`  ⚠ ${e.message}`));
+          }
+        } else {
+          console.log(chalk.gray('  ⏭ Skipped — verfix run downloads it on first use'));
+        }
       }
     }
   } else {
@@ -423,6 +452,9 @@ export async function runInitWizard(): Promise<void> {
     const config: Record<string, unknown> = { baseUrl, mode, flows: [] };
     if (aiProvider && aiModel) {
       config.ai = { provider: aiProvider, model: aiModel };
+    }
+    if (browserChannel) {
+      config.browser = { channel: browserChannel };
     }
     fs.writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n', 'utf-8');
     console.log(chalk.green(`  ✓ verfix.config.json created`));
