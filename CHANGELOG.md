@@ -7,8 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`verfix validate`** — checks `verfix.config.json` for structural and semantic errors (unknown assertion types, duplicate flow ids, a flow with no steps/assertions, `mode: "exploratory"` set per-flow, exploratory mode missing an AI key) without running anything.
+- **Flow `skip` / `skipReason`.** Flows can be quarantined with `"skip": true` (+ optional `"skipReason"`) so a known-broken flow is excluded from a full `verfix run` without being deleted; it still runs if named explicitly via `--flow <id>`.
+
 ### Fixed
+- **Per-flow `mode` override was silently dropped in multi-flow runs.** It only took effect when a single flow was selected via `--flow`; running multiple flows together always fell back to the global mode. `flow.mode` now correctly overrides the global mode for both step execution and assertions, for any number of flows in one run.
+- **Unknown assertion type errors didn't say what was valid.** `Unknown assertion type: X` now appends `Valid types: page_loaded, selector_visible, ...`.
+- **Exploratory mode failed only after launching a browser.** `verfix run` now fails fast with `ai_key_required` before launching the browser if the global mode is `exploratory` and no AI provider/key is configured — exploratory has no deterministic fallback (unlike `assisted`, which still works via semantic-selector healing without a key). `mode: "exploratory"` set on an individual flow is now rejected (both by `run` and `validate`) since the engine only ever branches on the top-level mode — a per-flow override was a silent no-op.
+- **Assisted mode without an AI key now warns instead of proceeding silently.** `verfix run` prints a one-line stderr warning (JSON output on stdout is unaffected) and `verfix validate` reports it as a non-blocking warning, since assisted mode still works without a key (semantic-selector healing runs regardless; only the AI-fallback tier is skipped).
 - **Headless-shell crash on partial Playwright install.** `isChromiumInstalled()` only checked the full Chromium binary (`chromium.executablePath()`), but the engine launches headless by default — which uses a *separate* `chrome-headless-shell` binary. When the full Chromium was present but the headless shell was missing (partial install, interrupted download, or cache cleared), the check passed, `ensureChromium()` skipped the download, and the run crashed with `Executable doesn't exist at chromium_headless_shell-XXXX/...`. Two fixes: (1) `isChromiumInstalled()` now also verifies the `chromium_headless_shell-{rev}` directory exists; (2) `ensureChromium()` no longer uses the check as a fast-path — it always runs `playwright install chromium` (idempotent, <1s when complete, downloads only missing pieces); (3) the retry loop now self-repairs: if a launch fails with "Executable doesn't exist", it re-runs the installer before retrying.
+
+### Changed
+- **`@verfix/engine` bumped to `0.1.1`** (`ASSERTION_TYPES` now exported, per-flow mode fix, improved assertion error message). CLI dependency bumped to `^0.1.1`.
+- Generated `.verfix/INSTRUCTIONS.md` now documents `verfix validate`, flow `skip`/`skipReason`, the `task` field (previously undocumented despite being required for exploratory mode), and a minimal standalone exploratory-mode example.
 
 ## [0.3.1] - 2026-07-04 (local-first)
 

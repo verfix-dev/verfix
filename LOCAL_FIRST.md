@@ -237,11 +237,13 @@ VERFIX_RUNNER=server verfix run --output json
 
 ## Still to do before release
 
-1. ✅ Done — `@verfix/engine@0.1.0` is published; the CLI now depends on
-   `^0.1.0`, and the repo uses npm workspaces so local dev still live-links the
-   `workers/` package. (The published tarball carries `^0.1.0`, not `file:`.)
-2. ✅ Done — CLI bumped to `0.3.1` (then `0.3.2` for the headless-shell crash
-   fix). The `timeline_url: null` behavior change + the packaging/install
-   fixes warranted the minor bump + changelog.
+1. ✅ Done — `@verfix/engine@0.1.1` is published (0.1.0 → 0.1.1: exported
+   `ASSERTION_TYPES`, fixed per-flow `mode` override, better assertion error
+   messages); the CLI now depends on `^0.1.1`, and the repo uses npm
+   workspaces so local dev still live-links the `workers/` package. (The
+   published tarball carries a semver range, not `file:`.)
+2. ✅ Done — CLI bumped to `0.3.1` → `0.3.2` (headless-shell crash fix) →
+   `0.3.3` (`verfix validate`, flow `skip`, exploratory/assisted mode
+   fail-fast + AI-key handling — see CHANGELOG).
 3. Re-verify the server Docker image builds (`docker build -f
    Dockerfile.server-slim .`) since the workers package layout changed.
