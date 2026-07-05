@@ -1175,11 +1175,23 @@ program
         if (!flow.steps?.length && !flow.assertions?.length) {
           warnings.push(`flows[${idx}] (${id}): has no steps or assertions — it does nothing`);
         }
+        if (flow.mode === 'exploratory') {
+          errors.push(`flows[${idx}] (${id}): mode "exploratory" is not valid per-flow — it replaces flow execution entirely and only applies as the top-level "mode"`);
+        }
         checkAssertions(flow.assertions, `flows[${idx}] (${id})`);
       });
 
       if (!config.baseUrl) {
         warnings.push('baseUrl is not set — every "verfix run" will require --url');
+      }
+
+      if (config.mode === 'exploratory') {
+        const { loadAIConfig, loadApiKey } = await import('./config/loader');
+        const aiConfig = loadAIConfig(process.cwd());
+        const apiKey = aiConfig ? loadApiKey(process.cwd(), aiConfig.provider) : null;
+        if (!apiKey) {
+          errors.push('mode is "exploratory" but no AI provider/key is configured — exploratory mode has no deterministic fallback. Run: verfix init to configure AI, or switch to mode: strict/assisted.');
+        }
       }
     }
 
@@ -1380,6 +1392,40 @@ program
       }
       console.error(chalk.red('Error: --url is required (or set baseUrl in config file)'));
       await finishTelemetryAndExit(2, 'missing_url');
+    }
+
+    // Exploratory mode replaces flow execution entirely (an AI agent drives the
+    // browser from `task`, ignoring `flows`/`assertions`) — it only makes sense
+    // as the run's global mode. A per-flow override to 'exploratory' is a no-op
+    // the engine silently ignores, so reject it here rather than let it pass
+    // through as a config that looks like it does something it doesn't.
+    const exploratoryFlow = flows.find((f: any) => f.mode === 'exploratory');
+    if (exploratoryFlow) {
+      const msg = `Flow "${exploratoryFlow.name}" sets mode: "exploratory" — exploratory mode only applies globally (it replaces flow execution with an AI-driven task), not per-flow. Set the top-level "mode" instead, or use "strict"/"assisted" for this flow.`;
+      if (isJsonMode(opts)) {
+        emitJsonError({ error: 'invalid_flow_mode', message: msg, hint: 'Remove "mode": "exploratory" from the flow, or run it as its own exploratory config.' });
+      }
+      console.error(chalk.red(msg));
+      await finishTelemetryAndExit(2, 'invalid_flow_mode');
+    }
+
+    // Exploratory mode has no deterministic fallback (unlike assisted, which
+    // still works via semantic-selector healing without an AI key) — fail fast
+    // here instead of launching a browser only to have it fail mid-run.
+    if (payload.mode === 'exploratory') {
+      const { loadAIConfig, loadApiKey } = await import('./config/loader');
+      const aiConfig = loadAIConfig(process.cwd());
+      const apiKey = aiConfig ? loadApiKey(process.cwd(), aiConfig.provider) : null;
+      if (!apiKey) {
+        const msg = 'Exploratory mode requires an AI provider and API key — there is no deterministic fallback for it (unlike assisted mode).';
+        const hint = 'Run: verfix init to configure AI, or switch to mode: strict/assisted.';
+        if (isJsonMode(opts)) {
+          emitJsonError({ error: 'ai_key_required', message: msg, hint });
+        }
+        console.error(chalk.red(msg));
+        console.error(chalk.gray(hint));
+        await finishTelemetryAndExit(2, 'ai_key_required');
+      }
     }
 
     if (opts.output === 'pretty') {

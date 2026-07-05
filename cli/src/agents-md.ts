@@ -430,15 +430,18 @@ If verification runs are misbehaving, use these commands to diagnose and fix:
 |---------|-------------|
 | \`verfix status\` | Check config, engine, browser install, and the last run |
 | \`verfix doctor\` | Run diagnostics (Node, config, engine, Chromium, app reachability) |
+| \`verfix validate\` | Check \`verfix.config.json\` for structural/semantic errors (bad assertion types, duplicate flow ids, invalid mode) without running anything |
 | \`verfix install\` | Download the Chromium browser the local runner needs (one-time) |
 | \`verfix show <execution_id>\` | Open the recorded Playwright trace of a run |
 
 **Recovery steps:**
 
 1. \`verfix doctor\` → Follow any suggestions it prints.
-2. Browser missing? Run \`verfix install\` (one-time ~130MB download), or it
+2. Edited \`verfix.config.json\` by hand? Run \`verfix validate\` first to catch
+   typos (bad assertion type, duplicate flow id, invalid mode) before running.
+3. Browser missing? Run \`verfix install\` (one-time ~130MB download), or it
    auto-downloads on the next \`verfix run\`.
-3. App unreachable? Start the dev server, or fix \`baseUrl\` in \`verfix.config.json\`.
+4. App unreachable? Start the dev server, or fix \`baseUrl\` in \`verfix.config.json\`.
 
 ---
 
@@ -491,8 +494,16 @@ If verification runs are misbehaving, use these commands to diagnose and fix:
       "id": "descriptive-flow-name",
 
       // OPTIONAL — Per-flow mode override. If set, this flow uses this mode
-      // instead of the global mode. Allowed: "strict" | "assisted" | "exploratory"
+      // instead of the global mode. Allowed: "strict" | "assisted" ONLY —
+      // "exploratory" replaces flow execution entirely and is global-only;
+      // setting it per-flow is a config error ("verfix validate" catches this).
       "mode": "assisted",
+
+      // OPTIONAL — Skip this flow in "verfix run" (no --flow filter given).
+      // Use to quarantine a known-broken flow without deleting it; the flow
+      // still runs if explicitly named via --flow <id>.
+      "skip": false,
+      "skipReason": "Tracked in ISSUE-42, blocked on backend fix",
 
       // REQUIRED — Ordered list of browser actions to execute.
       "steps": [
@@ -578,6 +589,13 @@ All assertions accept an optional \`timeout\` (ms, default 5000).
 | Quick smoke test (page loads, no errors) | \`strict\` | Just use \`page_loaded\` + \`no_console_errors\` |
 
 **Mode priority:** CLI flag \`--mode\` > flow-level \`mode\` > config-level \`mode\` > \`strict\`
+
+> \`exploratory\` is **global-only** — it replaces flow execution with an
+> AI-driven task and ignores \`flows\`/\`assertions\` entirely. It also has no
+> deterministic fallback (unlike \`assisted\`, which still works via semantic
+> selector healing without an AI key) — \`verfix run\` fails fast with
+> \`ai_key_required\` if no AI provider/key is configured. Setting
+> \`"mode": "exploratory"\` on an individual flow is rejected as a config error.
 
 ---
 
