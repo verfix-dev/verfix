@@ -455,11 +455,18 @@ If verification runs are misbehaving, use these commands to diagnose and fix:
   // All navigate step URLs are resolved relative to this.
   "baseUrl": "${baseUrl}",
 
-  // REQUIRED — Default verification mode for all flows.
+  // REQUIRED — Default verification mode.
   //   "strict"      → deterministic only, no AI. Best for CI and stable selectors.
   //   "assisted"    → deterministic first, AI heals broken selectors. Best for active dev.
-  //   "exploratory" → AI-driven navigation from a task description. No flows needed.
+  //   "exploratory" → AI-driven navigation from "task" below instead of "flows".
+  //                   Requires an AI key configured (verfix init) — no fallback exists.
+  //                   Global only — do NOT set this as a per-flow "mode" override.
   "mode": "${mode}",
+
+  // REQUIRED only when mode is "exploratory" — ignored otherwise. A natural-
+  // language goal the AI agent tries to achieve by clicking/typing/navigating.
+  // "flows" is not used at all in exploratory mode — omit it.
+  // "task": "Log in with the test account, then verify the dashboard shows the user's name.",
 
   // OPTIONAL — Global timeout in ms for all steps/assertions (default: 15000)
   "timeout": 15000,
@@ -485,7 +492,8 @@ If verification runs are misbehaving, use these commands to diagnose and fix:
     "framework": "next.js"
   },
 
-  // REQUIRED — Array of flows. This is a LIBRARY — add as many as you need.
+  // REQUIRED unless mode is "exploratory" (which uses "task" above instead).
+  // This is a LIBRARY — add as many flows as you need.
   // Each flow is independent and can be run with: verfix run --flow <id>
   "flows": [
     {
@@ -526,6 +534,30 @@ If verification runs are misbehaving, use these commands to diagnose and fix:
   ]
 }
 \`\`\`
+
+#### Exploratory mode — minimal example
+
+Exploratory mode is a **different shape of config**, not a flag on the flow-based
+one above. It has no \`flows\` array — the AI agent decides what to click/type/
+navigate at each step from \`task\` alone:
+
+\`\`\`json
+{
+  "baseUrl": "${baseUrl}",
+  "mode": "exploratory",
+  "task": "Log in with the test account, then verify the dashboard shows the user's name."
+}
+\`\`\`
+
+- Requires an AI provider/key (\`verfix init\`) — \`verfix run\` fails fast with
+  \`ai_key_required\` if none is configured, since there is no deterministic
+  fallback (unlike \`assisted\`, which still works without a key).
+- Use this when no flow exists yet and you're exploring what a feature does,
+  not when you already know the steps — write a real flow for anything you'll
+  verify repeatedly (exploratory re-decides the path every run, so it's slower
+  and less deterministic than a flow).
+- \`verfix run --flow <id>\` and per-flow \`mode\` overrides do not apply here —
+  exploratory mode ignores \`flows\`/\`assertions\` entirely.
 
 #### Step actions
 

@@ -1185,12 +1185,16 @@ program
         warnings.push('baseUrl is not set — every "verfix run" will require --url');
       }
 
-      if (config.mode === 'exploratory') {
+      const assistedInUse = config.mode === 'assisted' || (config.flows || []).some((f: any) => f.mode === 'assisted');
+      if (config.mode === 'exploratory' || assistedInUse) {
         const { loadAIConfig, loadApiKey } = await import('./config/loader');
         const aiConfig = loadAIConfig(process.cwd());
         const apiKey = aiConfig ? loadApiKey(process.cwd(), aiConfig.provider) : null;
-        if (!apiKey) {
+        if (!apiKey && config.mode === 'exploratory') {
           errors.push('mode is "exploratory" but no AI provider/key is configured — exploratory mode has no deterministic fallback. Run: verfix init to configure AI, or switch to mode: strict/assisted.');
+        }
+        if (!apiKey && assistedInUse) {
+          warnings.push('assisted mode is in use but no AI provider/key is configured — self-healing will only use semantic selectors (role/aria/text), no AI fallback. Run: verfix init to add one, or ignore if that\'s enough.');
         }
       }
     }
@@ -1409,14 +1413,19 @@ program
       await finishTelemetryAndExit(2, 'invalid_flow_mode');
     }
 
-    // Exploratory mode has no deterministic fallback (unlike assisted, which
-    // still works via semantic-selector healing without an AI key) — fail fast
-    // here instead of launching a browser only to have it fail mid-run.
-    if (payload.mode === 'exploratory') {
+    // AI key check — exploratory and assisted need different treatment.
+    // Exploratory has no deterministic fallback at all, so a missing key is a
+    // hard error, fail fast here instead of launching a browser only to have
+    // it fail mid-run. Assisted still works without a key (semantic-selector
+    // healing runs regardless; only the AI-fallback tier is skipped), so a
+    // missing key there is just a heads-up, not a blocker.
+    const assistedInUse = payload.mode === 'assisted' || flows.some((f: any) => f.mode === 'assisted');
+    if (payload.mode === 'exploratory' || assistedInUse) {
       const { loadAIConfig, loadApiKey } = await import('./config/loader');
       const aiConfig = loadAIConfig(process.cwd());
       const apiKey = aiConfig ? loadApiKey(process.cwd(), aiConfig.provider) : null;
-      if (!apiKey) {
+
+      if (!apiKey && payload.mode === 'exploratory') {
         const msg = 'Exploratory mode requires an AI provider and API key — there is no deterministic fallback for it (unlike assisted mode).';
         const hint = 'Run: verfix init to configure AI, or switch to mode: strict/assisted.';
         if (isJsonMode(opts)) {
@@ -1425,6 +1434,12 @@ program
         console.error(chalk.red(msg));
         console.error(chalk.gray(hint));
         await finishTelemetryAndExit(2, 'ai_key_required');
+      }
+
+      if (!apiKey && assistedInUse) {
+        console.warn(chalk.yellow(
+          '⚠ Assisted mode is active but no AI provider/key is configured — self-healing will only use semantic selectors (role/aria/text), no AI fallback. Run: verfix init to add one, or ignore if that\'s enough.'
+        ));
       }
     }
 
