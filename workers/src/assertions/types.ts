@@ -9,6 +9,11 @@ export type AssertionType =
   | 'title_contains'
   | 'exploration_result';
 
+export const ASSERTION_TYPES: AssertionType[] = [
+  'page_loaded', 'selector_visible', 'text_visible', 'url_contains',
+  'no_console_errors', 'network_request_success', 'title_contains', 'exploration_result',
+];
+
 export type FailureType =
   | 'selector_not_found'
   | 'selector_not_visible'
@@ -55,6 +60,7 @@ export interface FlowStep {
 
 export interface Flow {
   name: string;
+  mode?: string;
   steps: FlowStep[];
   assertions?: AssertionDefinition[];
 }

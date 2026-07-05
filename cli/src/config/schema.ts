@@ -28,6 +28,8 @@ export const FlowSchema = z.object({
   name: z.string().optional(),
   description: z.string().optional(),
   mode: z.string().optional(),
+  skip: z.boolean().optional(),
+  skipReason: z.string().optional(),
   steps: z.array(FlowStepSchema).optional(),
   assertions: z.array(FlowAssertionSchema).optional(),
 })

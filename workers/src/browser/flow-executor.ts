@@ -31,7 +31,7 @@ export async function executeFlow(page: Page, flow: Flow, job: JobPayload, track
       : rawValue;
     const stepDesc = `${step.action} ${JSON.stringify(step.target || stepValue || '')}`;
     try {
-      await executeStep(page, { ...step, value: stepValue }, job.selectors || {}, job.mode || 'strict', job.timeout || 10000);
+      await executeStep(page, { ...step, value: stepValue }, job.selectors || {}, flow.mode || job.mode || 'strict', job.timeout || 10000);
       if (tracker) {
         const eventType = step.action === 'navigate' ? 'navigation' : 'action';
         const event = tracker.pushEvent(

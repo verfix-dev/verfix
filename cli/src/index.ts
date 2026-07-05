@@ -1081,6 +1081,8 @@ program
           assertions: (f.assertions || []).length,
           description: f.description,
           composable_with: deps.length > 0 ? deps : undefined,
+          skip: f.skip || undefined,
+          skip_reason: f.skip ? f.skipReason : undefined,
         };
       });
       emitJson({ flows: list, total: list.length });
@@ -1096,8 +1098,12 @@ program
       const stepCount = (f.steps || []).length;
       const assertCount = (f.assertions || []).length;
       const stepDesc = (f.steps || []).map((s: any) => s.action).join(' → ');
-      console.log(`  ${chalk.cyan('▸')} ${chalk.bold(id)}`);
+      const skipTag = f.skip ? ` ${chalk.yellow('[skipped]')}` : '';
+      console.log(`  ${chalk.cyan('▸')} ${chalk.bold(id)}${skipTag}`);
       console.log(`    ${chalk.gray(`${stepCount} step(s), ${assertCount} assertion(s)`)}`);
+      if (f.skip && f.skipReason) {
+        console.log(`    ${chalk.yellow(`⊘ Skipped: ${f.skipReason}`)}`);
+      }
       if (stepDesc) {
         console.log(`    ${chalk.gray(stepDesc)}`);
       }
@@ -1113,6 +1119,92 @@ program
     }
     showPendingNotifications();
     scheduleBackgroundCheck(['npm', 'image']);
+  });
+
+// ─── validate command ───────────────────────────────────────────────────────
+
+program
+  .command('validate')
+  .description('Check verfix.config.json for structural and semantic errors without running it')
+  .option('-c, --config <file>', 'Path to config file')
+  .option('-o, --output <format>', 'Output format: pretty | json', 'pretty')
+  .action(async (opts) => {
+    const configPath = opts.config
+      ? path.resolve(opts.config)
+      : path.resolve(process.cwd(), DEFAULT_CONFIG);
+
+    if (!fs.existsSync(configPath)) {
+      if (isJsonMode(opts)) {
+        emitJsonError({ error: 'config_not_found', message: `Config file not found: ${configPath}`, hint: 'Run: verfix init --yes (non-interactive) or verfix init (interactive)' });
+      }
+      console.error(chalk.red(`Config file not found: ${configPath}`));
+      process.exit(2);
+    }
+
+    const errors: string[] = [];
+    const warnings: string[] = [];
+
+    let config: any = null;
+    try {
+      const { loadVerfixConfig } = await import('./config/loader');
+      config = loadVerfixConfig(configPath);
+    } catch (e: any) {
+      errors.push(e.message);
+    }
+
+    if (config) {
+      const { ASSERTION_TYPES } = await import('@verfix/engine');
+      const checkAssertions = (assertions: any[] | undefined, where: string) => {
+        for (const a of assertions || []) {
+          if (a.type && !ASSERTION_TYPES.includes(a.type)) {
+            errors.push(`${where}: unknown assertion type "${a.type}". Valid types: ${ASSERTION_TYPES.join(', ')}`);
+          }
+        }
+      };
+
+      checkAssertions(config.assertions, 'assertions');
+
+      const seenIds = new Set<string>();
+      (config.flows || []).forEach((flow: any, idx: number) => {
+        const id = flow.id || flow.name || `flow_${idx + 1}`;
+        if (seenIds.has(id)) {
+          errors.push(`flows[${idx}] (${id}): duplicate flow id/name`);
+        }
+        seenIds.add(id);
+
+        if (!flow.steps?.length && !flow.assertions?.length) {
+          warnings.push(`flows[${idx}] (${id}): has no steps or assertions — it does nothing`);
+        }
+        checkAssertions(flow.assertions, `flows[${idx}] (${id})`);
+      });
+
+      if (!config.baseUrl) {
+        warnings.push('baseUrl is not set — every "verfix run" will require --url');
+      }
+    }
+
+    const valid = errors.length === 0;
+
+    if (isJsonMode(opts)) {
+      emitJson({ valid, errors, warnings });
+      process.exit(valid ? 0 : 2);
+    }
+
+    if (valid && warnings.length === 0) {
+      console.log(chalk.green(`✓ ${configPath} is valid`));
+    } else {
+      console.log('');
+      for (const err of errors) {
+        console.log(`  ${chalk.red('✗')} ${err}`);
+      }
+      for (const warn of warnings) {
+        console.log(`  ${chalk.yellow('⚠')} ${warn}`);
+      }
+      console.log('');
+      console.log(valid ? chalk.green(`✓ ${configPath} is valid (with warnings)`) : chalk.red(`✗ ${configPath} is invalid`));
+    }
+
+    process.exit(valid ? 0 : 2);
   });
 
 // ─── install command ────────────────────────────────────────────────────────
@@ -1245,7 +1337,9 @@ program
       await finishTelemetryAndExit(2, 'flow_not_found');
     }
 
-    const flows = selectedFlows.length > 0 ? normalizeFlows(selectedFlows) : normalizeFlows(config?.flows || []);
+    const flows = selectedFlows.length > 0
+      ? normalizeFlows(selectedFlows)
+      : normalizeFlows((config?.flows || []).filter((f: any) => !f.skip));
     const assertions = selectedFlows.length > 0 ? undefined : config.assertions;
 
     trackFlowCount = flows.length > 0 ? flows.length : (assertions ? assertions.length : 0);
@@ -1654,6 +1748,7 @@ function normalizeFlows(flows: any[]): any[] {
   if (!flows || flows.length === 0) return [];
   return flows.map((flow, idx) => ({
     name: flow.name || flow.id || `flow_${idx + 1}`,
+    mode: flow.mode,
     steps: (flow.steps || []).map((step: any) => ({
       action: step.action,
       target: step.testId
