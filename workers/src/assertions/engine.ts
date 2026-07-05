@@ -1,5 +1,5 @@
 import { Page } from 'playwright';
-import { AssertionDefinition, AssertionResult, ConsoleLine, NetworkRequest } from './types';
+import { ASSERTION_TYPES, AssertionDefinition, AssertionResult, ConsoleLine, NetworkRequest } from './types';
 import { inferFailureType, renderFixHint } from './failure-hints';
 import { resolveWithHealing } from '../ai/self-healing';
 import { EventTracker } from '../artifacts/event-tracker';
@@ -138,7 +138,11 @@ export async function runAssertions(
       }
 
       default:
-        result = { passed: false, duration_ms: 0, error: `Unknown assertion type: ${(assertion as any).type}` };
+        result = {
+          passed: false,
+          duration_ms: 0,
+          error: `Unknown assertion type: ${(assertion as any).type}. Valid types: ${ASSERTION_TYPES.join(', ')}`,
+        };
     }
 
     let failure_type: AssertionResult['failure_type'];

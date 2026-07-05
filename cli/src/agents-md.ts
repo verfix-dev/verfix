@@ -430,15 +430,18 @@ If verification runs are misbehaving, use these commands to diagnose and fix:
 |---------|-------------|
 | \`verfix status\` | Check config, engine, browser install, and the last run |
 | \`verfix doctor\` | Run diagnostics (Node, config, engine, Chromium, app reachability) |
+| \`verfix validate\` | Check \`verfix.config.json\` for structural/semantic errors (bad assertion types, duplicate flow ids, invalid mode) without running anything |
 | \`verfix install\` | Download the Chromium browser the local runner needs (one-time) |
 | \`verfix show <execution_id>\` | Open the recorded Playwright trace of a run |
 
 **Recovery steps:**
 
 1. \`verfix doctor\` → Follow any suggestions it prints.
-2. Browser missing? Run \`verfix install\` (one-time ~130MB download), or it
+2. Edited \`verfix.config.json\` by hand? Run \`verfix validate\` first to catch
+   typos (bad assertion type, duplicate flow id, invalid mode) before running.
+3. Browser missing? Run \`verfix install\` (one-time ~130MB download), or it
    auto-downloads on the next \`verfix run\`.
-3. App unreachable? Start the dev server, or fix \`baseUrl\` in \`verfix.config.json\`.
+4. App unreachable? Start the dev server, or fix \`baseUrl\` in \`verfix.config.json\`.
 
 ---
 
@@ -452,11 +455,18 @@ If verification runs are misbehaving, use these commands to diagnose and fix:
   // All navigate step URLs are resolved relative to this.
   "baseUrl": "${baseUrl}",
 
-  // REQUIRED — Default verification mode for all flows.
+  // REQUIRED — Default verification mode.
   //   "strict"      → deterministic only, no AI. Best for CI and stable selectors.
   //   "assisted"    → deterministic first, AI heals broken selectors. Best for active dev.
-  //   "exploratory" → AI-driven navigation from a task description. No flows needed.
+  //   "exploratory" → AI-driven navigation from "task" below instead of "flows".
+  //                   Requires an AI key configured (verfix init) — no fallback exists.
+  //                   Global only — do NOT set this as a per-flow "mode" override.
   "mode": "${mode}",
+
+  // REQUIRED only when mode is "exploratory" — ignored otherwise. A natural-
+  // language goal the AI agent tries to achieve by clicking/typing/navigating.
+  // "flows" is not used at all in exploratory mode — omit it.
+  // "task": "Log in with the test account, then verify the dashboard shows the user's name.",
 
   // OPTIONAL — Global timeout in ms for all steps/assertions (default: 15000)
   "timeout": 15000,
@@ -482,7 +492,8 @@ If verification runs are misbehaving, use these commands to diagnose and fix:
     "framework": "next.js"
   },
 
-  // REQUIRED — Array of flows. This is a LIBRARY — add as many as you need.
+  // REQUIRED unless mode is "exploratory" (which uses "task" above instead).
+  // This is a LIBRARY — add as many flows as you need.
   // Each flow is independent and can be run with: verfix run --flow <id>
   "flows": [
     {
@@ -491,8 +502,16 @@ If verification runs are misbehaving, use these commands to diagnose and fix:
       "id": "descriptive-flow-name",
 
       // OPTIONAL — Per-flow mode override. If set, this flow uses this mode
-      // instead of the global mode. Allowed: "strict" | "assisted" | "exploratory"
+      // instead of the global mode. Allowed: "strict" | "assisted" ONLY —
+      // "exploratory" replaces flow execution entirely and is global-only;
+      // setting it per-flow is a config error ("verfix validate" catches this).
       "mode": "assisted",
+
+      // OPTIONAL — Skip this flow in "verfix run" (no --flow filter given).
+      // Use to quarantine a known-broken flow without deleting it; the flow
+      // still runs if explicitly named via --flow <id>.
+      "skip": false,
+      "skipReason": "Tracked in ISSUE-42, blocked on backend fix",
 
       // REQUIRED — Ordered list of browser actions to execute.
       "steps": [
@@ -515,6 +534,30 @@ If verification runs are misbehaving, use these commands to diagnose and fix:
   ]
 }
 \`\`\`
+
+#### Exploratory mode — minimal example
+
+Exploratory mode is a **different shape of config**, not a flag on the flow-based
+one above. It has no \`flows\` array — the AI agent decides what to click/type/
+navigate at each step from \`task\` alone:
+
+\`\`\`json
+{
+  "baseUrl": "${baseUrl}",
+  "mode": "exploratory",
+  "task": "Log in with the test account, then verify the dashboard shows the user's name."
+}
+\`\`\`
+
+- Requires an AI provider/key (\`verfix init\`) — \`verfix run\` fails fast with
+  \`ai_key_required\` if none is configured, since there is no deterministic
+  fallback (unlike \`assisted\`, which still works without a key).
+- Use this when no flow exists yet and you're exploring what a feature does,
+  not when you already know the steps — write a real flow for anything you'll
+  verify repeatedly (exploratory re-decides the path every run, so it's slower
+  and less deterministic than a flow).
+- \`verfix run --flow <id>\` and per-flow \`mode\` overrides do not apply here —
+  exploratory mode ignores \`flows\`/\`assertions\` entirely.
 
 #### Step actions
 
@@ -578,6 +621,13 @@ All assertions accept an optional \`timeout\` (ms, default 5000).
 | Quick smoke test (page loads, no errors) | \`strict\` | Just use \`page_loaded\` + \`no_console_errors\` |
 
 **Mode priority:** CLI flag \`--mode\` > flow-level \`mode\` > config-level \`mode\` > \`strict\`
+
+> \`exploratory\` is **global-only** — it replaces flow execution with an
+> AI-driven task and ignores \`flows\`/\`assertions\` entirely. It also has no
+> deterministic fallback (unlike \`assisted\`, which still works via semantic
+> selector healing without an AI key) — \`verfix run\` fails fast with
+> \`ai_key_required\` if no AI provider/key is configured. Setting
+> \`"mode": "exploratory"\` on an individual flow is rejected as a config error.
 
 ---
 

@@ -230,7 +230,7 @@ async function execute(data: JobPayload, opts: EngineRunOptions): Promise<Execut
             ranFlowAssertions = true;
             console.log(`\n🔍 Running ${flow.assertions.length} flow assertion(s)...`);
             const flowResults = await runAssertions(
-              page, flow.assertions, consoleLogs, networkRequests, artifactsDir, data.id, data.mode, data.task, tracker, flow.name
+              page, flow.assertions, consoleLogs, networkRequests, artifactsDir, data.id, flow.mode || data.mode, data.task, tracker, flow.name
             );
             assertionResults.push(...flowResults);
           }

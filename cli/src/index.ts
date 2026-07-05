@@ -1081,6 +1081,8 @@ program
           assertions: (f.assertions || []).length,
           description: f.description,
           composable_with: deps.length > 0 ? deps : undefined,
+          skip: f.skip || undefined,
+          skip_reason: f.skip ? f.skipReason : undefined,
         };
       });
       emitJson({ flows: list, total: list.length });
@@ -1096,8 +1098,12 @@ program
       const stepCount = (f.steps || []).length;
       const assertCount = (f.assertions || []).length;
       const stepDesc = (f.steps || []).map((s: any) => s.action).join(' → ');
-      console.log(`  ${chalk.cyan('▸')} ${chalk.bold(id)}`);
+      const skipTag = f.skip ? ` ${chalk.yellow('[skipped]')}` : '';
+      console.log(`  ${chalk.cyan('▸')} ${chalk.bold(id)}${skipTag}`);
       console.log(`    ${chalk.gray(`${stepCount} step(s), ${assertCount} assertion(s)`)}`);
+      if (f.skip && f.skipReason) {
+        console.log(`    ${chalk.yellow(`⊘ Skipped: ${f.skipReason}`)}`);
+      }
       if (stepDesc) {
         console.log(`    ${chalk.gray(stepDesc)}`);
       }
@@ -1113,6 +1119,108 @@ program
     }
     showPendingNotifications();
     scheduleBackgroundCheck(['npm', 'image']);
+  });
+
+// ─── validate command ───────────────────────────────────────────────────────
+
+program
+  .command('validate')
+  .description('Check verfix.config.json for structural and semantic errors without running it')
+  .option('-c, --config <file>', 'Path to config file')
+  .option('-o, --output <format>', 'Output format: pretty | json', 'pretty')
+  .action(async (opts) => {
+    const configPath = opts.config
+      ? path.resolve(opts.config)
+      : path.resolve(process.cwd(), DEFAULT_CONFIG);
+
+    if (!fs.existsSync(configPath)) {
+      if (isJsonMode(opts)) {
+        emitJsonError({ error: 'config_not_found', message: `Config file not found: ${configPath}`, hint: 'Run: verfix init --yes (non-interactive) or verfix init (interactive)' });
+      }
+      console.error(chalk.red(`Config file not found: ${configPath}`));
+      process.exit(2);
+    }
+
+    const errors: string[] = [];
+    const warnings: string[] = [];
+
+    let config: any = null;
+    try {
+      const { loadVerfixConfig } = await import('./config/loader');
+      config = loadVerfixConfig(configPath);
+    } catch (e: any) {
+      errors.push(e.message);
+    }
+
+    if (config) {
+      const { ASSERTION_TYPES } = await import('@verfix/engine');
+      const checkAssertions = (assertions: any[] | undefined, where: string) => {
+        for (const a of assertions || []) {
+          if (a.type && !ASSERTION_TYPES.includes(a.type)) {
+            errors.push(`${where}: unknown assertion type "${a.type}". Valid types: ${ASSERTION_TYPES.join(', ')}`);
+          }
+        }
+      };
+
+      checkAssertions(config.assertions, 'assertions');
+
+      const seenIds = new Set<string>();
+      (config.flows || []).forEach((flow: any, idx: number) => {
+        const id = flow.id || flow.name || `flow_${idx + 1}`;
+        if (seenIds.has(id)) {
+          errors.push(`flows[${idx}] (${id}): duplicate flow id/name`);
+        }
+        seenIds.add(id);
+
+        if (!flow.steps?.length && !flow.assertions?.length) {
+          warnings.push(`flows[${idx}] (${id}): has no steps or assertions — it does nothing`);
+        }
+        if (flow.mode === 'exploratory') {
+          errors.push(`flows[${idx}] (${id}): mode "exploratory" is not valid per-flow — it replaces flow execution entirely and only applies as the top-level "mode"`);
+        }
+        checkAssertions(flow.assertions, `flows[${idx}] (${id})`);
+      });
+
+      if (!config.baseUrl) {
+        warnings.push('baseUrl is not set — every "verfix run" will require --url');
+      }
+
+      const assistedInUse = config.mode === 'assisted' || (config.flows || []).some((f: any) => f.mode === 'assisted');
+      if (config.mode === 'exploratory' || assistedInUse) {
+        const { loadAIConfig, loadApiKey } = await import('./config/loader');
+        const aiConfig = loadAIConfig(process.cwd());
+        const apiKey = aiConfig ? loadApiKey(process.cwd(), aiConfig.provider) : null;
+        if (!apiKey && config.mode === 'exploratory') {
+          errors.push('mode is "exploratory" but no AI provider/key is configured — exploratory mode has no deterministic fallback. Run: verfix init to configure AI, or switch to mode: strict/assisted.');
+        }
+        if (!apiKey && assistedInUse) {
+          warnings.push('assisted mode is in use but no AI provider/key is configured — self-healing will only use semantic selectors (role/aria/text), no AI fallback. Run: verfix init to add one, or ignore if that\'s enough.');
+        }
+      }
+    }
+
+    const valid = errors.length === 0;
+
+    if (isJsonMode(opts)) {
+      emitJson({ valid, errors, warnings });
+      process.exit(valid ? 0 : 2);
+    }
+
+    if (valid && warnings.length === 0) {
+      console.log(chalk.green(`✓ ${configPath} is valid`));
+    } else {
+      console.log('');
+      for (const err of errors) {
+        console.log(`  ${chalk.red('✗')} ${err}`);
+      }
+      for (const warn of warnings) {
+        console.log(`  ${chalk.yellow('⚠')} ${warn}`);
+      }
+      console.log('');
+      console.log(valid ? chalk.green(`✓ ${configPath} is valid (with warnings)`) : chalk.red(`✗ ${configPath} is invalid`));
+    }
+
+    process.exit(valid ? 0 : 2);
   });
 
 // ─── install command ────────────────────────────────────────────────────────
@@ -1245,7 +1353,9 @@ program
       await finishTelemetryAndExit(2, 'flow_not_found');
     }
 
-    const flows = selectedFlows.length > 0 ? normalizeFlows(selectedFlows) : normalizeFlows(config?.flows || []);
+    const flows = selectedFlows.length > 0
+      ? normalizeFlows(selectedFlows)
+      : normalizeFlows((config?.flows || []).filter((f: any) => !f.skip));
     const assertions = selectedFlows.length > 0 ? undefined : config.assertions;
 
     trackFlowCount = flows.length > 0 ? flows.length : (assertions ? assertions.length : 0);
@@ -1286,6 +1396,51 @@ program
       }
       console.error(chalk.red('Error: --url is required (or set baseUrl in config file)'));
       await finishTelemetryAndExit(2, 'missing_url');
+    }
+
+    // Exploratory mode replaces flow execution entirely (an AI agent drives the
+    // browser from `task`, ignoring `flows`/`assertions`) — it only makes sense
+    // as the run's global mode. A per-flow override to 'exploratory' is a no-op
+    // the engine silently ignores, so reject it here rather than let it pass
+    // through as a config that looks like it does something it doesn't.
+    const exploratoryFlow = flows.find((f: any) => f.mode === 'exploratory');
+    if (exploratoryFlow) {
+      const msg = `Flow "${exploratoryFlow.name}" sets mode: "exploratory" — exploratory mode only applies globally (it replaces flow execution with an AI-driven task), not per-flow. Set the top-level "mode" instead, or use "strict"/"assisted" for this flow.`;
+      if (isJsonMode(opts)) {
+        emitJsonError({ error: 'invalid_flow_mode', message: msg, hint: 'Remove "mode": "exploratory" from the flow, or run it as its own exploratory config.' });
+      }
+      console.error(chalk.red(msg));
+      await finishTelemetryAndExit(2, 'invalid_flow_mode');
+    }
+
+    // AI key check — exploratory and assisted need different treatment.
+    // Exploratory has no deterministic fallback at all, so a missing key is a
+    // hard error, fail fast here instead of launching a browser only to have
+    // it fail mid-run. Assisted still works without a key (semantic-selector
+    // healing runs regardless; only the AI-fallback tier is skipped), so a
+    // missing key there is just a heads-up, not a blocker.
+    const assistedInUse = payload.mode === 'assisted' || flows.some((f: any) => f.mode === 'assisted');
+    if (payload.mode === 'exploratory' || assistedInUse) {
+      const { loadAIConfig, loadApiKey } = await import('./config/loader');
+      const aiConfig = loadAIConfig(process.cwd());
+      const apiKey = aiConfig ? loadApiKey(process.cwd(), aiConfig.provider) : null;
+
+      if (!apiKey && payload.mode === 'exploratory') {
+        const msg = 'Exploratory mode requires an AI provider and API key — there is no deterministic fallback for it (unlike assisted mode).';
+        const hint = 'Run: verfix init to configure AI, or switch to mode: strict/assisted.';
+        if (isJsonMode(opts)) {
+          emitJsonError({ error: 'ai_key_required', message: msg, hint });
+        }
+        console.error(chalk.red(msg));
+        console.error(chalk.gray(hint));
+        await finishTelemetryAndExit(2, 'ai_key_required');
+      }
+
+      if (!apiKey && assistedInUse) {
+        console.warn(chalk.yellow(
+          '⚠ Assisted mode is active but no AI provider/key is configured — self-healing will only use semantic selectors (role/aria/text), no AI fallback. Run: verfix init to add one, or ignore if that\'s enough.'
+        ));
+      }
     }
 
     if (opts.output === 'pretty') {
@@ -1654,6 +1809,7 @@ function normalizeFlows(flows: any[]): any[] {
   if (!flows || flows.length === 0) return [];
   return flows.map((flow, idx) => ({
     name: flow.name || flow.id || `flow_${idx + 1}`,
+    mode: flow.mode,
     steps: (flow.steps || []).map((step: any) => ({
       action: step.action,
       target: step.testId
