@@ -15,6 +15,8 @@ export const FlowStepSchema = z.object({
   value: z.string().optional(),
   url: z.string().optional(),
   timeout: z.number().optional(),
+  // Best-effort step: any failure within its timeout is skipped, not fatal.
+  optional: z.boolean().optional(),
 })
 
 export const FlowAssertionSchema = z.object({
@@ -42,6 +44,8 @@ export const FlowSchema = z.object({
   skipReason: z.string().optional(),
   steps: z.array(FlowStepSchema).optional(),
   assertions: z.array(FlowAssertionSchema).optional(),
+  // Clear cookies + local/session storage before this flow runs.
+  clearState: z.boolean().optional(),
 })
 
 export const VerfixConfigSchema = z.object({

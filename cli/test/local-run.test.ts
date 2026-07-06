@@ -45,6 +45,19 @@ async function main() {
           { type: 'text_visible', value: 'Hello Verfix' },
         ],
       },
+      {
+        // Exercises `optional` (a step whose target never appears must not
+        // abort the flow) and `clearState` (runs against a fresh
+        // cookies/storage slate) together in one end-to-end run.
+        id: 'optional-and-clear-state',
+        clearState: true,
+        steps: [
+          { action: 'click', selector: '[data-testid="does-not-exist"]', optional: true, timeout: 1000 },
+        ],
+        assertions: [
+          { type: 'selector_visible', selector: '[data-testid="greeting"]' },
+        ],
+      },
     ],
   };
   fs.writeFileSync(path.join(projectDir, 'verfix.config.json'), JSON.stringify(config, null, 2));
@@ -59,7 +72,7 @@ async function main() {
     const child = spawn(
       'npx',
       ['ts-node', '--project', path.join(CLI_DIR, 'tsconfig.json'), path.join(CLI_DIR, 'src', 'index.ts'),
-        'run', '--flow', 'smoke', '--output', 'json'],
+        'run', '--flow', 'smoke,optional-and-clear-state', '--output', 'json'],
       {
         cwd: projectDir,
         env: childEnv,

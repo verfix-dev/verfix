@@ -1826,6 +1826,7 @@ function normalizeFlows(flows: any[]): any[] {
     return {
       name: flow.name || flow.id || `flow_${idx + 1}`,
       mode: flow.mode,
+      clearState: flow.clearState,
       steps: (flow.steps || []).map((rawStep: any, stepIdx: number) => {
         const step = interpolateStep(rawStep, `${flowPath}.steps[${stepIdx}]`);
         return {
@@ -1840,6 +1841,7 @@ function normalizeFlows(flows: any[]): any[] {
           value: step.value ?? step.url,
           url: step.url,
           timeout: step.timeout,
+          optional: step.optional,
         };
       }),
       assertions: interpolateAssertions(flow.assertions, `${flowPath}.assertions`),

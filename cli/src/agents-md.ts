@@ -519,6 +519,11 @@ If verification runs are misbehaving, use these commands to diagnose and fix:
       "skip": false,
       "skipReason": "Tracked in ISSUE-42, blocked on backend fix",
 
+      // OPTIONAL — Clear cookies + local/session storage before this flow
+      // runs. Use on a flow that must start logged-out so a session left
+      // over from a previous run can't change the outcome.
+      "clearState": false,
+
       // REQUIRED — Ordered list of browser actions to execute.
       "steps": [
         // ... see "Step actions" below
@@ -568,6 +573,15 @@ navigate at each step from \`task\` alone:
 #### Step actions
 
 Every step in a flow has an \`action\` and a target. These are the **only** actions the runtime supports:
+
+Any step also accepts \`"optional": true\` — if it fails for any reason within
+its \`timeout\`, it is skipped instead of aborting the flow. Use this for a UI
+branch that may or may not appear (e.g. a "logout previous session" dialog on
+some login attempts but not others) — pair it with a short \`timeout\` so a
+dialog that never shows doesn't cost the full default wait:
+\`\`\`json
+{ "action": "click", "text": "Logout previous session and login here", "optional": true, "timeout": 2000 }
+\`\`\`
 
 **\`navigate\`** — Go to a URL
 \`\`\`json

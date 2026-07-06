@@ -58,6 +58,8 @@ export interface FlowStep {
   value?: string;
   url?: string;
   timeout?: number;
+  // Best-effort: any failure within the step's timeout is skipped, not fatal.
+  optional?: boolean;
 }
 
 export interface Flow {
@@ -65,6 +67,8 @@ export interface Flow {
   mode?: string;
   steps: FlowStep[];
   assertions?: AssertionDefinition[];
+  // Clear cookies + local/session storage before this flow runs.
+  clearState?: boolean;
 }
 
 export interface JobPayload {
