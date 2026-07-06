@@ -43,6 +43,18 @@ export async function executeFlow(page: Page, flow: Flow, job: JobPayload, track
         await tracker.captureStateSync(page, event.id, 'step');
       }
     } catch (err: any) {
+      if (step.optional) {
+        console.log(`    ⏭ skipped optional step ${stepDesc}: ${err.message}`);
+        if (tracker) {
+          tracker.pushEvent(
+            'action',
+            `⏭ skipped optional step ${stepDesc}: ${err.message}`,
+            { flow: flow.name, action: step.action, target: step.target, skipped: true, reason: err.message },
+            { category: 'info' },
+          );
+        }
+        continue;
+      }
       if (tracker) {
         const event = tracker.pushEvent('retry', `❌ ${stepDesc} failed: ${err.message}`, { flow: flow.name, action: step.action, error: err.message }, { category: 'signal', capture_reason: 'retry', signal_flags: ['retry'] });
         await tracker.captureSignalState(page, event.id, 'retry');

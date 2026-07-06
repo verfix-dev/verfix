@@ -112,10 +112,22 @@ export async function runAssertions(
 
       case 'no_console_errors': {
         result = await timed(async () => {
-          const errors = consoleLogs.filter(l => l.type === 'error');
+          const rawErrors = consoleLogs.filter(l => l.type === 'error');
+          let patterns: RegExp[];
+          try {
+            patterns = (assertion.exclude || []).map(p => new RegExp(p));
+          } catch (e: any) {
+            return { passed: false, error: `Invalid exclude pattern: ${e.message}` };
+          }
+          const errors = patterns.length > 0
+            ? rawErrors.filter(e => !patterns.some(p => p.test(e.text)))
+            : rawErrors;
+          const excluded_count = rawErrors.length - errors.length;
+          const passed = errors.length === 0;
           return {
-            passed: errors.length === 0,
-            details: { error_count: errors.length, errors: errors.map(e => e.text) },
+            passed,
+            details: { error_count: errors.length, errors: errors.map(e => e.text), excluded_count },
+            error: passed ? undefined : `${errors.length} console error(s), first: "${errors[0].text.slice(0, 200)}"`,
           };
         });
         break;
@@ -123,16 +135,24 @@ export async function runAssertions(
 
       case 'network_request_success': {
         const urlPattern = assertion.value || '';
+        const acceptStatuses = assertion.acceptStatuses;
+        const isAccepted = (status: number) =>
+          acceptStatuses && acceptStatuses.length > 0
+            ? acceptStatuses.includes(status)
+            : status >= 200 && status < 400;
         result = await timed(async () => {
           const matched = networkRequests.filter(r => r.url.includes(urlPattern));
-          const allSuccess = matched.length > 0 && matched.every(r => r.status >= 200 && r.status < 400);
-          return {
-            passed: allSuccess,
-            details: {
-              pattern: urlPattern,
-              matched: matched.map(r => ({ url: r.url, status: r.status })),
-            },
+          const allSuccess = matched.length > 0 && matched.every(r => isAccepted(r.status));
+          const details = {
+            pattern: urlPattern,
+            acceptStatuses,
+            matched: matched.map(r => ({ url: r.url, method: r.method, status: r.status })),
           };
+          if (allSuccess) return { passed: true, details };
+          const error = matched.length === 0
+            ? `No requests matching "${urlPattern}" were observed`
+            : `${matched.length} matched request(s) returned unaccepted status: ${matched.slice(0, 3).map(r => `${r.method} ${r.url} → ${r.status}`).join(', ')}`;
+          return { passed: false, details, error };
         });
         break;
       }
@@ -156,6 +176,7 @@ export async function runAssertions(
         expected: (result.details as any)?.expected ?? assertion.value,
         actual: (result.details as any)?.actual,
         error: result.error,
+        details: result.details,
       });
     }
 

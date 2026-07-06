@@ -24,6 +24,44 @@ edits are governed:
 | `sourceCodePolicy` | `warn` | What happens when project source is edited during a verify loop: `warn` (report only), `block` (fail with `source_edit_blocked`), or `off`. See [Config-First Verification](../4-guides/config-first-verification.md). |
 | `browser` | `{}` | Local-mode browser options: `{ "channel": "chrome" }` reuses your installed Chrome (skips the Chromium download); `{ "headless": false }` shows the browser window. |
 
+### Per-flow and per-step options
+
+| Field | Where | Description |
+|---|---|---|
+| `optional` | step | Best-effort step. If it fails for any reason within its `timeout`, it is skipped (logged as a timeline event) instead of aborting the flow. Use it for a UI branch that may or may not appear — e.g. click a "logout previous session" confirmation dialog if it shows up, then continue. Give it a short `timeout` so a dialog that never appears doesn't cost the full default wait. |
+| `clearState` | flow | Clears cookies and `localStorage`/`sessionStorage` before this flow runs. Use it on a flow that must start logged-out, so a stale session from a previous run doesn't produce an unexpected response. Does not clear IndexedDB or service workers. |
+| `timeout` | step | Per-step override of the default action timeout (already existed). |
+
+```json
+{
+  "flows": [
+    {
+      "id": "login",
+      "clearState": true,
+      "steps": [
+        { "action": "type", "selector": "emailInput", "value": "${TEST_EMAIL}" },
+        { "action": "type", "selector": "passwordInput", "value": "${TEST_PASSWORD}" },
+        { "action": "click", "selector": "submitBtn" },
+        { "action": "click", "text": "Logout previous session and login here", "optional": true, "timeout": 2000 }
+      ],
+      "assertions": [
+        { "type": "network_request_success", "value": "/api/auth/login", "acceptStatuses": [200, 409] }
+      ]
+    }
+  ]
+}
+```
+
+### `${VAR}` environment substitution
+
+Step `value`/`url`, assertion `value`, and `baseUrl` may reference an
+environment variable with `${VAR_NAME}` syntax. It's resolved from
+`process.env` at run time — which already includes anything set in
+`.verfix/.env` — so secrets never need to be committed in
+`verfix.config.json`. An unset variable fails the run immediately with a
+clear error naming the missing variable, rather than typing the literal
+`${VAR_NAME}` string into a form field.
+
 ## External Dependencies
 
 Local mode (the default) has none — results are plain files under

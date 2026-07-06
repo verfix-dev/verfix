@@ -29,6 +29,8 @@ export interface AssertionDefinition {
   selector?: string;      // for selector_visible
   value?: string;         // for text_visible, url_contains, title_contains, network_request_success
   timeout?: number;
+  acceptStatuses?: number[]; // network_request_success: replaces the default 200-399 range when set
+  exclude?: string[];        // no_console_errors: regex patterns to ignore
 }
 
 export interface AssertionResult {
@@ -56,6 +58,8 @@ export interface FlowStep {
   value?: string;
   url?: string;
   timeout?: number;
+  // Best-effort: any failure within the step's timeout is skipped, not fatal.
+  optional?: boolean;
 }
 
 export interface Flow {
@@ -63,6 +67,8 @@ export interface Flow {
   mode?: string;
   steps: FlowStep[];
   assertions?: AssertionDefinition[];
+  // Clear cookies + local/session storage before this flow runs.
+  clearState?: boolean;
 }
 
 export interface JobPayload {

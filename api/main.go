@@ -21,10 +21,12 @@ var store Store
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type AssertionDef struct {
-	Type     string `json:"type"`
-	Selector string `json:"selector,omitempty"`
-	Value    string `json:"value,omitempty"`
-	Timeout  int    `json:"timeout,omitempty"`
+	Type           string   `json:"type"`
+	Selector       string   `json:"selector,omitempty"`
+	Value          string   `json:"value,omitempty"`
+	Timeout        int      `json:"timeout,omitempty"`
+	AcceptStatuses []int    `json:"acceptStatuses,omitempty"`
+	Exclude        []string `json:"exclude,omitempty"`
 }
 
 type FlowTarget struct {
@@ -34,17 +36,20 @@ type FlowTarget struct {
 }
 
 type FlowStep struct {
-	Action  string     `json:"action"`
-	Target  FlowTarget `json:"target,omitempty"`
-	Value   string     `json:"value,omitempty"`
-	URL     string     `json:"url,omitempty"`
-	Timeout int        `json:"timeout,omitempty"`
+	Action   string     `json:"action"`
+	Target   FlowTarget `json:"target,omitempty"`
+	Value    string     `json:"value,omitempty"`
+	URL      string     `json:"url,omitempty"`
+	Timeout  int        `json:"timeout,omitempty"`
+	Optional bool       `json:"optional,omitempty"`
 }
 
 type Flow struct {
-	Name       string        `json:"name"`
-	Steps      []FlowStep    `json:"steps"`
+	Name       string         `json:"name"`
+	Mode       string         `json:"mode,omitempty"`
+	Steps      []FlowStep     `json:"steps"`
 	Assertions []AssertionDef `json:"assertions,omitempty"`
+	ClearState bool           `json:"clearState,omitempty"`
 }
 
 type AppMetadata struct {

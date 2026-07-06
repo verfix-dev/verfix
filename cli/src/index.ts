@@ -24,6 +24,7 @@ import {
   evaluateSourceChanges, buildSourceFinding, clearSourceBaseline,
   type SourceCodePolicy, type SourceChanges,
 } from './source-guard';
+import { interpolateEnv, interpolateStep, interpolateAssertions, MissingEnvVarError } from './config/interpolate';
 
 
 // ─── Load Environment Variables ────────────────────────────────────────────────
@@ -1353,14 +1354,27 @@ program
       await finishTelemetryAndExit(2, 'flow_not_found');
     }
 
-    const flows = selectedFlows.length > 0
-      ? normalizeFlows(selectedFlows)
-      : normalizeFlows((config?.flows || []).filter((f: any) => !f.skip));
-    const assertions = selectedFlows.length > 0 ? undefined : config.assertions;
+    let flows: any[];
+    let assertions: any[] | undefined;
+    let baseUrl: any;
+    try {
+      flows = selectedFlows.length > 0
+        ? normalizeFlows(selectedFlows)
+        : normalizeFlows((config?.flows || []).filter((f: any) => !f.skip));
+      assertions = selectedFlows.length > 0 ? undefined : interpolateAssertions(config.assertions, 'assertions');
+      baseUrl = opts.url || config.baseUrl || config.url;
+      if (baseUrl) baseUrl = interpolateEnv(baseUrl, 'baseUrl');
+    } catch (e: any) {
+      if (!(e instanceof MissingEnvVarError)) throw e;
+      if (isJsonMode(opts)) {
+        emitJsonError({ error: 'env_var_missing', message: e.message, hint: `Set ${e.varName} in .verfix/.env.` });
+      }
+      console.error(chalk.red(e.message));
+      await finishTelemetryAndExit(2, 'env_var_missing');
+      return;
+    }
 
     trackFlowCount = flows.length > 0 ? flows.length : (assertions ? assertions.length : 0);
-
-    const baseUrl = opts.url || config.baseUrl || config.url;
 
     // ── Source-change guard ───────────────────────────────────────────────────
     // Snapshot / compare the working tree at the START of the run so we can tell
@@ -1807,24 +1821,32 @@ function selectFlows(flows: any[] | undefined, idOrNames?: string): any[] {
 
 function normalizeFlows(flows: any[]): any[] {
   if (!flows || flows.length === 0) return [];
-  return flows.map((flow, idx) => ({
-    name: flow.name || flow.id || `flow_${idx + 1}`,
-    mode: flow.mode,
-    steps: (flow.steps || []).map((step: any) => ({
-      action: step.action,
-      target: step.testId
-        ? { testId: step.testId }
-        : step.selector
-          ? { selector: step.selector }
-          : step.text
-            ? { text: step.text }
-            : undefined,
-      value: step.value ?? step.url,
-      url: step.url,
-      timeout: step.timeout,
-    })),
-    assertions: flow.assertions,
-  }));
+  return flows.map((flow, idx) => {
+    const flowPath = `flows[${idx}]`;
+    return {
+      name: flow.name || flow.id || `flow_${idx + 1}`,
+      mode: flow.mode,
+      clearState: flow.clearState,
+      steps: (flow.steps || []).map((rawStep: any, stepIdx: number) => {
+        const step = interpolateStep(rawStep, `${flowPath}.steps[${stepIdx}]`);
+        return {
+          action: step.action,
+          target: step.testId
+            ? { testId: step.testId }
+            : step.selector
+              ? { selector: step.selector }
+              : step.text
+                ? { text: step.text }
+                : undefined,
+          value: step.value ?? step.url,
+          url: step.url,
+          timeout: step.timeout,
+          optional: step.optional,
+        };
+      }),
+      assertions: interpolateAssertions(flow.assertions, `${flowPath}.assertions`),
+    };
+  });
 }
 
 function validateConfigSchema(config: any, configPath: string): void {

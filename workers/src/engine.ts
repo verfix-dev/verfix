@@ -222,6 +222,18 @@ async function execute(data: JobPayload, opts: EngineRunOptions): Promise<Execut
       if (data.flows && data.flows.length > 0) {
         console.log('\n▶ Executing flows...');
         for (const flow of data.flows) {
+          if (flow.clearState) {
+            // ponytail: clears cookies + local/session storage only — leaves
+            // IndexedDB/service workers untouched. Upgrade to a fresh
+            // BrowserContext if that ceiling is ever hit.
+            await context.clearCookies();
+            try {
+              await page.evaluate(() => { localStorage.clear(); sessionStorage.clear(); });
+            } catch {
+              // Storage APIs unavailable (e.g. about:blank) — nothing to clear.
+            }
+            tracker.pushEvent('dom_change', `cleared cookies/storage before flow ${flow.name}`, { flow: flow.name }, { category: 'info' });
+          }
           await executeFlow(page, flow, data, tracker);
           await waitForStableDOM(page, 400, 5000);
           tracker.pushEvent('dom_change', `DOM stabilized after flow ${flow.name}`, { flow: flow.name }, { category: 'info' });
