@@ -14,6 +14,8 @@ export const FlowStepSchema = z.object({
   text: z.string().optional(),
   value: z.string().optional(),
   url: z.string().optional(),
+  // Keyboard key for the 'press' action (Playwright key names, e.g. "Enter", "Escape", "Tab").
+  key: z.string().optional(),
   timeout: z.number().optional(),
   // Best-effort step: any failure within its timeout is skipped, not fatal.
   optional: z.boolean().optional(),
