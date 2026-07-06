@@ -487,6 +487,12 @@ If verification runs are misbehaving, use these commands to diagnose and fix:
     "submitBtn": "[data-testid=submit]"
   },
 
+  // Step/assertion "value"/"url" and "baseUrl" may reference \${VAR_NAME} —
+  // resolved from process.env (including .verfix/.env) at run time, so
+  // secrets never need to be committed here. An unset variable fails the
+  // run immediately with a clear error naming it.
+  // "value": "\${TEST_PASSWORD}"
+
   // OPTIONAL — App metadata. Helps the AI in assisted/exploratory mode.
   "metadata": {
     "framework": "next.js"

@@ -24,6 +24,16 @@ edits are governed:
 | `sourceCodePolicy` | `warn` | What happens when project source is edited during a verify loop: `warn` (report only), `block` (fail with `source_edit_blocked`), or `off`. See [Config-First Verification](../4-guides/config-first-verification.md). |
 | `browser` | `{}` | Local-mode browser options: `{ "channel": "chrome" }` reuses your installed Chrome (skips the Chromium download); `{ "headless": false }` shows the browser window. |
 
+### `${VAR}` environment substitution
+
+Step `value`/`url`, assertion `value`, and `baseUrl` may reference an
+environment variable with `${VAR_NAME}` syntax. It's resolved from
+`process.env` at run time — which already includes anything set in
+`.verfix/.env` — so secrets never need to be committed in
+`verfix.config.json`. An unset variable fails the run immediately with a
+clear error naming the missing variable, rather than typing the literal
+`${VAR_NAME}` string into a form field.
+
 ## External Dependencies
 
 Local mode (the default) has none — results are plain files under
