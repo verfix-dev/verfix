@@ -31,6 +31,7 @@ edits are governed:
 | `optional` | step | Best-effort step. If it fails for any reason within its `timeout`, it is skipped (logged as a timeline event) instead of aborting the flow. Use it for a UI branch that may or may not appear — e.g. click a "logout previous session" confirmation dialog if it shows up, then continue. Give it a short `timeout` so a dialog that never appears doesn't cost the full default wait. |
 | `clearState` | flow | Clears cookies and `localStorage`/`sessionStorage` before this flow runs. Use it on a flow that must start logged-out, so a stale session from a previous run doesn't produce an unexpected response. Does not clear IndexedDB or service workers. |
 | `timeout` | step | Per-step override of the default action timeout (already existed). |
+| `key` | step | Keyboard key for a `press` step (Playwright key name, e.g. `"Enter"`, `"Escape"`, `"Tab"`). Pressed on the step's target if given, otherwise at the page level. |
 
 ```json
 {

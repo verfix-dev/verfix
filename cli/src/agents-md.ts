@@ -608,6 +608,14 @@ dialog that never shows doesn't cost the full default wait:
 - Waits until the element is visible in the DOM.
 - Use before clicking/typing on elements that render asynchronously.
 
+**\`press\`** — Press a keyboard key
+\`\`\`json
+{ "action": "press", "selector": "[data-testid=search-input]", "key": "Enter" }
+\`\`\`
+- \`key\` is a Playwright key name (e.g. \`"Enter"\`, \`"Escape"\`, \`"Tab"\`).
+- If a target (\`selector\`/\`testId\`/\`text\`) is given, the key is pressed on that element; otherwise it's pressed at the page level (for global shortcuts).
+- Use this when \`type\`'s \`fill()\` isn't enough — e.g. a search box or chat input that submits on Enter via a keydown handler.
+
 #### Target resolution priority
 
 1. **\`data-testid\`** (most stable — prefer this)

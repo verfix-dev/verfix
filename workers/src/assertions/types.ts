@@ -49,7 +49,7 @@ export interface AssertionResult {
 }
 
 export interface FlowStep {
-  action: 'click' | 'type' | 'navigate' | 'wait_for_selector';
+  action: 'click' | 'type' | 'navigate' | 'wait_for_selector' | 'press';
   target?: {
     testId?: string;
     selector?: string;
@@ -57,6 +57,8 @@ export interface FlowStep {
   };
   value?: string;
   url?: string;
+  // Keyboard key for the 'press' action (Playwright key names, e.g. "Enter", "Escape", "Tab").
+  key?: string;
   timeout?: number;
   // Best-effort: any failure within the step's timeout is skipped, not fatal.
   optional?: boolean;
