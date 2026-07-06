@@ -19,7 +19,7 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
 # next.config.ts is patched to add output:'standalone' at build time so devs
 # don't have to change their local config. Idempotent if already set.
 # ─────────────────────────────────────────────────────────────────────────────
-FROM node:20-alpine AS dashboard-builder
+FROM node:22-alpine AS dashboard-builder
 
 WORKDIR /build/dashboard
 COPY dashboard/package*.json ./
@@ -41,7 +41,7 @@ RUN npm run build
 # workers/tsconfig.json has no outDir — we patch it before compiling so
 # ts-node is not needed at runtime (only compiled JS ships to final image).
 # ─────────────────────────────────────────────────────────────────────────────
-FROM node:20-alpine AS workers-builder
+FROM node:22-alpine AS workers-builder
 
 WORKDIR /build/workers
 COPY workers/package*.json ./
@@ -58,7 +58,7 @@ RUN npx tsc --skipLibCheck
 # ─────────────────────────────────────────────────────────────────────────────
 # Stage 4 — Final runtime image
 #
-# Base: node:20-slim  →  Debian 12 (bookworm-slim)
+# Base: node:22-slim  →  Debian 12 (bookworm-slim)
 #   • bookworm ships PostgreSQL 15 in its default repos — no PGDG setup needed
 #   • redis-server is also in bookworm default repos
 #   • tini is used as PID 1 for correct signal handling + zombie reaping
@@ -71,7 +71,7 @@ RUN npx tsc --skipLibCheck
 #   /app/dashboard/              → Next.js standalone bundle
 #   /var/lib/postgresql/15/main/ → Postgres data dir (mount as volume)
 # ─────────────────────────────────────────────────────────────────────────────
-FROM node:20-slim AS final
+FROM node:22-slim AS final
 
 # ── Build-time traceability args (passed by CI workflow via build-args) ────────
 # Declare them so Docker doesn't emit warnings; attach as OCI image labels.
@@ -84,7 +84,7 @@ LABEL org.opencontainers.image.revision="${BUILD_SHA}" \
       org.opencontainers.image.description="Verfix all-in-one server: API + Dashboard + Workers + Redis + PostgreSQL"
 
 # ── System packages ───────────────────────────────────────────────────────────
-# node:20-slim is Debian bookworm-slim. bookworm default repos include:
+# node:22-slim is Debian bookworm-slim. bookworm default repos include:
 #   postgresql-15, redis-server, tini — so no third-party repo is needed.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         curl \
