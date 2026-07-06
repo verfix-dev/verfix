@@ -5,7 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.3.4] - 2026-07-06
+
+### Added
+- **`${VAR}` env-var interpolation in config.** Flow step `value`/`url` and assertion `value` fields may reference `${VAR_NAME}`, resolved from `process.env` (including `.verfix/.env`) at run time — secrets no longer need to live in `verfix.config.json`. An unset variable fails the run immediately, naming the variable and its field path.
+- **Optional flow steps.** Any step accepts `"optional": true` — if it fails for any reason within its `timeout`, it's skipped instead of aborting the flow. Use it for a UI branch that may or may not appear (e.g. a "logout previous session" dialog), paired with a short `timeout` so a dialog that never shows doesn't cost the full default wait.
+- **Flow `clearState`.** `"clearState": true` on a flow clears cookies + local/session storage before it runs, for flows that must start logged-out (IndexedDB/service workers are left untouched).
+- **`network_request_success` `acceptStatuses`.** Replaces the default 200-399 pass range when set, so a flow with more than one valid outcome (e.g. `200` on login success, `409` when a session is already active) doesn't need to branch — list every accepted status explicitly.
+- **`no_console_errors` `exclude`.** An array of regex patterns; matching console errors are ignored instead of failing the assertion, for known/expected warnings (e.g. a third-party library notice).
+- Both assertions now surface the concrete matched request (method, URL, status) or console error text in the failure's `error`/`fix_hint` on failure, to make it clear whether to add an exception above or fix a real bug.
+
+### Changed
+- **`@verfix/engine` bumped to `0.1.2`.** CLI dependency bumped to `^0.1.2`.
+- Generated `.verfix/INSTRUCTIONS.md` now documents env-var interpolation, optional steps, `clearState`, and `acceptStatuses`/`exclude`.
+
+## [0.3.3] - 2026-07-05
 
 ### Added
 - **`verfix validate`** — checks `verfix.config.json` for structural and semantic errors (unknown assertion types, duplicate flow ids, a flow with no steps/assertions, `mode: "exploratory"` set per-flow, exploratory mode missing an AI key) without running anything.
