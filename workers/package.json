@@ -23,12 +23,13 @@
     "dev": "ts-node src/index.ts",
     "build": "tsc -p tsconfig.build.json",
     "prepublishOnly": "npm run build",
-    "test": "npm run test:registry && npm run test:openai && npm run test:formats && npm run test:assertions && npm run test:engine",
+    "test": "npm run test:registry && npm run test:openai && npm run test:formats && npm run test:assertions && npm run test:assertion-options && npm run test:engine",
     "test:registry": "ts-node test/ai/adapters/registry.test.ts",
     "test:openai": "ts-node test/ai/adapters/openai.test.ts",
     "test:formats": "ts-node test/ai/adapters/message-format.test.ts",
     "test:smoke": "ts-node scripts/test-ai-provider.ts",
     "test:assertions": "ts-node test/assertions/engine-flow-tagging.test.ts",
+    "test:assertion-options": "ts-node test/assertions/assertion-options.test.ts",
     "test:engine": "ts-node test/engine/transport-free.test.ts"
   },
   "dependencies": {

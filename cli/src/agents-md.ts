@@ -606,10 +606,27 @@ Every step in a flow has an \`action\` and a target. These are the **only** acti
 | \`text_visible\` | \`value\` | A text string appears anywhere on the page |
 | \`url_contains\` | \`value\` | Current URL contains this substring |
 | \`title_contains\` | \`value\` | Page \`<title>\` contains this substring (case-insensitive) |
-| \`no_console_errors\` | — | Zero \`console.error()\` calls during execution |
-| \`network_request_success\` | \`value\` | All network requests matching this URL pattern returned 2xx |
+| \`no_console_errors\` | — | Zero \`console.error()\` calls during execution (after \`exclude\`, see below) |
+| \`network_request_success\` | \`value\` | All requests matching this URL pattern returned 2xx-3xx, or a status in \`acceptStatuses\` if set |
 
 All assertions accept an optional \`timeout\` (ms, default 5000).
+
+A flow can have more than one valid outcome — e.g. a login endpoint that
+returns \`200\` on success or \`409\` when a session is already active. Don't
+branch the flow for this; tell the assertion which outcomes are expected:
+\`\`\`json
+{ "type": "network_request_success", "value": "/api/auth/login", "acceptStatuses": [200, 409] }
+\`\`\`
+\`acceptStatuses\` replaces the default 200-399 range entirely — list every
+status you accept. Similarly, \`exclude\` on \`no_console_errors\` ignores
+errors matching any of the given regex patterns (e.g. a known third-party
+warning) without silencing every error:
+\`\`\`json
+{ "type": "no_console_errors", "exclude": ["ACTIVE_SESSION_EXISTS"] }
+\`\`\`
+On failure, both assertions' \`detail\`/\`fix_hint\` name the concrete matched
+request (method, URL, status) or console error text — use that to decide
+whether to add one of the exceptions above or fix a real bug.
 
 #### Mode selection guide
 

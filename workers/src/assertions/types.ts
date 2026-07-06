@@ -29,6 +29,8 @@ export interface AssertionDefinition {
   selector?: string;      // for selector_visible
   value?: string;         // for text_visible, url_contains, title_contains, network_request_success
   timeout?: number;
+  acceptStatuses?: number[]; // network_request_success: replaces the default 200-399 range when set
+  exclude?: string[];        // no_console_errors: regex patterns to ignore
 }
 
 export interface AssertionResult {

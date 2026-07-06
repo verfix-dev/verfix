@@ -7,6 +7,7 @@ export type FailureContext = {
   expected?: string;
   actual?: string;
   error?: string;
+  details?: Record<string, unknown>;
 };
 
 const TIMEOUT_REGEX = /timeout|timed out|waiting for/i;
@@ -68,9 +69,13 @@ export function renderFixHint(type: FailureType, context: FailureContext): strin
         ? `Expected URL to contain "${context.expected}" but got "${context.actual}". Check routing/redirects and wait for navigation.`
         : 'Navigation did not reach the expected URL. Check routing/redirects and wait for navigation.';
     case 'console_error':
-      return 'Console errors detected. Fix JS errors or mock failing dependencies.';
+      return context.error
+        ? `Console errors detected — ${context.error}. Fix JS errors, or add "exclude" patterns to no_console_errors if the error is expected.`
+        : 'Console errors detected. Fix JS errors or mock failing dependencies.';
     case 'network_failure':
-      return 'Network request failed or returned non-2xx. Check backend availability or mock API responses.';
+      return context.error
+        ? `${context.error} Check backend availability, or add "acceptStatuses" to network_request_success if this status is expected.`
+        : 'Network request failed or returned non-2xx. Check backend availability or mock API responses.';
     case 'timeout':
       return 'Operation timed out. Increase timeout or wait for network/DOM to settle before asserting.';
     case 'assertion_failed':

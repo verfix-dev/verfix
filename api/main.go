@@ -21,10 +21,12 @@ var store Store
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type AssertionDef struct {
-	Type     string `json:"type"`
-	Selector string `json:"selector,omitempty"`
-	Value    string `json:"value,omitempty"`
-	Timeout  int    `json:"timeout,omitempty"`
+	Type           string   `json:"type"`
+	Selector       string   `json:"selector,omitempty"`
+	Value          string   `json:"value,omitempty"`
+	Timeout        int      `json:"timeout,omitempty"`
+	AcceptStatuses []int    `json:"acceptStatuses,omitempty"`
+	Exclude        []string `json:"exclude,omitempty"`
 }
 
 type FlowTarget struct {
@@ -42,8 +44,8 @@ type FlowStep struct {
 }
 
 type Flow struct {
-	Name       string        `json:"name"`
-	Steps      []FlowStep    `json:"steps"`
+	Name       string         `json:"name"`
+	Steps      []FlowStep     `json:"steps"`
 	Assertions []AssertionDef `json:"assertions,omitempty"`
 }
 

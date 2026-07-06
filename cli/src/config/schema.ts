@@ -21,6 +21,16 @@ export const FlowAssertionSchema = z.object({
   type: z.string(),
   selector: z.string().optional(),
   value: z.string().optional(),
+  timeout: z.number().optional(),
+  // network_request_success: replaces the default 200-399 pass range when set.
+  acceptStatuses: z.array(z.number().int()).min(1).optional(),
+  // no_console_errors: regex patterns; matching errors are ignored.
+  exclude: z.array(z.string()).optional().refine(
+    (patterns) => !patterns || patterns.every((p) => {
+      try { new RegExp(p); return true } catch { return false }
+    }),
+    { message: 'exclude must contain valid regex patterns' },
+  ),
 })
 
 export const FlowSchema = z.object({
