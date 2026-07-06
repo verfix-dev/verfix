@@ -25,7 +25,7 @@ export async function executeFlows(page: Page, job: JobPayload, tracker?: EventT
 export async function executeFlow(page: Page, flow: Flow, job: JobPayload, tracker?: EventTracker): Promise<void> {
   console.log(`  ▶ Running flow: "${flow.name}"`);
   for (const step of flow.steps) {
-    const rawValue = step.value || step.url || '';
+    const rawValue = step.value || step.url || (step.action === 'press' ? step.key : '') || '';
     const stepValue = step.action === 'navigate'
       ? resolveNavigateUrl(rawValue, job.url)
       : rawValue;
@@ -167,6 +167,18 @@ async function executeStep(page: Page, step: FlowStep, knownSelectors: Record<st
       const locator = await resolveLocator(page, step, knownSelectors, mode, t);
       await locator.waitFor({ state: 'visible', timeout: t });
       console.log(`    wait_for_selector → ${JSON.stringify(step.target)}`);
+      break;
+    }
+    case 'press': {
+      const key = step.key || step.value || '';
+      if (step.target) {
+        const locator = await resolveLocator(page, step, knownSelectors, mode, t);
+        await locator.waitFor({ state: 'visible', timeout: t });
+        await locator.press(key, { timeout: t });
+      } else {
+        await page.keyboard.press(key);
+      }
+      console.log(`    press "${key}"${step.target ? ` → ${JSON.stringify(step.target)}` : ''}`);
       break;
     }
     default:

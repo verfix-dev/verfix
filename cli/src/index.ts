@@ -1840,6 +1840,7 @@ function normalizeFlows(flows: any[]): any[] {
                 : undefined,
           value: step.value ?? step.url,
           url: step.url,
+          key: step.key,
           timeout: step.timeout,
           optional: step.optional,
         };
