@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.5] - 2026-07-06
+
+### Added
+- **`press` flow step action.** Sends a keyboard key (`"Enter"`, `"Escape"`, `"Tab"`, etc.) — on a target locator when `selector`/`testId`/`text` is given, or at the page level otherwise. Fills a gap `type`'s `fill()` doesn't cover: UIs that submit or react on a `keydown` handler rather than form submission (search boxes, chat inputs, custom shortcuts).
+
+### Fixed
+- **Server Docker image failed to build.** `workers/` is an npm workspace member with no lockfile of its own, so `npm ci` in `Dockerfile.server`'s `workers-builder` and `final` stages errored with `EUSAGE`. Added a standalone `workers/package-lock.json`.
+- **Latent `ioredis` version-skew bug**, surfaced by the fix above: `workers/package.json` declared `ioredis: ^5.10.1` while `bullmq`'s nested `ioredis` is pinned to exactly `5.10.1`. The monorepo's hoisted install happened to dedupe them, but a standalone install (what Docker does) resolved two incompatible `ioredis` copies side by side and broke the TypeScript build. Pinned to the exact version bullmq requires.
+- Bumped `node:20-alpine`/`node:20-slim` → `node:22` in `Dockerfile.server`, and the GitHub Actions in `publish-server.yml` (checkout, buildx, login, metadata, build-push) to their latest majors — Node 20 is deprecated on GitHub-hosted runners.
+
+### Changed
+- **`@verfix/engine` bumped to `0.1.3`.** CLI dependency bumped to `^0.1.3`.
+- Generated `.verfix/INSTRUCTIONS.md` now documents the `press` action.
+
 ## [0.3.4] - 2026-07-06
 
 ### Added
