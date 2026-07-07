@@ -75,8 +75,14 @@ async function resolveLocator(
 ): Promise<Locator> {
   if (!step.target) throw new Error('Step has no target defined');
 
+  // `frame` scopes the step's target inside an <iframe>. Resolution is
+  // deterministic there — AI healing operates on the top-level page only.
+  // ponytail: one frame level (no nested iframes); chain frameLocators to upgrade.
+  const frame = step.frame ? page.frameLocator(step.frame) : undefined;
+
   if (step.target.testId) {
     const selector = `[data-testid="${step.target.testId}"]`;
+    if (frame) return frame.locator(selector).first();
     const intent = humanize(step.target.testId);
     return resolveOrHeal(page, selector, mode, intent, timeout);
   }
@@ -85,11 +91,12 @@ async function resolveLocator(
     // Falls through unchanged when the selector isn't an alias.
     const aliased = Object.prototype.hasOwnProperty.call(knownSelectors, step.target.selector);
     const selector = aliased ? knownSelectors[step.target.selector] : step.target.selector;
+    if (frame) return frame.locator(selector).first();
     const intent = aliased ? humanize(step.target.selector) : undefined;
     return resolveOrHeal(page, selector, mode, intent, timeout);
   }
   if (step.target.text) {
-    return page.getByText(step.target.text, { exact: false }).first();
+    return (frame ?? page).getByText(step.target.text, { exact: false }).first();
   }
   throw new Error(`Cannot resolve locator for step: ${JSON.stringify(step)}`);
 }
@@ -169,6 +176,19 @@ async function executeStep(page: Page, step: FlowStep, knownSelectors: Record<st
       const locator = await resolveLocator(page, step, knownSelectors, mode, t);
       await locator.waitFor({ state: 'visible', timeout: t });
       console.log(`    wait_for_selector → ${JSON.stringify(step.target)}`);
+      break;
+    }
+    case 'wait_for_url': {
+      const fragment = step.value || '';
+      if (!fragment) throw new Error('wait_for_url step requires "value" (a URL substring to wait for)');
+      // Substring semantics, same as the url_contains assertion.
+      await page.waitForURL(u => u.toString().includes(fragment), { timeout: t });
+      console.log(`    wait_for_url "${fragment}" → ${page.url()}`);
+      break;
+    }
+    case 'wait_for_network_idle': {
+      await page.waitForLoadState('networkidle', { timeout: t });
+      console.log('    wait_for_network_idle');
       break;
     }
     case 'select_option': {

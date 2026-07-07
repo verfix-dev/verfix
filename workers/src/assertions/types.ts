@@ -50,7 +50,8 @@ export interface AssertionResult {
 
 export interface FlowStep {
   action: 'click' | 'type' | 'navigate' | 'wait_for_selector' | 'press'
-    | 'select_option' | 'check' | 'uncheck' | 'hover' | 'upload_file';
+    | 'select_option' | 'check' | 'uncheck' | 'hover' | 'upload_file'
+    | 'wait_for_url' | 'wait_for_network_idle';
   target?: {
     testId?: string;
     selector?: string;
@@ -64,6 +65,9 @@ export interface FlowStep {
   // inline content materialized at run time (no filesystem dependency — works
   // in CI and containers). encoding 'base64' covers binary content.
   file?: string | { name: string; content: string; mimeType?: string; encoding?: 'utf8' | 'base64' };
+  // CSS selector of an <iframe>; the step's target is resolved inside that
+  // frame instead of the top-level page.
+  frame?: string;
   timeout?: number;
   // Best-effort: any failure within the step's timeout is skipped, not fatal.
   optional?: boolean;

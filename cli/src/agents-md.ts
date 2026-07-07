@@ -651,8 +651,32 @@ dialog that never shows doesn't cost the full default wait:
 { "action": "upload_file", "selector": "input[type=file]", "file": { "name": "note.csv", "content": "a,b\\n1,2", "mimeType": "text/csv" } }
 \`\`\`
 - **Prefer inline \`{ name, content }\`** — the file is materialized at run time, so the flow has zero filesystem dependencies and runs identically in CI. Add \`"encoding": "base64"\` for binary content (a tiny PNG fits in a config line).
+- **Keep inline content small** (a few KB). It lives in this config file, which agents read — for anything larger, commit a fixture and use the path form (\`verfix validate\` warns above 64KB).
 - Alternatively \`"file": "fixtures/avatar.png"\` — a path resolved relative to the project root; commit the fixture so CI checkouts have it. \`\${VAR}\` substitution works in the path.
 - Target the \`<input type="file">\` itself, even when it's hidden behind a styled button or drag-drop zone — the input only needs to exist, not be visible.
+
+**\`wait_for_url\`** — Wait until the page URL contains a substring
+\`\`\`json
+{ "action": "wait_for_url", "value": "/dashboard", "timeout": 10000 }
+\`\`\`
+- Substring match, same semantics as the \`url_contains\` assertion.
+- Use after an action that triggers a client-side redirect (login → dashboard) before asserting on the destination page.
+
+**\`wait_for_network_idle\`** — Wait until network activity settles
+\`\`\`json
+{ "action": "wait_for_network_idle" }
+\`\`\`
+- Use before asserting on data that loads via background requests (tables, charts). Prefer \`wait_for_selector\` on the concrete element when you know it — it's faster and more precise.
+
+#### Targeting inside iframes
+
+Add \`"frame"\` (a CSS selector for the \`<iframe>\`) to any step whose target
+lives inside an embedded frame — payment widgets, embedded editors:
+\`\`\`json
+{ "action": "type", "frame": "iframe[title=card]", "selector": "input[name=cardnumber]", "value": "4242424242424242" }
+\`\`\`
+- The step's \`selector\`/\`testId\`/\`text\` target is resolved inside that frame instead of the top-level page.
+- Frame targeting is always deterministic — AI selector-healing does not apply inside frames.
 
 #### Target resolution priority
 

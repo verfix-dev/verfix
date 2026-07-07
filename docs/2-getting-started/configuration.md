@@ -34,7 +34,8 @@ edits are governed:
 | `useState` | flow | Restores the named state before the run navigates, so the flow starts already logged in — no re-implementing login in every flow. If the state doesn't exist yet or the session has expired, the flow fails normally; rerun the `saveState` flow to (re)create it. One state name per run. |
 | `timeout` | step | Per-step override of the default action timeout (already existed). |
 | `key` | step | Keyboard key for a `press` step (Playwright key name, e.g. `"Enter"`, `"Escape"`, `"Tab"`). Pressed on the step's target if given, otherwise at the page level. |
-| `file` | step | For `upload_file`: either a project-relative path to a committed fixture (`"fixtures/avatar.png"`, `${VAR}` substitution supported), or inline content materialized at run time — `{ "name": "note.csv", "content": "a,b\n1,2", "mimeType": "text/csv" }` (`"encoding": "base64"` for binary). Inline needs no filesystem, so it's the CI-safe default. Target the `<input type=file>` even if it's hidden behind a styled button. |
+| `file` | step | For `upload_file`: either a project-relative path to a committed fixture (`"fixtures/avatar.png"`, `${VAR}` substitution supported), or inline content materialized at run time — `{ "name": "note.csv", "content": "a,b\n1,2", "mimeType": "text/csv" }` (`"encoding": "base64"` for binary). Inline needs no filesystem, so it's the CI-safe default — but keep it to a few KB; `verfix validate` warns above 64KB (use a fixture path instead). Target the `<input type=file>` even if it's hidden behind a styled button. |
+| `frame` | step | CSS selector of an `<iframe>`; the step's `selector`/`testId`/`text` target is resolved inside that frame (payment widgets, embedded editors). One frame level; AI selector-healing does not apply inside frames. |
 
 ```json
 {

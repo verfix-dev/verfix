@@ -30,6 +30,8 @@ export const FlowStepSchema = z.object({
       encoding: z.enum(['utf8', 'base64']).optional(),
     }),
   ]).optional(),
+  // CSS selector of an <iframe>; the step's target is resolved inside that frame.
+  frame: z.string().optional(),
 })
 
 export const FlowAssertionSchema = z.object({

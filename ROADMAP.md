@@ -2,7 +2,7 @@
 
 **Goal:** Be the deterministic verification layer between AI-generated code and production — the gate every automated change passes through before it reaches users.
 
-**Where we are:** local-first runtime works end-to-end (in-process engine, typed failures, traces, source guard). The engine supports 5 actions and 8 failure types. We have zero users. Everything below is ordered by what gets us from "works" to "used," and every phase has an explicit exit condition so we don't polish forever.
+**Where we are:** local-first runtime works end-to-end (in-process engine, typed failures, traces, source guard). The engine supports 12 actions (incl. form interaction, upload, iframe targeting, auth state reuse) and 8 failure types. We have zero users. Everything below is ordered by what gets us from "works" to "used," and every phase has an explicit exit condition so we don't polish forever.
 
 **Operating principle:** deterministic first, one config surface, frozen failure taxonomy. Capability grows by adding *steps and assertion detail inside the existing JSON schema* — never by adding a second config format, a plugin system, or a new mode.
 
@@ -20,14 +20,14 @@
 
 ## Phase 2 — Enough surface to verify a real app (~1–2 months)
 
-*Why: 5 actions cannot express most real flows. This is the single biggest blocker to anyone adopting. But "surface" means the top 80% of flows — not Playwright parity.*
+*Why: the original 5 actions could not express most real flows. This was the single biggest blocker to anyone adopting. But "surface" means the top 80% of flows — not Playwright parity.*
 
 Actions (each lands in the same step schema, each maps failures onto the *existing* taxonomy, each gets a testbed flow):
 
 - [x] `select_option`, `check` / `uncheck`, `hover`
 - [x] `upload_file`
-- [ ] iframe targeting (a `frame` field on steps, not a new step type)
-- [ ] `wait_for_url` / wait for network idle
+- [x] iframe targeting (a `frame` field on steps, not a new step type)
+- [x] `wait_for_url` / wait for network idle
 - [x] Auth state reuse (save/restore storage state) — without this, every flow re-implements login and people give up
 
 Assertions: **no new failure types.** Richness goes into the failure payload (see Phase 3), not the taxonomy. New types require a GitHub Discussion, per existing policy.

@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Auth state reuse** (`saveState` / `useState` flow fields). A flow that logs in can persist the browser's cookies (incl. `httpOnly`), `localStorage`, and IndexedDB under a name once its steps *and* assertions pass; other flows — including in later runs — restore it at context creation and start authenticated. States live in `.verfix/state/` (never committed; `.verfix` self-ignores). `verfix validate` warns when a `useState` name is never saved by any flow. `sessionStorage` is not captured.
+- **`select_option`, `check`, `uncheck`, `hover` flow steps.** `select_option` matches an option by value or visible label; `check`/`uncheck` are idempotent (unlike `click` on a checkbox), keeping reruns deterministic.
+- **`upload_file` flow step.** `file` accepts a project-relative fixture path (`${VAR}` substitution supported) or CI-safe inline content (`{ name, content, mimeType, encoding }`, `base64` for binary) materialized at run time with no filesystem dependency. Targets the `<input type=file>` by attachment, not visibility, since real UIs hide it behind styled buttons. `verfix validate` warns when inline content exceeds 64KB.
+- **`wait_for_url` and `wait_for_network_idle` flow steps.** Substring URL wait (same semantics as the `url_contains` assertion) for client-side redirects, and a network-idle settle for background-loaded data.
+- **`frame` step field (iframe targeting).** Resolves the step's `selector`/`testId`/`text` inside an `<iframe>` (payment widgets, embedded editors). Deterministic only — AI healing does not apply inside frames.
+- **Scoped `text_visible`.** Optional `selector` on the assertion scopes the text search to matches inside that element. Unscoped, duplicated text no longer fails on Playwright's strict-mode violation — the assertion passes if any visible occurrence matches.
+
 ## [0.3.5] - 2026-07-06
 
 ### Added

@@ -1182,6 +1182,19 @@ program
         checkAssertions(flow.assertions, `flows[${idx}] (${id})`);
       });
 
+      // Inline upload_file content lives in the config agents read — a large
+      // blob would bloat every future context window that loads it.
+      const MAX_INLINE_FILE_BYTES = 64 * 1024;
+      (config.flows || []).forEach((flow: any, idx: number) => {
+        const id = flow.id || flow.name || `flow_${idx + 1}`;
+        (flow.steps || []).forEach((step: any, stepIdx: number) => {
+          const content = step?.file?.content;
+          if (typeof content === 'string' && Buffer.byteLength(content, 'utf8') > MAX_INLINE_FILE_BYTES) {
+            warnings.push(`flows[${idx}] (${id}).steps[${stepIdx}]: inline file content is ${Math.round(Buffer.byteLength(content, 'utf8') / 1024)}KB — commit it as a fixture and use a "file" path instead (inline is for tiny files)`);
+          }
+        });
+      });
+
       const savedStateNames = new Set((config.flows || []).map((f: any) => f.saveState).filter(Boolean));
       (config.flows || []).forEach((flow: any, idx: number) => {
         const id = flow.id || flow.name || `flow_${idx + 1}`;
@@ -1852,6 +1865,7 @@ function normalizeFlows(flows: any[]): any[] {
           url: step.url,
           key: step.key,
           file: step.file,
+          frame: step.frame,
           timeout: step.timeout,
           optional: step.optional,
         };
