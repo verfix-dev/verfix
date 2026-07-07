@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **JSON output is now a summary by default; `--full` restores the raw timeline.** `verfix run --output json` no longer embeds the full ExecutionResult (`raw`) — the event timeline was ~93% of the payload and agents paid for it on every fix-loop iteration. The summary is lossless for anything non-nominal: every failure now carries the `flow` and `assertion` that produced it, skipped `optional` steps are listed explicitly in `skipped_optional_steps` (never silent), `ai_summary` stays when present, and `retry_count` > 0 signals crash-retries. `detail_commands` in the output names the exact `verfix show` commands that return console/network detail on demand. `--quiet` (added earlier in this cycle, now the default behavior) is kept as a no-op alias. Taken while pre-1.0 with no known consumers.
+
 ### Added
 - **Auth state reuse** (`saveState` / `useState` flow fields). A flow that logs in can persist the browser's cookies (incl. `httpOnly`), `localStorage`, and IndexedDB under a name once its steps *and* assertions pass; other flows — including in later runs — restore it at context creation and start authenticated. States live in `.verfix/state/` (never committed; `.verfix` self-ignores). `verfix validate` warns when a `useState` name is never saved by any flow. `sessionStorage` is not captured.
 - **`select_option`, `check`, `uncheck`, `hover` flow steps.** `select_option` matches an option by value or visible label; `check`/`uncheck` are idempotent (unlike `click` on a checkbox), keeping reruns deterministic.

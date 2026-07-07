@@ -28,6 +28,10 @@ export type VerifyConfig = {
 
 export type VerifyFailure = {
   type: FailureType;
+  /** Flow the failing assertion belongs to (absent for top-level/default assertions). */
+  flow?: string;
+  /** Assertion type that failed (e.g. 'text_visible'). */
+  assertion?: string;
   selector?: string;
   detail?: string;
   fix_hint?: string;
@@ -333,6 +337,8 @@ function buildFailures(result: any): VerifyFailure[] {
     .filter((a: any) => !a.passed)
     .map((a: any) => ({
       type: (a.failure_type || 'assertion_failed') as FailureType,
+      flow: a.flow_name,
+      assertion: a.type,
       selector: a.details?.selector || a.details?.resolved_selector,
       detail: a.error,
       fix_hint: a.fix_hint,

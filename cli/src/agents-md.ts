@@ -139,9 +139,10 @@ verfix status
 # Run a specific flow
 verfix run --flow <flow-id> --output json
 
-# Same, without the raw event timeline (much smaller output; fetch details
-# on demand with \`verfix show\` below)
-verfix run --flow <flow-id> --output json --quiet
+# Same, plus the raw event timeline (large — the default summary already
+# contains every failure and skipped step; only use this when the summary
+# and \`verfix show\` detail commands aren't enough)
+verfix run --flow <flow-id> --output json --full
 
 # Run all flows
 verfix run --output json
@@ -378,7 +379,9 @@ Cookies and localStorage set by a login flow are available to subsequent flows.
 
 #### Output contract
 
-Every \`verfix run --output json\` returns this exact shape:
+Every \`verfix run --output json\` returns this summary shape (the full event
+timeline is deliberately omitted — pull details with \`detail_commands\` below,
+or opt into everything with \`--full\`):
 
 \`\`\`json
 {
@@ -386,22 +389,41 @@ Every \`verfix run --output json\` returns this exact shape:
   "failures": [
     {
       "type": "selector_not_found",
+      "flow": "your-flow-id",
+      "assertion": "selector_visible",
       "selector": "[data-testid=submit]",
       "fix_hint": "Selector \\"[data-testid=submit]\\" not found in DOM. Add a stable data-testid or update the selector."
     }
   ],
+  "skipped_optional_steps": [
+    { "flow": "your-flow-id", "action": "click", "target": { "text": "Logout other session" }, "reason": "locator.waitFor: Timeout 2000ms exceeded." }
+  ],
   "timeline_url": null,
   "trace_path": "/absolute/path/to/.verfix/runs/exec_abc123_trace.zip",
   "show_command": "verfix show exec_abc123",
+  "detail_commands": {
+    "console": "verfix show exec_abc123 --console --output json",
+    "network": "verfix show exec_abc123 --network --output json"
+  },
+  "duration_ms": 4231,
+  "retry_count": 0,
   "exit_code": 1,
   "execution_id": "exec_abc123"
 }
 \`\`\`
 
+> The summary is **lossless for anything non-nominal**: every failure (with the
+> flow and assertion that produced it), every skipped \`optional\` step (present
+> only when something was skipped — verify skips were intentional!), the AI
+> failure analysis (\`ai_summary\`, when a run in assisted/exploratory mode
+> failed), and \`retry_count\` (> 0 means the run crashed and was retried).
+> What's omitted is only the passing-path event timeline.
+>
 > \`timeline_url\` is always present but \`null\` in local runs (it points at the
 > dashboard only when running against a server runtime). \`trace_path\` and
 > \`show_command\` are the local-run equivalents — pass \`show_command\` to the
-> human when they need to see what the browser did.
+> human when they need to see what the browser did. Run the \`detail_commands\`
+> verbatim when you need console/network detail.
 
 #### Failure type reference
 

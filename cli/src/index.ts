@@ -1297,7 +1297,8 @@ program
   .option('-f, --flow <id>', 'Flow id or name to run')
   .option('-m, --mode <mode>', 'Verification mode: strict | assisted | smoke | exploratory')
   .option('-o, --output <format>', 'Output format: pretty | json', 'json')
-  .option('-q, --quiet', 'JSON output: omit the raw event timeline — only the stable contract fields (passed, failures, fix_hints, trace_path)', false)
+  .option('--full', 'JSON output: include the raw ExecutionResult (full event timeline) — large; details are otherwise pull-on-demand via verfix show', false)
+  .option('-q, --quiet', '(deprecated: summary is now the default) no-op kept for compatibility', false)
   .option('--dashboard <url>', 'Dashboard base URL for timeline links')
   .option('--timeout <ms>', 'Timeout in milliseconds', '15000')
   .option('--retries <n>', 'Number of retries on failure', '2')
@@ -1607,20 +1608,46 @@ program
       const blocked = sourceGate.block;
       const passed = result.passed && !blocked;
 
+      // Nothing non-nominal may hide in the omitted timeline: optional steps
+      // that were skipped are surfaced here explicitly, so "the dialog never
+      // appeared" is always visible in the summary, not just in --full events.
+      const skippedSteps = (result.events || [])
+        .filter((e: any) => e.metadata?.skipped === true)
+        .map((e: any) => ({
+          flow: e.metadata?.flow,
+          action: e.metadata?.action,
+          target: e.metadata?.target,
+          reason: e.metadata?.reason,
+        }));
+
       const jsonResult = {
         passed,
         failures,
+        ...(skippedSteps.length > 0 ? { skipped_optional_steps: skippedSteps } : {}),
+        // AI failure analysis (assisted/exploratory modes) is failure signal —
+        // it stays in the summary.
+        ...(result.ai_summary ? { ai_summary: result.ai_summary } : {}),
         source_changes: sourceChanges.status === 'ok' ? sourceChanges : undefined,
         // Contract stability: timeline_url stays present but is null in local
         // mode (no dashboard); trace_path/show_command are the local additions.
         timeline_url: timelineUrl,
-        ...(runnerMode === 'local' ? { trace_path: tracePath, show_command: showCommand } : {}),
+        ...(runnerMode === 'local' ? {
+          trace_path: tracePath,
+          show_command: showCommand,
+          // Self-describing pulls: the summary names the exact commands that
+          // return the detail it omits.
+          detail_commands: {
+            console: `verfix show ${result.executionId} --console --output json`,
+            network: `verfix show ${result.executionId} --network --output json`,
+          },
+        } : {}),
+        duration_ms: result.duration_ms,
+        retry_count: result.retry_count,
         exit_code: passed ? 0 : 1,
         execution_id: result.executionId,
-        // The full ExecutionResult (event timeline, per-step artifact paths) is
-        // pull-when-needed data — agents on --quiet fetch details via
-        // `verfix show <id> --console/--network` instead of paying for it here.
-        ...(opts.quiet ? {} : { raw: result }),
+        // Summary is the default: the full ExecutionResult (event timeline,
+        // per-step artifact paths) is pull-when-needed data. --full opts in.
+        ...(opts.full ? { raw: result } : {}),
       };
       // End the verify cycle only on a clean pass; keep the baseline otherwise so
       // a revert-and-rerun resolves cleanly.
@@ -1955,11 +1982,14 @@ function validateConfigSchema(config: any, configPath: string): void {
   }
 }
 
-function buildFailures(result: any): Array<{ type: string; selector?: string; detail?: string; fix_hint?: string }> {
+function buildFailures(result: any): Array<{ type: string; flow?: string; assertion?: string; selector?: string; detail?: string; fix_hint?: string }> {
   const failures = (result.assertions || [])
     .filter((a: any) => !a.passed)
     .map((a: any) => ({
       type: a.failure_type || 'assertion_failed',
+      // Locate the failure without the raw timeline: which flow, which assertion.
+      flow: a.flow_name,
+      assertion: a.type,
       selector: a.details?.selector || a.details?.resolved_selector,
       detail: a.error,
       fix_hint: a.fix_hint,

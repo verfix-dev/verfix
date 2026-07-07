@@ -93,6 +93,12 @@ npx verfix run --mode exploratory --task "verify the login page loads and shows 
   "timeline_url": null,
   "trace_path": "/your/project/.verfix/runs/exec_abc123_trace.zip",
   "show_command": "verfix show exec_abc123",
+  "detail_commands": {
+    "console": "verfix show exec_abc123 --console --output json",
+    "network": "verfix show exec_abc123 --network --output json"
+  },
+  "duration_ms": 3120,
+  "retry_count": 0,
   "exit_code": 0,
   "execution_id": "exec_abc123"
 }

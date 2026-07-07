@@ -73,6 +73,12 @@ Output:
   "timeline_url": null,
   "trace_path": "/your/project/.verfix/runs/exec_abc123_trace.zip",
   "show_command": "verfix show exec_abc123",
+  "detail_commands": {
+    "console": "verfix show exec_abc123 --console --output json",
+    "network": "verfix show exec_abc123 --network --output json"
+  },
+  "duration_ms": 3120,
+  "retry_count": 0,
   "exit_code": 0,
   "execution_id": "exec_abc123"
 }
@@ -308,7 +314,16 @@ verfix run --output json                   # all flows
 | `navigate` | `url` | Navigate to a URL path |
 | `click` | `selector` or `testId` | Click an element |
 | `type` | `selector` or `testId`, `value` | Type text into an input |
+| `press` | `key`, optional target | Press a keyboard key (on a target or page-wide) |
+| `select_option` | `selector`, `value` | Pick a `<select>` option by value or label |
+| `check` / `uncheck` | `selector` | Set a checkbox/radio to a known state (idempotent) |
+| `hover` | `selector` | Hover to reveal hover-only UI |
+| `upload_file` | `selector`, `file` | Set a file input — fixture path or inline `{ name, content }` |
 | `wait_for_selector` | `selector`, `timeout` | Wait for an element to appear |
+| `wait_for_url` | `value` | Wait until the URL contains a substring |
+| `wait_for_network_idle` | — | Wait for network activity to settle |
+
+Any step also takes `optional: true` (skip on failure instead of aborting — skips are reported in the JSON output) and `frame` (a CSS selector of an `<iframe>` to resolve the target inside). Flows take `clearState`, and `saveState`/`useState` for auth session reuse.
 
 ---
 
@@ -322,6 +337,8 @@ Every `verfix run --output json` returns this shape — stable, parseable, and d
   "failures": [
     {
       "type": "selector_not_found",
+      "flow": "login",
+      "assertion": "selector_visible",
       "selector": "[data-testid=submit]",
       "fix_hint": "Element not found. Check that the selector matches a visible DOM element."
     }
@@ -329,6 +346,12 @@ Every `verfix run --output json` returns this shape — stable, parseable, and d
   "timeline_url": null,
   "trace_path": "/your/project/.verfix/runs/exec_abc123_trace.zip",
   "show_command": "verfix show exec_abc123",
+  "detail_commands": {
+    "console": "verfix show exec_abc123 --console --output json",
+    "network": "verfix show exec_abc123 --network --output json"
+  },
+  "duration_ms": 4231,
+  "retry_count": 0,
   "exit_code": 1,
   "execution_id": "exec_abc123"
 }

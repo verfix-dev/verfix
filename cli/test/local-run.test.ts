@@ -166,6 +166,20 @@ async function main() {
     assert.ok(fs.existsSync(json.trace_path), `trace zip exists on disk: ${json.trace_path}`);
     console.log('✓ trace_path points at a real Playwright trace zip');
 
+    assert.strictEqual(json.raw, undefined, 'summary is the default — raw only with --full');
+    assert.ok(json.detail_commands?.console?.includes('--console'), 'detail_commands.console present');
+    assert.ok(json.detail_commands?.network?.includes('--network'), 'detail_commands.network present');
+    console.log('✓ default JSON is the summary shape with self-describing detail_commands');
+
+    // The optional-and-clear-state flow skips an optional step whose target
+    // never exists — the summary must say so explicitly, never silently.
+    assert.ok(Array.isArray(json.skipped_optional_steps) && json.skipped_optional_steps.length === 1,
+      `skipped optional step must surface in the summary, got: ${JSON.stringify(json.skipped_optional_steps)}`);
+    assert.strictEqual(json.skipped_optional_steps[0].flow, 'optional-and-clear-state');
+    assert.strictEqual(json.skipped_optional_steps[0].action, 'click');
+    assert.ok(json.skipped_optional_steps[0].reason, 'skip reason present');
+    console.log('✓ skipped optional steps are reported in the summary (nothing silent)');
+
     const resultFile = path.join(projectDir, '.verfix', 'runs', `${json.execution_id}.json`);
     assert.ok(fs.existsSync(resultFile), `persisted result exists: ${resultFile}`);
     const persisted = JSON.parse(fs.readFileSync(resultFile, 'utf-8'));
@@ -184,7 +198,7 @@ async function main() {
     assert.strictEqual(privateJson.passed, true, `private flow should start logged-in via useState — got: ${resPrivate.stdout}`);
     console.log('✓ separate run with useState starts authenticated (no login steps)');
 
-    console.log('\n6 passed, 0 failed\n');
+    console.log('\n8 passed, 0 failed\n');
   } finally {
     fs.rmSync(projectDir, { recursive: true, force: true });
   }
