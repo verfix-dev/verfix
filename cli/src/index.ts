@@ -1851,6 +1851,7 @@ function normalizeFlows(flows: any[]): any[] {
           value: step.value ?? step.url,
           url: step.url,
           key: step.key,
+          file: step.file,
           timeout: step.timeout,
           optional: step.optional,
         };

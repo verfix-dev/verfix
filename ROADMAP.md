@@ -25,7 +25,7 @@
 Actions (each lands in the same step schema, each maps failures onto the *existing* taxonomy, each gets a testbed flow):
 
 - [x] `select_option`, `check` / `uncheck`, `hover`
-- [ ] `upload_file`
+- [x] `upload_file`
 - [ ] iframe targeting (a `frame` field on steps, not a new step type)
 - [ ] `wait_for_url` / wait for network idle
 - [x] Auth state reuse (save/restore storage state) — without this, every flow re-implements login and people give up

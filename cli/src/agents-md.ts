@@ -646,6 +646,14 @@ dialog that never shows doesn't cost the full default wait:
 \`\`\`
 - Use to reveal hover-only UI (dropdown menus, tooltips) before clicking or asserting on it.
 
+**\`upload_file\`** — Set a file on an \`<input type="file">\`
+\`\`\`json
+{ "action": "upload_file", "selector": "input[type=file]", "file": { "name": "note.csv", "content": "a,b\\n1,2", "mimeType": "text/csv" } }
+\`\`\`
+- **Prefer inline \`{ name, content }\`** — the file is materialized at run time, so the flow has zero filesystem dependencies and runs identically in CI. Add \`"encoding": "base64"\` for binary content (a tiny PNG fits in a config line).
+- Alternatively \`"file": "fixtures/avatar.png"\` — a path resolved relative to the project root; commit the fixture so CI checkouts have it. \`\${VAR}\` substitution works in the path.
+- Target the \`<input type="file">\` itself, even when it's hidden behind a styled button or drag-drop zone — the input only needs to exist, not be visible.
+
 #### Target resolution priority
 
 1. **\`data-testid\`** (most stable — prefer this)

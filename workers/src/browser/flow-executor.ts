@@ -1,3 +1,5 @@
+import * as fs from 'fs';
+import * as path from 'path';
 import { Page, BrowserContext, Locator } from 'playwright';
 import { JobPayload, Flow, FlowStep } from '../assertions/types';
 import { EventTracker } from '../artifacts/event-tracker';
@@ -184,6 +186,30 @@ async function executeStep(page: Page, step: FlowStep, knownSelectors: Record<st
       if (step.action === 'check') await locator.check({ timeout: t });
       else await locator.uncheck({ timeout: t });
       console.log(`    ${step.action} → ${JSON.stringify(step.target)}`);
+      break;
+    }
+    case 'upload_file': {
+      if (!step.file) throw new Error('upload_file step requires "file": a fixture path or inline { name, content }');
+      const locator = await resolveLocator(page, step, knownSelectors, mode, t);
+      // File inputs are routinely hidden behind styled buttons/drop zones —
+      // require the input to exist, not to be visible (setInputFiles works
+      // on hidden inputs).
+      await locator.waitFor({ state: 'attached', timeout: t });
+      if (typeof step.file === 'string') {
+        const filePath = path.resolve(process.cwd(), step.file);
+        if (!fs.existsSync(filePath)) {
+          throw new Error(`upload_file: file not found: ${filePath} — commit a fixture at that path, or use inline { "name", "content" } so the run has no filesystem dependency`);
+        }
+        await locator.setInputFiles(filePath, { timeout: t });
+        console.log(`    upload_file "${step.file}" → ${JSON.stringify(step.target)}`);
+      } else {
+        const buffer = Buffer.from(step.file.content, step.file.encoding === 'base64' ? 'base64' : 'utf8');
+        await locator.setInputFiles(
+          { name: step.file.name, mimeType: step.file.mimeType || 'application/octet-stream', buffer },
+          { timeout: t },
+        );
+        console.log(`    upload_file inline "${step.file.name}" (${buffer.length} bytes) → ${JSON.stringify(step.target)}`);
+      }
       break;
     }
     case 'hover': {

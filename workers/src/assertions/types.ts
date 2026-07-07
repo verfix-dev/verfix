@@ -50,7 +50,7 @@ export interface AssertionResult {
 
 export interface FlowStep {
   action: 'click' | 'type' | 'navigate' | 'wait_for_selector' | 'press'
-    | 'select_option' | 'check' | 'uncheck' | 'hover';
+    | 'select_option' | 'check' | 'uncheck' | 'hover' | 'upload_file';
   target?: {
     testId?: string;
     selector?: string;
@@ -60,6 +60,10 @@ export interface FlowStep {
   url?: string;
   // Keyboard key for the 'press' action (Playwright key names, e.g. "Enter", "Escape", "Tab").
   key?: string;
+  // For 'upload_file': a project-relative path to a committed fixture, or
+  // inline content materialized at run time (no filesystem dependency — works
+  // in CI and containers). encoding 'base64' covers binary content.
+  file?: string | { name: string; content: string; mimeType?: string; encoding?: 'utf8' | 'base64' };
   timeout?: number;
   // Best-effort: any failure within the step's timeout is skipped, not fatal.
   optional?: boolean;

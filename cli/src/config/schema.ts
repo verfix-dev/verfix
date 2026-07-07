@@ -19,6 +19,17 @@ export const FlowStepSchema = z.object({
   timeout: z.number().optional(),
   // Best-effort step: any failure within its timeout is skipped, not fatal.
   optional: z.boolean().optional(),
+  // upload_file: project-relative fixture path, or inline content materialized
+  // at run time (CI-safe: no filesystem dependency). encoding 'base64' for binary.
+  file: z.union([
+    z.string().min(1),
+    z.object({
+      name: z.string().min(1),
+      content: z.string(),
+      mimeType: z.string().optional(),
+      encoding: z.enum(['utf8', 'base64']).optional(),
+    }),
+  ]).optional(),
 })
 
 export const FlowAssertionSchema = z.object({
