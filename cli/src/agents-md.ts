@@ -616,6 +616,25 @@ dialog that never shows doesn't cost the full default wait:
 - If a target (\`selector\`/\`testId\`/\`text\`) is given, the key is pressed on that element; otherwise it's pressed at the page level (for global shortcuts).
 - Use this when \`type\`'s \`fill()\` isn't enough — e.g. a search box or chat input that submits on Enter via a keydown handler.
 
+**\`select_option\`** — Pick an option from a \`<select>\` dropdown
+\`\`\`json
+{ "action": "select_option", "selector": "[data-testid=country]", "value": "India" }
+\`\`\`
+- \`value\` matches the option's \`value\` attribute **or** its visible label.
+- For custom (non-\`<select>\`) dropdowns, use \`click\` on the trigger and then \`click\` on the option instead.
+
+**\`check\`** / **\`uncheck\`** — Set a checkbox or radio to a known state
+\`\`\`json
+{ "action": "check", "selector": "[data-testid=accept-tos]" }
+\`\`\`
+- Idempotent: \`check\` on an already-checked box is a no-op (unlike \`click\`, which would toggle it off) — prefer these over \`click\` for checkboxes so reruns are deterministic.
+
+**\`hover\`** — Hover over an element
+\`\`\`json
+{ "action": "hover", "selector": "[data-testid=user-menu]" }
+\`\`\`
+- Use to reveal hover-only UI (dropdown menus, tooltips) before clicking or asserting on it.
+
 #### Target resolution priority
 
 1. **\`data-testid\`** (most stable — prefer this)

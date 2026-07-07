@@ -169,6 +169,30 @@ async function executeStep(page: Page, step: FlowStep, knownSelectors: Record<st
       console.log(`    wait_for_selector → ${JSON.stringify(step.target)}`);
       break;
     }
+    case 'select_option': {
+      const locator = await resolveLocator(page, step, knownSelectors, mode, t);
+      await locator.waitFor({ state: 'visible', timeout: t });
+      // Playwright matches the string against the option's value or label.
+      await locator.selectOption(step.value || '', { timeout: t });
+      console.log(`    select_option "${step.value}" → ${JSON.stringify(step.target)}`);
+      break;
+    }
+    case 'check':
+    case 'uncheck': {
+      const locator = await resolveLocator(page, step, knownSelectors, mode, t);
+      await locator.waitFor({ state: 'visible', timeout: t });
+      if (step.action === 'check') await locator.check({ timeout: t });
+      else await locator.uncheck({ timeout: t });
+      console.log(`    ${step.action} → ${JSON.stringify(step.target)}`);
+      break;
+    }
+    case 'hover': {
+      const locator = await resolveLocator(page, step, knownSelectors, mode, t);
+      await locator.waitFor({ state: 'visible', timeout: t });
+      await locator.hover({ timeout: t });
+      console.log(`    hover → ${JSON.stringify(step.target)}`);
+      break;
+    }
     case 'press': {
       const key = step.key || step.value || '';
       if (step.target) {

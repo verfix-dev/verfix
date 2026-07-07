@@ -49,7 +49,8 @@ export interface AssertionResult {
 }
 
 export interface FlowStep {
-  action: 'click' | 'type' | 'navigate' | 'wait_for_selector' | 'press';
+  action: 'click' | 'type' | 'navigate' | 'wait_for_selector' | 'press'
+    | 'select_option' | 'check' | 'uncheck' | 'hover';
   target?: {
     testId?: string;
     selector?: string;
