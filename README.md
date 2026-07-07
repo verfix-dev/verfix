@@ -93,6 +93,12 @@ npx verfix run --mode exploratory --task "verify the login page loads and shows 
   "timeline_url": null,
   "trace_path": "/your/project/.verfix/runs/exec_abc123_trace.zip",
   "show_command": "verfix show exec_abc123",
+  "detail_commands": {
+    "console": "verfix show exec_abc123 --console --output json",
+    "network": "verfix show exec_abc123 --network --output json"
+  },
+  "duration_ms": 3120,
+  "retry_count": 0,
   "exit_code": 0,
   "execution_id": "exec_abc123"
 }
@@ -154,6 +160,8 @@ npx verfix flows             # List all flows in verfix.config.json
 npx verfix run               # Run all flows
 npx verfix run --flow <id>   # Run a specific flow
 npx verfix show [id]         # Open the Playwright trace viewer for a run
+npx verfix show --console    # Print a run's captured console log (--network for requests)
+npx verfix probe -s "<css>"  # Dry-run a selector against the last run's DOM (~1s)
 npx verfix list              # List recent runs
 npx verfix status            # Check setup health (config, browser, last run)
 npx verfix doctor            # Diagnose common setup issues

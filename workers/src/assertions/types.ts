@@ -26,7 +26,7 @@ export type FailureType =
 
 export interface AssertionDefinition {
   type: AssertionType;
-  selector?: string;      // for selector_visible
+  selector?: string;      // for selector_visible; on text_visible, scopes the text search to matches inside this selector
   value?: string;         // for text_visible, url_contains, title_contains, network_request_success
   timeout?: number;
   acceptStatuses?: number[]; // network_request_success: replaces the default 200-399 range when set
@@ -49,7 +49,9 @@ export interface AssertionResult {
 }
 
 export interface FlowStep {
-  action: 'click' | 'type' | 'navigate' | 'wait_for_selector' | 'press';
+  action: 'click' | 'type' | 'navigate' | 'wait_for_selector' | 'press'
+    | 'select_option' | 'check' | 'uncheck' | 'hover' | 'upload_file'
+    | 'wait_for_url' | 'wait_for_network_idle';
   target?: {
     testId?: string;
     selector?: string;
@@ -59,6 +61,13 @@ export interface FlowStep {
   url?: string;
   // Keyboard key for the 'press' action (Playwright key names, e.g. "Enter", "Escape", "Tab").
   key?: string;
+  // For 'upload_file': a project-relative path to a committed fixture, or
+  // inline content materialized at run time (no filesystem dependency — works
+  // in CI and containers). encoding 'base64' covers binary content.
+  file?: string | { name: string; content: string; mimeType?: string; encoding?: 'utf8' | 'base64' };
+  // CSS selector of an <iframe>; the step's target is resolved inside that
+  // frame instead of the top-level page.
+  frame?: string;
   timeout?: number;
   // Best-effort: any failure within the step's timeout is skipped, not fatal.
   optional?: boolean;
@@ -71,6 +80,12 @@ export interface Flow {
   assertions?: AssertionDefinition[];
   // Clear cookies + local/session storage before this flow runs.
   clearState?: boolean;
+  // Restore the named storage state (cookies + localStorage) saved by a
+  // previous run. Applied at browser-context creation, before navigation.
+  useState?: string;
+  // After this flow's steps and assertions pass, save the context's storage
+  // state under this name so later runs can restore it via `useState`.
+  saveState?: string;
 }
 
 export interface JobPayload {

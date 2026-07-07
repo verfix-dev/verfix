@@ -17,6 +17,7 @@
 
 import { ProviderAdapter, ChatMessage, CompletionOptions } from './types'
 import { fetchWithTimeout, parseJsonSafe } from './_http'
+import { reportRateLimit } from '../circuit-breaker'
 
 const GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com'
 
@@ -97,6 +98,7 @@ export class GeminiAdapter implements ProviderAdapter {
       }
       if (res.status === 429) {
         console.warn('  ⚠ Gemini: Rate limited.')
+        reportRateLimit('Gemini')
         return null
       }
       if (!res.ok) {

@@ -15,6 +15,7 @@
 
 import { ProviderAdapter, ChatMessage, CompletionOptions } from './types'
 import { fetchWithTimeout, resolveBaseUrl, parseJsonSafe } from './_http'
+import { reportRateLimit } from '../circuit-breaker'
 
 export class OpenAIAdapter implements ProviderAdapter {
   readonly id = 'openai'
@@ -79,6 +80,7 @@ export class OpenAIAdapter implements ProviderAdapter {
       }
       if (res.status === 429) {
         console.warn('  ⚠ OpenAI: Rate limited. Consider upgrading your plan or waiting.')
+        reportRateLimit('OpenAI')
         return null
       }
 

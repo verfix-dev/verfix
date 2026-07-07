@@ -229,6 +229,9 @@ export async function runLocal(payload: any, opts: LocalRunOptions): Promise<Exe
       try {
         result = await engine.runVerification(jobPayload, {
           artifactsDir: runsDir,
+          // Saved auth states must survive run pruning, so they live beside
+          // (not inside) the runs dir. .verfix self-ignores via its .gitignore.
+          stateDir: path.join(path.dirname(runsDir), 'state'),
           attempt,
           headless,
           channel: opts.browser?.channel,
@@ -288,21 +291,106 @@ export async function runLocal(payload: any, opts: LocalRunOptions): Promise<Exe
   return result;
 }
 
-/** Find the trace zip for an execution id (or the newest run when omitted). */
-export function findTraceZip(executionId?: string, cwd: string = process.cwd()): string | null {
+/** Find a run artifact by filename suffix for an execution id (or the newest run when omitted). */
+export function findRunArtifact(suffix: string, executionId?: string, cwd: string = process.cwd()): string | null {
   const runsDir = localRunsDir(cwd);
   if (!fs.existsSync(runsDir)) return null;
 
   if (executionId) {
-    const p = path.join(runsDir, `${executionId}_trace.zip`);
+    const p = path.join(runsDir, `${executionId}${suffix}`);
     return fs.existsSync(p) ? p : null;
   }
 
-  const traces = fs.readdirSync(runsDir)
-    .filter(f => f.endsWith('_trace.zip'))
+  const matches = fs.readdirSync(runsDir)
+    .filter(f => f.endsWith(suffix))
     .map(f => path.join(runsDir, f))
     .sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs);
-  return traces[0] ?? null;
+  return matches[0] ?? null;
+}
+
+/** Find the trace zip for an execution id (or the newest run when omitted). */
+export function findTraceZip(executionId?: string, cwd: string = process.cwd()): string | null {
+  return findRunArtifact('_trace.zip', executionId, cwd);
+}
+
+// ─── Selector dry-run (verfix probe) ─────────────────────────────────────────
+
+export interface ProbeQuery {
+  kind: 'selector' | 'text';
+  query: string;
+  /** Set when the query was a config `selectors` alias that resolved to a real selector. */
+  resolvedSelector?: string;
+}
+
+export interface ProbeQueryResult {
+  kind: 'selector' | 'text';
+  query: string;
+  resolved_selector?: string;
+  count: number;
+  matches: Array<{ excerpt: string; visible: boolean }>;
+}
+
+/**
+ * Check selectors/text against a saved DOM snapshot in headless Chromium —
+ * ~1s instead of a full navigate-login-assert run.
+ *
+ * The snapshot is static end-of-run state: JavaScript is disabled and all
+ * network requests are blocked, so the page's scripts can't mutate the DOM
+ * and its live stylesheet/script URLs are never fetched. Visibility is
+ * therefore approximate (inline styles only) — `count` is the reliable signal.
+ */
+export async function probeSnapshot(
+  snapshotPath: string,
+  queries: ProbeQuery[],
+  browser?: LocalBrowserConfig,
+): Promise<ProbeQueryResult[]> {
+  const engineEntry = require.resolve('@verfix/engine');
+  const pwEntry = require.resolve('playwright', { paths: [engineEntry] });
+  const chromium = require(pwEntry).chromium;
+
+  const instance = await chromium.launch({
+    headless: true,
+    ...(browser?.channel ? { channel: browser.channel } : {}),
+  });
+  try {
+    const context = await instance.newContext({ javaScriptEnabled: false });
+    const page = await context.newPage();
+    await page.route('**/*', (route: any) => route.abort());
+    const html = fs.readFileSync(snapshotPath, 'utf-8');
+    await page.setContent(html, { waitUntil: 'domcontentloaded' });
+
+    const results: ProbeQueryResult[] = [];
+    for (const q of queries) {
+      const target = q.resolvedSelector ?? q.query;
+      const locator = q.kind === 'selector'
+        ? page.locator(target)
+        : page.getByText(target, { exact: false });
+      const count: number = await locator.count();
+      const matches: Array<{ excerpt: string; visible: boolean }> = [];
+      for (let i = 0; i < Math.min(count, 3); i++) {
+        const el = locator.nth(i);
+        let excerpt = '';
+        let visible = false;
+        try {
+          excerpt = String(await el.evaluate((n: Element) => n.outerHTML)).slice(0, 300);
+          visible = await el.isVisible();
+        } catch {
+          // Element detached or evaluate blocked — count already recorded.
+        }
+        matches.push({ excerpt, visible });
+      }
+      results.push({
+        kind: q.kind,
+        query: q.query,
+        ...(q.resolvedSelector && q.resolvedSelector !== q.query ? { resolved_selector: q.resolvedSelector } : {}),
+        count,
+        matches,
+      });
+    }
+    return results;
+  } finally {
+    await instance.close();
+  }
 }
 
 /** Read a persisted local run result by execution id. */

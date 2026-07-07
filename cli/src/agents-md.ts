@@ -139,6 +139,11 @@ verfix status
 # Run a specific flow
 verfix run --flow <flow-id> --output json
 
+# Same, plus the raw event timeline (large — the default summary already
+# contains every failure and skipped step; only use this when the summary
+# and \`verfix show\` detail commands aren't enough)
+verfix run --flow <flow-id> --output json --full
+
 # Run all flows
 verfix run --output json
 
@@ -150,6 +155,20 @@ verfix run --flow <flow-id> --url http://localhost:5173 --output json
 
 # Open the recorded Playwright trace of a run (for the human to inspect)
 verfix show <execution_id>
+
+# Print a run's FULL captured console errors / network requests — use this to
+# inspect failure detail (e.g. before writing no_console_errors "exclude"
+# patterns) instead of reading files out of .verfix/runs/.
+# Omit <execution_id> to use the newest run.
+verfix show <execution_id> --console --output json
+verfix show <execution_id> --network --output json
+
+# Dry-run a selector/text against the last run's saved DOM (~1s) BEFORE paying
+# for a full re-run — exit 0 = all matched, 1 = something didn't. Config
+# \`selectors\` aliases resolve. Caveat: the snapshot is END-OF-RUN state, so a
+# match here doesn't guarantee the element existed at the step that failed.
+verfix probe --selector "[data-testid=submit]" --output json
+verfix probe --text "Welcome back" --output json
 \`\`\`
 
 ---
@@ -367,7 +386,9 @@ Cookies and localStorage set by a login flow are available to subsequent flows.
 
 #### Output contract
 
-Every \`verfix run --output json\` returns this exact shape:
+Every \`verfix run --output json\` returns this summary shape (the full event
+timeline is deliberately omitted — pull details with \`detail_commands\` below,
+or opt into everything with \`--full\`):
 
 \`\`\`json
 {
@@ -375,22 +396,41 @@ Every \`verfix run --output json\` returns this exact shape:
   "failures": [
     {
       "type": "selector_not_found",
+      "flow": "your-flow-id",
+      "assertion": "selector_visible",
       "selector": "[data-testid=submit]",
       "fix_hint": "Selector \\"[data-testid=submit]\\" not found in DOM. Add a stable data-testid or update the selector."
     }
   ],
+  "skipped_optional_steps": [
+    { "flow": "your-flow-id", "action": "click", "target": { "text": "Logout other session" }, "reason": "locator.waitFor: Timeout 2000ms exceeded." }
+  ],
   "timeline_url": null,
   "trace_path": "/absolute/path/to/.verfix/runs/exec_abc123_trace.zip",
   "show_command": "verfix show exec_abc123",
+  "detail_commands": {
+    "console": "verfix show exec_abc123 --console --output json",
+    "network": "verfix show exec_abc123 --network --output json"
+  },
+  "duration_ms": 4231,
+  "retry_count": 0,
   "exit_code": 1,
   "execution_id": "exec_abc123"
 }
 \`\`\`
 
+> The summary is **lossless for anything non-nominal**: every failure (with the
+> flow and assertion that produced it), every skipped \`optional\` step (present
+> only when something was skipped — verify skips were intentional!), the AI
+> failure analysis (\`ai_summary\`, when a run in assisted/exploratory mode
+> failed), and \`retry_count\` (> 0 means the run crashed and was retried).
+> What's omitted is only the passing-path event timeline.
+>
 > \`timeline_url\` is always present but \`null\` in local runs (it points at the
 > dashboard only when running against a server runtime). \`trace_path\` and
 > \`show_command\` are the local-run equivalents — pass \`show_command\` to the
-> human when they need to see what the browser did.
+> human when they need to see what the browser did. Run the \`detail_commands\`
+> verbatim when you need console/network detail.
 
 #### Failure type reference
 
@@ -400,7 +440,7 @@ ${failureList}
 
 | Failure type | What to do |
 |---|---|
-| \`selector_not_found\` | Inspect the source, find the correct selector, update the step. |
+| \`selector_not_found\` | Inspect the source, find the correct selector, update the step. Check candidate selectors with \`verfix probe --selector "..."\` (~1s) before paying for a full re-run. |
 | \`selector_not_visible\` | Element exists but is hidden. Check conditional rendering logic (CSS \`display:none\`, \`visibility:hidden\`, or zero dimensions). |
 | \`text_mismatch\` | Expected text not on page. Check if text is dynamically loaded — add a \`wait_for_selector\` step before the assertion. |
 | \`url_mismatch\` | Navigation didn't reach expected URL. Check routing, redirects, or auth guards. |
@@ -416,8 +456,10 @@ ${failureList}
 \`\`\`
 1. Read failures[0].type
 2. Apply the fix strategy from the table above
-3. Re-run:  verfix run --flow <id> --output json
-4. If still failing after 3 attempts → stop, give the user the show_command
+3. For selector/text fixes: verfix probe --selector "..." first (~1s dry-run
+   against the failed run's DOM) — only re-run once the probe matches
+4. Re-run:  verfix run --flow <id> --output json
+5. If still failing after 3 attempts → stop, give the user the show_command
 \`\`\`
 
 ---
@@ -524,6 +566,17 @@ If verification runs are misbehaving, use these commands to diagnose and fix:
       // over from a previous run can't change the outcome.
       "clearState": false,
 
+      // OPTIONAL — Auth state reuse, so flows don't re-implement login.
+      // On the flow that logs in: "saveState": "auth" — once the flow's steps
+      // and assertions pass, its cookies + localStorage + IndexedDB are saved
+      // under that name (in .verfix/state/, never committed). sessionStorage
+      // is not captured.
+      // On flows that need a session: "useState": "auth" — the saved state is
+      // restored before the run navigates, so the flow starts logged in.
+      // If the state doesn't exist yet (or the session expired and the flow
+      // fails), run the saving flow once to (re)create it.
+      "saveState": "auth",
+
       // REQUIRED — Ordered list of browser actions to execute.
       "steps": [
         // ... see "Step actions" below
@@ -615,6 +668,57 @@ dialog that never shows doesn't cost the full default wait:
 - \`key\` is a Playwright key name (e.g. \`"Enter"\`, \`"Escape"\`, \`"Tab"\`).
 - If a target (\`selector\`/\`testId\`/\`text\`) is given, the key is pressed on that element; otherwise it's pressed at the page level (for global shortcuts).
 - Use this when \`type\`'s \`fill()\` isn't enough — e.g. a search box or chat input that submits on Enter via a keydown handler.
+
+**\`select_option\`** — Pick an option from a \`<select>\` dropdown
+\`\`\`json
+{ "action": "select_option", "selector": "[data-testid=country]", "value": "India" }
+\`\`\`
+- \`value\` matches the option's \`value\` attribute **or** its visible label.
+- For custom (non-\`<select>\`) dropdowns, use \`click\` on the trigger and then \`click\` on the option instead.
+
+**\`check\`** / **\`uncheck\`** — Set a checkbox or radio to a known state
+\`\`\`json
+{ "action": "check", "selector": "[data-testid=accept-tos]" }
+\`\`\`
+- Idempotent: \`check\` on an already-checked box is a no-op (unlike \`click\`, which would toggle it off) — prefer these over \`click\` for checkboxes so reruns are deterministic.
+
+**\`hover\`** — Hover over an element
+\`\`\`json
+{ "action": "hover", "selector": "[data-testid=user-menu]" }
+\`\`\`
+- Use to reveal hover-only UI (dropdown menus, tooltips) before clicking or asserting on it.
+
+**\`upload_file\`** — Set a file on an \`<input type="file">\`
+\`\`\`json
+{ "action": "upload_file", "selector": "input[type=file]", "file": { "name": "note.csv", "content": "a,b\\n1,2", "mimeType": "text/csv" } }
+\`\`\`
+- **Prefer inline \`{ name, content }\`** — the file is materialized at run time, so the flow has zero filesystem dependencies and runs identically in CI. Add \`"encoding": "base64"\` for binary content (a tiny PNG fits in a config line).
+- **Keep inline content small** (a few KB). It lives in this config file, which agents read — for anything larger, commit a fixture and use the path form (\`verfix validate\` warns above 64KB).
+- Alternatively \`"file": "fixtures/avatar.png"\` — a path resolved relative to the project root; commit the fixture so CI checkouts have it. \`\${VAR}\` substitution works in the path.
+- Target the \`<input type="file">\` itself, even when it's hidden behind a styled button or drag-drop zone — the input only needs to exist, not be visible.
+
+**\`wait_for_url\`** — Wait until the page URL contains a substring
+\`\`\`json
+{ "action": "wait_for_url", "value": "/dashboard", "timeout": 10000 }
+\`\`\`
+- Substring match, same semantics as the \`url_contains\` assertion.
+- Use after an action that triggers a client-side redirect (login → dashboard) before asserting on the destination page.
+
+**\`wait_for_network_idle\`** — Wait until network activity settles
+\`\`\`json
+{ "action": "wait_for_network_idle" }
+\`\`\`
+- Use before asserting on data that loads via background requests (tables, charts). Prefer \`wait_for_selector\` on the concrete element when you know it — it's faster and more precise.
+
+#### Targeting inside iframes
+
+Add \`"frame"\` (a CSS selector for the \`<iframe>\`) to any step whose target
+lives inside an embedded frame — payment widgets, embedded editors:
+\`\`\`json
+{ "action": "type", "frame": "iframe[title=card]", "selector": "input[name=cardnumber]", "value": "4242424242424242" }
+\`\`\`
+- The step's \`selector\`/\`testId\`/\`text\` target is resolved inside that frame instead of the top-level page.
+- Frame targeting is always deterministic — AI selector-healing does not apply inside frames.
 
 #### Target resolution priority
 

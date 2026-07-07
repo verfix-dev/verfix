@@ -1,3 +1,5 @@
+import * as fs from 'fs';
+import * as path from 'path';
 import { Page, BrowserContext, Locator } from 'playwright';
 import { JobPayload, Flow, FlowStep } from '../assertions/types';
 import { EventTracker } from '../artifacts/event-tracker';
@@ -73,8 +75,14 @@ async function resolveLocator(
 ): Promise<Locator> {
   if (!step.target) throw new Error('Step has no target defined');
 
+  // `frame` scopes the step's target inside an <iframe>. Resolution is
+  // deterministic there — AI healing operates on the top-level page only.
+  // ponytail: one frame level (no nested iframes); chain frameLocators to upgrade.
+  const frame = step.frame ? page.frameLocator(step.frame) : undefined;
+
   if (step.target.testId) {
     const selector = `[data-testid="${step.target.testId}"]`;
+    if (frame) return frame.locator(selector).first();
     const intent = humanize(step.target.testId);
     return resolveOrHeal(page, selector, mode, intent, timeout);
   }
@@ -83,11 +91,12 @@ async function resolveLocator(
     // Falls through unchanged when the selector isn't an alias.
     const aliased = Object.prototype.hasOwnProperty.call(knownSelectors, step.target.selector);
     const selector = aliased ? knownSelectors[step.target.selector] : step.target.selector;
+    if (frame) return frame.locator(selector).first();
     const intent = aliased ? humanize(step.target.selector) : undefined;
     return resolveOrHeal(page, selector, mode, intent, timeout);
   }
   if (step.target.text) {
-    return page.getByText(step.target.text, { exact: false }).first();
+    return (frame ?? page).getByText(step.target.text, { exact: false }).first();
   }
   throw new Error(`Cannot resolve locator for step: ${JSON.stringify(step)}`);
 }
@@ -167,6 +176,67 @@ async function executeStep(page: Page, step: FlowStep, knownSelectors: Record<st
       const locator = await resolveLocator(page, step, knownSelectors, mode, t);
       await locator.waitFor({ state: 'visible', timeout: t });
       console.log(`    wait_for_selector → ${JSON.stringify(step.target)}`);
+      break;
+    }
+    case 'wait_for_url': {
+      const fragment = step.value || '';
+      if (!fragment) throw new Error('wait_for_url step requires "value" (a URL substring to wait for)');
+      // Substring semantics, same as the url_contains assertion.
+      await page.waitForURL(u => u.toString().includes(fragment), { timeout: t });
+      console.log(`    wait_for_url "${fragment}" → ${page.url()}`);
+      break;
+    }
+    case 'wait_for_network_idle': {
+      await page.waitForLoadState('networkidle', { timeout: t });
+      console.log('    wait_for_network_idle');
+      break;
+    }
+    case 'select_option': {
+      const locator = await resolveLocator(page, step, knownSelectors, mode, t);
+      await locator.waitFor({ state: 'visible', timeout: t });
+      // Playwright matches the string against the option's value or label.
+      await locator.selectOption(step.value || '', { timeout: t });
+      console.log(`    select_option "${step.value}" → ${JSON.stringify(step.target)}`);
+      break;
+    }
+    case 'check':
+    case 'uncheck': {
+      const locator = await resolveLocator(page, step, knownSelectors, mode, t);
+      await locator.waitFor({ state: 'visible', timeout: t });
+      if (step.action === 'check') await locator.check({ timeout: t });
+      else await locator.uncheck({ timeout: t });
+      console.log(`    ${step.action} → ${JSON.stringify(step.target)}`);
+      break;
+    }
+    case 'upload_file': {
+      if (!step.file) throw new Error('upload_file step requires "file": a fixture path or inline { name, content }');
+      const locator = await resolveLocator(page, step, knownSelectors, mode, t);
+      // File inputs are routinely hidden behind styled buttons/drop zones —
+      // require the input to exist, not to be visible (setInputFiles works
+      // on hidden inputs).
+      await locator.waitFor({ state: 'attached', timeout: t });
+      if (typeof step.file === 'string') {
+        const filePath = path.resolve(process.cwd(), step.file);
+        if (!fs.existsSync(filePath)) {
+          throw new Error(`upload_file: file not found: ${filePath} — commit a fixture at that path, or use inline { "name", "content" } so the run has no filesystem dependency`);
+        }
+        await locator.setInputFiles(filePath, { timeout: t });
+        console.log(`    upload_file "${step.file}" → ${JSON.stringify(step.target)}`);
+      } else {
+        const buffer = Buffer.from(step.file.content, step.file.encoding === 'base64' ? 'base64' : 'utf8');
+        await locator.setInputFiles(
+          { name: step.file.name, mimeType: step.file.mimeType || 'application/octet-stream', buffer },
+          { timeout: t },
+        );
+        console.log(`    upload_file inline "${step.file.name}" (${buffer.length} bytes) → ${JSON.stringify(step.target)}`);
+      }
+      break;
+    }
+    case 'hover': {
+      const locator = await resolveLocator(page, step, knownSelectors, mode, t);
+      await locator.waitFor({ state: 'visible', timeout: t });
+      await locator.hover({ timeout: t });
+      console.log(`    hover → ${JSON.stringify(step.target)}`);
       break;
     }
     case 'press': {

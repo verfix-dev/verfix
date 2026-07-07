@@ -1182,6 +1182,27 @@ program
         checkAssertions(flow.assertions, `flows[${idx}] (${id})`);
       });
 
+      // Inline upload_file content lives in the config agents read — a large
+      // blob would bloat every future context window that loads it.
+      const MAX_INLINE_FILE_BYTES = 64 * 1024;
+      (config.flows || []).forEach((flow: any, idx: number) => {
+        const id = flow.id || flow.name || `flow_${idx + 1}`;
+        (flow.steps || []).forEach((step: any, stepIdx: number) => {
+          const content = step?.file?.content;
+          if (typeof content === 'string' && Buffer.byteLength(content, 'utf8') > MAX_INLINE_FILE_BYTES) {
+            warnings.push(`flows[${idx}] (${id}).steps[${stepIdx}]: inline file content is ${Math.round(Buffer.byteLength(content, 'utf8') / 1024)}KB — commit it as a fixture and use a "file" path instead (inline is for tiny files)`);
+          }
+        });
+      });
+
+      const savedStateNames = new Set((config.flows || []).map((f: any) => f.saveState).filter(Boolean));
+      (config.flows || []).forEach((flow: any, idx: number) => {
+        const id = flow.id || flow.name || `flow_${idx + 1}`;
+        if (flow.useState && !savedStateNames.has(flow.useState)) {
+          warnings.push(`flows[${idx}] (${id}): useState "${flow.useState}" is never saved by any flow — add saveState: "${flow.useState}" to the flow that logs in`);
+        }
+      });
+
       if (!config.baseUrl) {
         warnings.push('baseUrl is not set — every "verfix run" will require --url');
       }
@@ -1276,6 +1297,8 @@ program
   .option('-f, --flow <id>', 'Flow id or name to run')
   .option('-m, --mode <mode>', 'Verification mode: strict | assisted | smoke | exploratory')
   .option('-o, --output <format>', 'Output format: pretty | json', 'json')
+  .option('--full', 'JSON output: include the raw ExecutionResult (full event timeline) — large; details are otherwise pull-on-demand via verfix show', false)
+  .option('-q, --quiet', '(deprecated: summary is now the default) no-op kept for compatibility', false)
   .option('--dashboard <url>', 'Dashboard base URL for timeline links')
   .option('--timeout <ms>', 'Timeout in milliseconds', '15000')
   .option('--retries <n>', 'Number of retries on failure', '2')
@@ -1585,17 +1608,46 @@ program
       const blocked = sourceGate.block;
       const passed = result.passed && !blocked;
 
+      // Nothing non-nominal may hide in the omitted timeline: optional steps
+      // that were skipped are surfaced here explicitly, so "the dialog never
+      // appeared" is always visible in the summary, not just in --full events.
+      const skippedSteps = (result.events || [])
+        .filter((e: any) => e.metadata?.skipped === true)
+        .map((e: any) => ({
+          flow: e.metadata?.flow,
+          action: e.metadata?.action,
+          target: e.metadata?.target,
+          reason: e.metadata?.reason,
+        }));
+
       const jsonResult = {
         passed,
         failures,
+        ...(skippedSteps.length > 0 ? { skipped_optional_steps: skippedSteps } : {}),
+        // AI failure analysis (assisted/exploratory modes) is failure signal —
+        // it stays in the summary.
+        ...(result.ai_summary ? { ai_summary: result.ai_summary } : {}),
         source_changes: sourceChanges.status === 'ok' ? sourceChanges : undefined,
         // Contract stability: timeline_url stays present but is null in local
         // mode (no dashboard); trace_path/show_command are the local additions.
         timeline_url: timelineUrl,
-        ...(runnerMode === 'local' ? { trace_path: tracePath, show_command: showCommand } : {}),
+        ...(runnerMode === 'local' ? {
+          trace_path: tracePath,
+          show_command: showCommand,
+          // Self-describing pulls: the summary names the exact commands that
+          // return the detail it omits.
+          detail_commands: {
+            console: `verfix show ${result.executionId} --console --output json`,
+            network: `verfix show ${result.executionId} --network --output json`,
+          },
+        } : {}),
+        duration_ms: result.duration_ms,
+        retry_count: result.retry_count,
         exit_code: passed ? 0 : 1,
         execution_id: result.executionId,
-        raw: result,
+        // Summary is the default: the full ExecutionResult (event timeline,
+        // per-step artifact paths) is pull-when-needed data. --full opts in.
+        ...(opts.full ? { raw: result } : {}),
       };
       // End the verify cycle only on a clean pass; keep the baseline otherwise so
       // a revert-and-rerun resolves cleanly.
@@ -1681,9 +1733,68 @@ program
 
 program
   .command('show [executionId]')
-  .description('Open the Playwright trace viewer for a local run (newest run if no id given)')
-  .action(async (executionId?: string) => {
-    const { findTraceZip, playwrightCliPath } = await import('./local-runner');
+  .description('Open the Playwright trace viewer for a local run (newest run if no id given); --console/--network print the captured logs instead')
+  .option('--console', 'Print the run\'s captured console log (full untruncated error text)', false)
+  .option('--network', 'Print the run\'s captured network requests', false)
+  .option('-o, --output <format>', 'Output format for --console/--network: pretty | json', 'pretty')
+  .action(async (executionId: string | undefined, opts) => {
+    const { findTraceZip, findRunArtifact, playwrightCliPath } = await import('./local-runner');
+
+    // ── Log inspection: first-class access to the artifacts every run already
+    // writes, so nobody has to spelunk in .verfix/runs/ with a script.
+    if (opts.console || opts.network) {
+      const readArtifact = (suffix: string, label: string): any[] | null => {
+        const p = findRunArtifact(suffix, executionId);
+        if (!p) {
+          if (opts.output === 'json') {
+            emitJsonError({
+              error: 'artifact_not_found',
+              message: executionId
+                ? `No ${label} log found for execution ${executionId} under .verfix/runs/`
+                : 'No local runs found under .verfix/runs/.',
+              hint: 'Run a verification first: verfix run --output json',
+            });
+          } else {
+            console.error(chalk.red(executionId
+              ? `No ${label} log found for execution ${executionId} under .verfix/runs/`
+              : 'No local runs found under .verfix/runs/. Run a verification first: verfix run --output json'));
+          }
+          process.exit(2);
+        }
+        try {
+          return JSON.parse(fs.readFileSync(p, 'utf-8'));
+        } catch (e: any) {
+          console.error(chalk.red(`Could not parse ${p}: ${e.message}`));
+          process.exit(2);
+        }
+      };
+
+      const out: { console_logs?: any[]; network_requests?: any[] } = {};
+      if (opts.console) out.console_logs = readArtifact('_console.json', 'console') ?? [];
+      if (opts.network) out.network_requests = readArtifact('_network.json', 'network') ?? [];
+
+      if (opts.output === 'json') {
+        emitJson(out);
+        return;
+      }
+      if (out.console_logs) {
+        console.log(chalk.bold(`\n  Console log (${out.console_logs.length} entries):`));
+        for (const l of out.console_logs) {
+          const color = l.type === 'error' ? chalk.red : l.type === 'warning' ? chalk.yellow : chalk.gray;
+          console.log(`    ${color(`[${l.type}]`)} ${l.text}`);
+        }
+      }
+      if (out.network_requests) {
+        console.log(chalk.bold(`\n  Network requests (${out.network_requests.length}):`));
+        for (const r of out.network_requests) {
+          const color = r.status >= 400 ? chalk.red : r.status >= 300 ? chalk.yellow : chalk.green;
+          console.log(`    ${color(String(r.status))} ${r.method} ${r.url} ${chalk.gray(`(${r.timing_ms}ms)`)}`);
+        }
+      }
+      console.log('');
+      return;
+    }
+
     const traceZip = findTraceZip(executionId);
 
     if (!traceZip) {
@@ -1699,6 +1810,106 @@ program
       stdio: 'inherit',
     });
     process.exit(res.status ?? 0);
+  });
+
+// ─── probe command ────────────────────────────────────────────────────────────
+
+program
+  .command('probe [executionId]')
+  .description('Dry-run selectors/text against a run\'s saved DOM snapshot (~1s) instead of a full verification run (newest run if no id given)')
+  .option('-s, --selector <selectors...>', 'CSS selector(s) to check (config `selectors` aliases resolve first)')
+  .option('-t, --text <texts...>', 'Text content to check (same matching as text_visible)')
+  .option('-c, --config <file>', 'Path to verfix.config.json (for the selectors alias map)')
+  .option('-o, --output <format>', 'Output format: pretty | json', 'pretty')
+  .action(async (executionId: string | undefined, opts) => {
+    const selectors: string[] = opts.selector || [];
+    const texts: string[] = opts.text || [];
+    const emitErr = (error: string, message: string, hint: string) => {
+      if (opts.output === 'json') emitJsonError({ error, message, hint });
+      else console.error(chalk.red(message) + '\n' + chalk.gray(hint));
+      process.exit(2);
+    };
+
+    if (selectors.length === 0 && texts.length === 0) {
+      emitErr('missing_query', 'probe needs at least one --selector or --text', 'Example: verfix probe --selector "[data-testid=submit]"');
+    }
+
+    const { findRunArtifact, probeSnapshot, ensureChromium } = await import('./local-runner');
+    const snapshotPath = findRunArtifact('.html', executionId);
+    if (!snapshotPath) {
+      emitErr(
+        'artifact_not_found',
+        executionId
+          ? `No DOM snapshot found for execution ${executionId} under .verfix/runs/`
+          : 'No local runs found under .verfix/runs/.',
+        'Run a verification first: verfix run --output json — probe checks selectors against its saved end-of-run DOM.',
+      );
+    }
+
+    // Resolve config `selectors` aliases so probing a logical name checks the
+    // same real selector a flow step would use.
+    let aliasMap: Record<string, string> = {};
+    let browserCfg: any;
+    const configPath = opts.config ? path.resolve(opts.config) : path.resolve(process.cwd(), DEFAULT_CONFIG);
+    if (fs.existsSync(configPath)) {
+      try {
+        const cfg = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+        aliasMap = cfg.selectors || {};
+        browserCfg = cfg.browser;
+      } catch {
+        // Unreadable config just means no alias resolution.
+      }
+    }
+
+    const queries = [
+      ...selectors.map(s => ({
+        kind: 'selector' as const,
+        query: s,
+        ...(Object.prototype.hasOwnProperty.call(aliasMap, s) ? { resolvedSelector: aliasMap[s] } : {}),
+      })),
+      ...texts.map(t => ({ kind: 'text' as const, query: t })),
+    ];
+
+    await ensureChromium(browserCfg);
+    const results = await (async () => {
+      try {
+        return await probeSnapshot(snapshotPath!, queries, browserCfg);
+      } catch (e: any) {
+        emitErr('probe_failed', `Probe failed: ${e.message}`, 'The snapshot may be corrupted — rerun the verification and probe again.');
+        return []; // unreachable
+      }
+    })();
+
+    const executionIdFromFile = path.basename(snapshotPath!, '.html');
+    const allMatched = results.every(r => r.count > 0);
+    if (opts.output === 'json') {
+      emitJson({
+        snapshot: snapshotPath,
+        execution_id: executionIdFromFile,
+        // The snapshot is END-OF-RUN state (at-failure state for failed runs),
+        // not per-step state — a selector present here can still be missing at
+        // the step where the flow needs it.
+        snapshot_semantics: 'end_of_run',
+        queries: results,
+        exit_code: allMatched ? 0 : 1,
+      });
+      process.exit(allMatched ? 0 : 1);
+    }
+
+    console.log(chalk.gray(`\n  Probing DOM snapshot of ${executionIdFromFile} (end-of-run state)\n`));
+    for (const r of results) {
+      const label = r.kind === 'selector' ? r.query + (r.resolved_selector ? chalk.gray(` → ${r.resolved_selector}`) : '') : `text "${r.query}"`;
+      if (r.count === 0) {
+        console.log(`  ${chalk.red('✗')} ${label} — ${chalk.red('0 matches')}`);
+      } else {
+        console.log(`  ${chalk.green('✓')} ${label} — ${r.count} match(es)`);
+        for (const m of r.matches) {
+          console.log(chalk.gray(`      ${m.visible ? '' : '[hidden] '}${m.excerpt.replace(/\s+/g, ' ').slice(0, 160)}`));
+        }
+      }
+    }
+    console.log('');
+    process.exit(allMatched ? 0 : 1);
   });
 
 // ─── list command ─────────────────────────────────────────────────────────────
@@ -1827,6 +2038,8 @@ function normalizeFlows(flows: any[]): any[] {
       name: flow.name || flow.id || `flow_${idx + 1}`,
       mode: flow.mode,
       clearState: flow.clearState,
+      useState: flow.useState,
+      saveState: flow.saveState,
       steps: (flow.steps || []).map((rawStep: any, stepIdx: number) => {
         const step = interpolateStep(rawStep, `${flowPath}.steps[${stepIdx}]`);
         return {
@@ -1841,6 +2054,8 @@ function normalizeFlows(flows: any[]): any[] {
           value: step.value ?? step.url,
           url: step.url,
           key: step.key,
+          file: step.file,
+          frame: step.frame,
           timeout: step.timeout,
           optional: step.optional,
         };
@@ -1867,11 +2082,14 @@ function validateConfigSchema(config: any, configPath: string): void {
   }
 }
 
-function buildFailures(result: any): Array<{ type: string; selector?: string; detail?: string; fix_hint?: string }> {
+function buildFailures(result: any): Array<{ type: string; flow?: string; assertion?: string; selector?: string; detail?: string; fix_hint?: string }> {
   const failures = (result.assertions || [])
     .filter((a: any) => !a.passed)
     .map((a: any) => ({
       type: a.failure_type || 'assertion_failed',
+      // Locate the failure without the raw timeline: which flow, which assertion.
+      flow: a.flow_name,
+      assertion: a.type,
       selector: a.details?.selector || a.details?.resolved_selector,
       detail: a.error,
       fix_hint: a.fix_hint,

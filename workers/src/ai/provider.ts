@@ -24,6 +24,7 @@
  */
 
 import { resolveAdapter } from './adapters/registry';
+import { isAIBreakerOpen, reportAISuccess } from './circuit-breaker';
 
 // Re-export ChatMessage so callers can use it without importing from the adapters module.
 export type { ChatMessage } from './adapters/types';
@@ -60,5 +61,10 @@ export async function chatCompletion(
     json?: boolean;
   },
 ): Promise<string | null> {
-  return resolveAdapter().chat(messages, opts);
+  // Persistent rate limiting opens the breaker for the rest of the run —
+  // callers already treat null as "AI unavailable" and fall back.
+  if (isAIBreakerOpen()) return null;
+  const result = await resolveAdapter().chat(messages, opts);
+  if (result !== null) reportAISuccess();
+  return result;
 }

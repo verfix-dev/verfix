@@ -63,6 +63,26 @@ Or a specific run by its execution id (printed in the run output):
 npx verfix show exec_abc123
 ```
 
+To read a run's captured logs in the terminal instead of the trace viewer —
+full untruncated console error text and every network request with status and
+timing (handy for writing `exclude` / `acceptStatuses` after a failure):
+
+```bash
+npx verfix show --console            # newest run's console log
+npx verfix show exec_abc123 --network --output json
+```
+
+When a selector fails, dry-run replacements against the run's saved DOM
+snapshot in about a second — instead of paying for a full re-run per guess:
+
+```bash
+npx verfix probe --selector "[data-testid=submit]" --text "Welcome back"
+```
+
+Exit code 0 means every query matched; 1 means something didn't. The snapshot
+is end-of-run state (at-failure state for failed runs), so it's exactly the
+DOM your failed selector was tested against.
+
 `npx verfix list` shows the recent runs, and `npx verfix status` summarizes your
 setup (config, browser, last run).
 

@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- **JSON output is now a summary by default; `--full` restores the raw timeline.** `verfix run --output json` no longer embeds the full ExecutionResult (`raw`) — the event timeline was ~93% of the payload and agents paid for it on every fix-loop iteration. The summary is lossless for anything non-nominal: every failure now carries the `flow` and `assertion` that produced it, skipped `optional` steps are listed explicitly in `skipped_optional_steps` (never silent), `ai_summary` stays when present, and `retry_count` > 0 signals crash-retries. `detail_commands` in the output names the exact `verfix show` commands that return console/network detail on demand. `--quiet` (added earlier in this cycle, now the default behavior) is kept as a no-op alias. Taken while pre-1.0 with no known consumers.
+
+### Added
+- **Auth state reuse** (`saveState` / `useState` flow fields). A flow that logs in can persist the browser's cookies (incl. `httpOnly`), `localStorage`, and IndexedDB under a name once its steps *and* assertions pass; other flows — including in later runs — restore it at context creation and start authenticated. States live in `.verfix/state/` (never committed; `.verfix` self-ignores). `verfix validate` warns when a `useState` name is never saved by any flow. `sessionStorage` is not captured.
+- **`select_option`, `check`, `uncheck`, `hover` flow steps.** `select_option` matches an option by value or visible label; `check`/`uncheck` are idempotent (unlike `click` on a checkbox), keeping reruns deterministic.
+- **`upload_file` flow step.** `file` accepts a project-relative fixture path (`${VAR}` substitution supported) or CI-safe inline content (`{ name, content, mimeType, encoding }`, `base64` for binary) materialized at run time with no filesystem dependency. Targets the `<input type=file>` by attachment, not visibility, since real UIs hide it behind styled buttons. `verfix validate` warns when inline content exceeds 64KB.
+- **`wait_for_url` and `wait_for_network_idle` flow steps.** Substring URL wait (same semantics as the `url_contains` assertion) for client-side redirects, and a network-idle settle for background-loaded data.
+- **`frame` step field (iframe targeting).** Resolves the step's `selector`/`testId`/`text` inside an `<iframe>` (payment widgets, embedded editors). Deterministic only — AI healing does not apply inside frames.
+- **Scoped `text_visible`.** Optional `selector` on the assertion scopes the text search to matches inside that element. Unscoped, duplicated text no longer fails on Playwright's strict-mode violation — the assertion passes if any visible occurrence matches.
+- **`verfix show --console` / `--network`.** Prints a run's captured console log (full untruncated error text) and network requests (status, method, timing) in pretty or `--output json` form — no more reading `_console.json` out of `.verfix/runs/` by hand. Defaults to the newest run when no execution id is given.
+- **`verfix probe` — selector dry-run.** Checks `--selector`s (config aliases resolve) and `--text` against a run's saved end-of-run DOM snapshot in headless Chromium (~1s vs a full ~20s run per guess). Reports match count, `outerHTML` excerpts, and a `[hidden]` marker per match; exit 0 = all matched, 1 = any miss. JavaScript is disabled and network blocked during probing, so the snapshot can't mutate or fetch live resources.
+- **`verfix run --quiet`.** JSON output without the raw event timeline — only the stable contract fields (`passed`, `failures`, `fix_hint`s, `trace_path`, `show_command`, `timeline_url`). Details stay pull-on-demand via `verfix show`. Default output is unchanged.
+- **AI rate-limit circuit breaker.** After 3 consecutive 429 responses, AI calls (self-healing, failure analysis) are disabled for the remainder of the run with a single log line, instead of retrying and failing on every step. Deterministic fallbacks are unaffected; the breaker resets at the start of each run.
+
 ## [0.3.5] - 2026-07-06
 
 ### Added

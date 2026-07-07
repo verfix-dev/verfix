@@ -21,13 +21,15 @@ export function interpolateEnv(value: string, fieldPath: string): string {
   });
 }
 
-/** Interpolate a flow step's `value`/`url` fields in place, given its 0-based index for error messages. */
+/** Interpolate a flow step's `value`/`url`/`file`-path fields in place, given its 0-based index for error messages. */
 export function interpolateStep(step: any, fieldPrefix: string): any {
   if (!step) return step;
   return {
     ...step,
     value: typeof step.value === 'string' ? interpolateEnv(step.value, `${fieldPrefix}.value`) : step.value,
     url: typeof step.url === 'string' ? interpolateEnv(step.url, `${fieldPrefix}.url`) : step.url,
+    // upload_file fixture paths may be machine-specific; inline file content is not interpolated.
+    file: typeof step.file === 'string' ? interpolateEnv(step.file, `${fieldPrefix}.file`) : step.file,
   };
 }
 

@@ -16,6 +16,7 @@
 
 import { ProviderAdapter, ChatMessage, CompletionOptions } from './types'
 import { fetchWithTimeout, parseJsonSafe } from './_http'
+import { reportRateLimit } from '../circuit-breaker'
 
 const ANTHROPIC_BASE_URL = 'https://api.anthropic.com'
 const ANTHROPIC_VERSION = '2023-06-01'
@@ -94,6 +95,7 @@ export class AnthropicAdapter implements ProviderAdapter {
       }
       if (res.status === 429) {
         console.warn('  ⚠ Anthropic: Rate limited.')
+        reportRateLimit('Anthropic')
         return null
       }
       if (res.status === 529) {
