@@ -44,6 +44,34 @@ Assertions: **no new failure types.** Richness goes into the failure payload (se
 
 **Exit condition:** loop-closure rate measured and improving release over release.
 
+## Field-review backlog — first real-world SaaS run (July 2026)
+
+*Source: a coding agent ran Verfix end-to-end against a live SaaS app (multi-outcome auth flow, real SPA noise). What worked: `optional` steps, `acceptStatuses`, `clearState`, config-first discipline. What follows is every friction point it hit, triaged. The theme across all of them: each one is a place where the agent had to **leave the structured contract** — spelunking in `.verfix/runs/` with a throwaway script, burning three run-iterations to discover console noise, deleting an assertion it couldn't scope. These fixes feed Phase 2's exit condition (real-app flows without gaps) and Phase 3's moat (loop-closure rate).*
+
+### Tier 1 — quick wins (small, additive, no contract breaks; ship with Phase 2)
+
+- [x] **Scoped `text_visible`.** Real pages repeat text ("Total Declarations" as both a card title and a caption); `text_visible` only takes a global `value`, so an ambiguous match forces the user to *delete* the assertion — the tool pushing toward weaker verification. Fix: `Assertion` in `workers/src/assertions/types.ts` already has `selector?`; make `text_visible` honor it in `workers/src/assertions/engine.ts` via `page.locator(selector).getByText(text)` when present. Backward compatible, ~10 lines + testbed flow. *Why it matters: strict mode is only viable if real-world assertions stay expressible without AI.*
+- [ ] **`verfix show <id> --console` / `--network`.** The reviewer's #1 time-saver. The data already exists — `workers/src/artifacts/collector.ts` writes `<id>_console.json` and `<id>_network.json` next to every trace — but the only way to read it today is a throwaway Node script against `.verfix/runs/`. Fix: pure CLI surface on the existing `show` command (newest run when no id, pretty + `--output json`), reusing the trace-resolution helpers in `cli/src/local-runner.ts`. *Why it matters: artifacts an agent can only reach by guessing file paths aren't part of the product.*
+- [ ] **AI rate-limit circuit breaker.** Under persistent 429s (observed: Gemini on every single call), all four adapters in `workers/src/ai/adapters/` warn and retry independently on every step — the deterministic fallback works, but the run pays the retry latency and log spam each time, and the degradation is invisible in the result. Fix: per-run state threaded through healing + post-failure analysis; after 2–3 consecutive 429s, disable AI for the remainder of the run and log once ("AI disabled for this run: persistent rate limiting; continuing deterministic"). *Why it matters: silent degradation is the design; silent + slow + noisy is not.*
+- [ ] **Quiet JSON output.** `--output json` dumps the full event timeline (every screenshot path, every DOM-snapshot path) even when the consumer only wants pass/fail + failures. Fix: additive `--quiet` flag on `run` emitting only the stable contract fields (`passed`, `failures[]`, `fix_hint`, `timeline_url`, `trace_path`, `show_command`). Default unchanged — no contract break; guard with `cli/test/json-purity.sh`. *Why it matters: the JSON consumer is an agent paying per token; timeline detail is pull-when-needed (via `show --console/--network`), not push-every-run.*
+
+### Tier 2 — `verfix probe` (selector dry-run; medium effort)
+
+- [ ] Every selector fix today costs a full ~20s run (navigate → login → dashboard) just to learn whether one CSS selector resolves. v1: `verfix probe --selector "..."` / `--text "..."` loads the **last run's DOM snapshot** (already saved as `<id>.html` by `collector.ts`) into headless Chromium via `page.setContent()` and reports match count + outerHTML excerpts. Turns the config-first fix loop from ~20s into ~1s using artifacts we already collect. Documented caveat: the snapshot is end-of-run/at-failure state, not per-step — fine for the dominant case (fixing the selector that just failed); per-step probing waits for user pull. *Why it matters: the config-first rule is only tolerable if the config-fix loop is fast — this is the single biggest loop-time reduction available.*
+
+### Tier 3 — `no_console_errors` noise (design decision, not just code)
+
+Real SPAs fire unrelated transient errors on every run (branding fetch, session-validate, language-detect racing navigation). The reviewer burned three run-iterations discovering them one failure at a time, because the failure summary truncates to the first error string. The tempting fix — a built-in "ignore transient errors" default — is rejected: a default that swallows 401s can mask the exact regression a login flow exists to catch.
+
+- [ ] **Do now (deterministic, zero risk):** make *one* failing run sufficient to write the excludes. The engine already collects every error string in `details.errors` (`workers/src/assertions/engine.ts`); surface the full deduped list in CLI output, and upgrade the `no_console_errors` template in `workers/src/assertions/failure-hints.ts` to emit ready-to-paste suggested `exclude` regexes derived from the actual errors. Collapses the three-iteration discovery loop into one.
+- [ ] **Discuss before building:** opt-in per-assertion `ignoreTransientNetworkErrors: true` (drops `Failed to fetch` / `net::ERR_*`-class errors that raced navigation). Failure behavior and `fix_hint` semantics are agent-facing contract, so this goes through a GitHub Discussion first, per existing policy.
+
+### Declined
+
+- **Built-in noise-ignoring default for `no_console_errors`** — see Tier 3; deterministic-first says make the exclude loop fast, not silently swallow errors.
+- **Anything about the target app's missing `data-testid`s** — not Verfix's bug. One cheap action: a line in `generateAgentsSection()` guidance noting that when the agent owns the app source (outside a verify-fix loop), adding `data-testid`s is the durable fix for selector brittleness.
+- **New failure types** — nothing above needs one; the taxonomy stays frozen.
+
 ## Phase 4 — GitHub Action: from tool to gate (~1 month, after Phase 2 exit)
 
 *Why: this is the moment Verfix becomes infrastructure. The same `verfix.config.json` the agent used locally gates the PR — that's the portability story made visible.*

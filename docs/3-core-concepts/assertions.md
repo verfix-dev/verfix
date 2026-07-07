@@ -6,7 +6,7 @@ Assertions are the core mechanism for verifying application state in Strict and 
 
 - `page_loaded`: Verifies the page navigated successfully (not blank/errored).
 - `selector_visible`: Verifies a specific element is present and visible in the DOM.
-- `text_visible`: Verifies text exists anywhere on the page.
+- `text_visible`: Verifies text is visible anywhere on the page. Add `selector` to scope the search — see below.
 - `url_contains`: Verifies the current URL contains a specific substring.
 - `title_contains`: Verifies the page title contains a substring.
 - `no_console_errors`: Verifies no `console.error` lines were logged. See `exclude` below to allow known-noisy errors.
@@ -54,6 +54,23 @@ third-party script warning), without silencing every error:
   "exclude": ["ACTIVE_SESSION_EXISTS"]
 }
 ```
+
+## Scoping text_visible when text appears more than once
+
+Real pages repeat text — a stats-card title may also appear in a caption or
+nav item. `text_visible` passes when *any* visible occurrence matches. To
+assert the text appears in a specific place, add `selector` to scope the
+search to matches inside that element:
+
+```json
+{
+  "type": "text_visible",
+  "value": "Total Declarations",
+  "selector": "[data-testid=stats-card]"
+}
+```
+
+Scoped, the assertion fails if the text is only visible elsewhere on the page.
 
 Failure `detail`/`fix_hint` text for both assertions now names the concrete
 matched request (method, URL, status) or console error text, instead of a

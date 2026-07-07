@@ -26,7 +26,7 @@ export type FailureType =
 
 export interface AssertionDefinition {
   type: AssertionType;
-  selector?: string;      // for selector_visible
+  selector?: string;      // for selector_visible; on text_visible, scopes the text search to matches inside this selector
   value?: string;         // for text_visible, url_contains, title_contains, network_request_success
   timeout?: number;
   acceptStatuses?: number[]; // network_request_success: replaces the default 200-399 range when set

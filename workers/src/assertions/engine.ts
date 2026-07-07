@@ -79,12 +79,22 @@ export async function runAssertions(
 
       case 'text_visible': {
         const text = assertion.value || '';
+        const scope = assertion.selector;
         result = await timed(async () => {
+          const details: Record<string, unknown> = scope ? { text, scope } : { text };
           try {
-            const visible = await page.getByText(text, { exact: false }).isVisible({ timeout: assertion.timeout || 5000 });
-            return { passed: visible, details: { text } };
+            const base = scope ? page.locator(scope) : page;
+            // Real pages repeat text; a bare locator would hit Playwright's
+            // strict-mode violation on the second match. Pass if any matching
+            // text is visible (optionally within the `selector` scope).
+            const visible = await base
+              .getByText(text, { exact: false })
+              .filter({ visible: true })
+              .first()
+              .isVisible({ timeout: assertion.timeout || 5000 });
+            return { passed: visible, details };
           } catch (e: any) {
-            return { passed: false, error: e.message, details: { text } };
+            return { passed: false, error: e.message, details };
           }
         });
         break;

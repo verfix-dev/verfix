@@ -63,7 +63,7 @@ export function renderFixHint(type: FailureType, context: FailureContext): strin
     case 'text_mismatch':
       return context.expected && context.actual
         ? `Expected text "${context.expected}" but saw "${context.actual}". Verify content or wait for data to render.`
-        : 'Expected text did not match. Verify content or wait for data to render.';
+        : 'Expected text did not match. Verify content or wait for data to render. If the text appears in multiple places, add "selector" to text_visible to scope the search.';
     case 'url_mismatch':
       return context.expected && context.actual
         ? `Expected URL to contain "${context.expected}" but got "${context.actual}". Check routing/redirects and wait for navigation.`

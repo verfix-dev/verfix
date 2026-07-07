@@ -18,10 +18,12 @@ import { AssertionDefinition, AssertionResult } from '../../src/assertions/types
 // Implements only the surface area the assertion engine touches in strict mode
 // for passing assertions. Returned locators expose isVisible() resolving true.
 function makeFakePage(opts: { url?: string; title?: string } = {}) {
-  const fakeLocator = {
+  const fakeLocator: any = {
     isVisible: async (_o?: unknown) => true,
     waitFor: async (_o?: unknown) => {},
     first: () => fakeLocator,
+    filter: (_o?: unknown) => fakeLocator,
+    getByText: (_text: string, _o?: unknown) => fakeLocator,
   };
   return {
     url: () => opts.url ?? 'https://example.com/dashboard',

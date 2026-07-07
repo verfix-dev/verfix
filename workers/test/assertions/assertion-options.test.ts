@@ -1,7 +1,8 @@
 /**
  * Unit tests for the additive assertion options: `acceptStatuses` on
- * network_request_success, `exclude` on no_console_errors, and the richer
- * error/fix_hint text both assertions now carry on failure.
+ * network_request_success, `exclude` on no_console_errors, `selector`
+ * scoping on text_visible, and the richer error/fix_hint text these
+ * assertions now carry on failure.
  *
  * Uses a lightweight fake Playwright Page. No browser is launched.
  * Run with: ts-node test/assertions/assertion-options.test.ts
@@ -107,6 +108,70 @@ async function test_invalid_exclude_pattern_fails_clearly() {
   console.log('✓ an invalid exclude regex fails the assertion with a clear error');
 }
 
+// ─── text_visible / selector scoping ────────────────────────────────────────
+
+// Chainable fake locator: getByText → filter({visible}) → first → isVisible,
+// resolving to whether any "visible match" exists in that scope.
+function textLocator(visibleMatches: number): any {
+  const l: any = {
+    getByText: (_t: string, _o?: unknown) => l,
+    filter: (_o?: unknown) => l,
+    first: () => l,
+    isVisible: async (_o?: unknown) => visibleMatches > 0,
+  };
+  return l;
+}
+
+function makeTextPage(opts: { globalVisible: number; scoped?: Record<string, number> }) {
+  const locatorCalls: string[] = [];
+  const page = {
+    url: () => 'https://example.com/',
+    title: async () => '',
+    getByText: (_t: string, _o?: unknown) => textLocator(opts.globalVisible),
+    locator: (sel: string) => {
+      locatorCalls.push(sel);
+      return textLocator(opts.scoped?.[sel] ?? 0);
+    },
+    screenshot: async (_o?: unknown) => Buffer.from(''),
+  } as any;
+  return { page, locatorCalls };
+}
+
+async function test_text_visible_passes_when_any_match_visible() {
+  // Duplicated text on the page (e.g. a card title and a caption): the chain
+  // must not depend on a unique match — one visible occurrence passes.
+  const { page } = makeTextPage({ globalVisible: 1 });
+  const assertions: AssertionDefinition[] = [{ type: 'text_visible', value: 'Total Declarations' }];
+  const [result] = await runAssertions(page, assertions, [], [], '/tmp', 'exec', 'strict', '');
+  assert.strictEqual(result.passed, true, 'one visible match among duplicates should pass');
+  console.log('✓ unscoped text_visible passes when any match is visible');
+}
+
+async function test_text_visible_scoped_searches_inside_selector() {
+  const { page, locatorCalls } = makeTextPage({ globalVisible: 0, scoped: { '.stats-card': 1 } });
+  const assertions: AssertionDefinition[] = [
+    { type: 'text_visible', value: 'Total Declarations', selector: '.stats-card' },
+  ];
+  const [result] = await runAssertions(page, assertions, [], [], '/tmp', 'exec', 'strict', '');
+  assert.strictEqual(result.passed, true, 'text visible inside the scope should pass');
+  assert.ok(locatorCalls.includes('.stats-card'), `should scope via page.locator, got calls: ${locatorCalls}`);
+  console.log('✓ text_visible with selector scopes the search to that element');
+}
+
+async function test_text_visible_scoped_fails_when_absent_in_scope() {
+  // Text is visible elsewhere on the page but not inside the scope.
+  const { page } = makeTextPage({ globalVisible: 1, scoped: { '.stats-card': 0 } });
+  const assertions: AssertionDefinition[] = [
+    { type: 'text_visible', value: 'Total Declarations', selector: '.stats-card' },
+  ];
+  const [result] = await runAssertions(page, assertions, [], [], '/tmp', 'exec', 'strict', '');
+  assert.strictEqual(result.passed, false, 'text outside the scope should not satisfy a scoped assertion');
+  assert.strictEqual(result.failure_type, 'text_mismatch');
+  assert.strictEqual((result.details as any).scope, '.stats-card', 'details should carry the scope');
+  assert.ok(result.fix_hint?.includes('selector'), `fix_hint should mention selector scoping, got: ${result.fix_hint}`);
+  console.log('✓ scoped text_visible fails when the text is only visible outside the scope');
+}
+
 // ─── Runner ───────────────────────────────────────────────────────────────────
 
 const tests: Array<{ name: string; fn: () => Promise<void> }> = [
@@ -118,6 +183,9 @@ const tests: Array<{ name: string; fn: () => Promise<void> }> = [
   { name: 'test_exclude_pattern_suppresses_matching_error', fn: test_exclude_pattern_suppresses_matching_error },
   { name: 'test_exclude_pattern_can_suppress_all_errors', fn: test_exclude_pattern_can_suppress_all_errors },
   { name: 'test_invalid_exclude_pattern_fails_clearly', fn: test_invalid_exclude_pattern_fails_clearly },
+  { name: 'test_text_visible_passes_when_any_match_visible', fn: test_text_visible_passes_when_any_match_visible },
+  { name: 'test_text_visible_scoped_searches_inside_selector', fn: test_text_visible_scoped_searches_inside_selector },
+  { name: 'test_text_visible_scoped_fails_when_absent_in_scope', fn: test_text_visible_scoped_fails_when_absent_in_scope },
 ];
 
 (async () => {
