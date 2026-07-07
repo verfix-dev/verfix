@@ -1182,6 +1182,14 @@ program
         checkAssertions(flow.assertions, `flows[${idx}] (${id})`);
       });
 
+      const savedStateNames = new Set((config.flows || []).map((f: any) => f.saveState).filter(Boolean));
+      (config.flows || []).forEach((flow: any, idx: number) => {
+        const id = flow.id || flow.name || `flow_${idx + 1}`;
+        if (flow.useState && !savedStateNames.has(flow.useState)) {
+          warnings.push(`flows[${idx}] (${id}): useState "${flow.useState}" is never saved by any flow — add saveState: "${flow.useState}" to the flow that logs in`);
+        }
+      });
+
       if (!config.baseUrl) {
         warnings.push('baseUrl is not set — every "verfix run" will require --url');
       }
@@ -1827,6 +1835,8 @@ function normalizeFlows(flows: any[]): any[] {
       name: flow.name || flow.id || `flow_${idx + 1}`,
       mode: flow.mode,
       clearState: flow.clearState,
+      useState: flow.useState,
+      saveState: flow.saveState,
       steps: (flow.steps || []).map((rawStep: any, stepIdx: number) => {
         const step = interpolateStep(rawStep, `${flowPath}.steps[${stepIdx}]`);
         return {

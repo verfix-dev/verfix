@@ -48,6 +48,11 @@ export const FlowSchema = z.object({
   assertions: z.array(FlowAssertionSchema).optional(),
   // Clear cookies + local/session storage before this flow runs.
   clearState: z.boolean().optional(),
+  // Auth state reuse: restore the named storage state (cookies + localStorage)
+  // saved by a previous run / save this context's state under a name once the
+  // flow passes. Names become filenames under .verfix/state/.
+  useState: z.string().regex(/^[A-Za-z0-9_-]+$/, 'useState must contain only letters, digits, dash, underscore').optional(),
+  saveState: z.string().regex(/^[A-Za-z0-9_-]+$/, 'saveState must contain only letters, digits, dash, underscore').optional(),
 })
 
 export const VerfixConfigSchema = z.object({

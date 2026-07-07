@@ -28,7 +28,7 @@ Actions (each lands in the same step schema, each maps failures onto the *existi
 - [ ] `upload_file`
 - [ ] iframe targeting (a `frame` field on steps, not a new step type)
 - [ ] `wait_for_url` / wait for network idle
-- [ ] Auth state reuse (save/restore storage state) — without this, every flow re-implements login and people give up
+- [x] Auth state reuse (save/restore storage state) — without this, every flow re-implements login and people give up
 
 Assertions: **no new failure types.** Richness goes into the failure payload (see Phase 3), not the taxonomy. New types require a GitHub Discussion, per existing policy.
 

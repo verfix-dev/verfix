@@ -229,6 +229,9 @@ export async function runLocal(payload: any, opts: LocalRunOptions): Promise<Exe
       try {
         result = await engine.runVerification(jobPayload, {
           artifactsDir: runsDir,
+          // Saved auth states must survive run pruning, so they live beside
+          // (not inside) the runs dir. .verfix self-ignores via its .gitignore.
+          stateDir: path.join(path.dirname(runsDir), 'state'),
           attempt,
           headless,
           channel: opts.browser?.channel,

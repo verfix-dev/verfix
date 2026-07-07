@@ -524,6 +524,16 @@ If verification runs are misbehaving, use these commands to diagnose and fix:
       // over from a previous run can't change the outcome.
       "clearState": false,
 
+      // OPTIONAL — Auth state reuse, so flows don't re-implement login.
+      // On the flow that logs in: "saveState": "auth" — once the flow's steps
+      // and assertions pass, its cookies + localStorage are saved under that
+      // name (in .verfix/state/, never committed).
+      // On flows that need a session: "useState": "auth" — the saved state is
+      // restored before the run navigates, so the flow starts logged in.
+      // If the state doesn't exist yet (or the session expired and the flow
+      // fails), run the saving flow once to (re)create it.
+      "saveState": "auth",
+
       // REQUIRED — Ordered list of browser actions to execute.
       "steps": [
         // ... see "Step actions" below

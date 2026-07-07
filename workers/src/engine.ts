@@ -42,6 +42,14 @@ const IS_DOCKER =
     fs.existsSync('/.dockerenv')
   );
 
+// State names become filenames — reject anything that could escape stateDir.
+function storageStatePath(stateDir: string, name: string): string {
+  if (!/^[A-Za-z0-9_-]+$/.test(name)) {
+    throw new Error(`Invalid storage state name "${name}" — use only letters, digits, dash, underscore`);
+  }
+  return path.join(stateDir, `${name}.json`);
+}
+
 function resolveTargetUrl(rawUrl: string): string {
   // Host network mode: localhost IS the host, no rewrite needed.
   if (IS_HOST_NETWORK) return rawUrl;
@@ -66,6 +74,10 @@ const SUMMARY_TIMEOUT_MS = 10000;
 export interface EngineRunOptions {
   /** Directory where traces/screenshots/HAR/step captures are written. */
   artifactsDir: string;
+  /** Directory for named storage states (auth reuse via flow saveState /
+   *  useState). Default: <artifactsDir>/state. Files hold session cookies and
+   *  tokens — the location must never be committed or shared. */
+  stateDir?: string;
   /** Retry attempt number, reported as retry_count (default 0). */
   attempt?: number;
   /** Launch browser headless (default: PLAYWRIGHT_HEADLESS env, headless). */
@@ -143,8 +155,32 @@ async function execute(data: JobPayload, opts: EngineRunOptions): Promise<Execut
 
   try {
     const harPath = path.join(artifactsDir, `${data.id}.har`);
+
+    // ── Auth state reuse: restore ─────────────────────────────────────────────
+    // Storage state must be applied at context creation so cookies/localStorage
+    // exist before the app boots (SPAs read auth tokens on first load).
+    const stateDir = opts.stateDir ?? path.join(artifactsDir, 'state');
+    const restoreNames = [...new Set((data.flows || []).map(f => f.useState).filter((n): n is string => !!n))];
+    if (restoreNames.length > 1) {
+      // ponytail: one restored state per run (it's context-level). Flows asking
+      // for a second name share the first; split into separate runs to upgrade.
+      console.warn(`   ⚠ Multiple useState names (${restoreNames.join(', ')}) — only "${restoreNames[0]}" is restored this run.`);
+    }
+    let restoredState: string | undefined;
+    if (restoreNames.length > 0) {
+      const p = storageStatePath(stateDir, restoreNames[0]);
+      if (fs.existsSync(p)) {
+        restoredState = p;
+        console.log(`   🔑 Restoring saved storage state "${restoreNames[0]}"`);
+        tracker.pushEvent('action', `restored storage state "${restoreNames[0]}"`, { state: restoreNames[0] }, { category: 'info' });
+      } else {
+        console.log(`   ℹ️  No saved storage state "${restoreNames[0]}" yet — running without it (a flow with saveState creates it)`);
+      }
+    }
+
     const context = await browser.newContext({
       recordHar: { path: harPath },
+      ...(restoredState ? { storageState: restoredState } : {}),
     });
 
     await context.tracing.start({ screenshots: true, snapshots: true, sources: true });
@@ -238,6 +274,7 @@ async function execute(data: JobPayload, opts: EngineRunOptions): Promise<Execut
           await waitForStableDOM(page, 400, 5000);
           tracker.pushEvent('dom_change', `DOM stabilized after flow ${flow.name}`, { flow: flow.name }, { category: 'info' });
 
+          let flowPassed = true;
           if (flow.assertions && flow.assertions.length > 0) {
             ranFlowAssertions = true;
             console.log(`\n🔍 Running ${flow.assertions.length} flow assertion(s)...`);
@@ -245,6 +282,18 @@ async function execute(data: JobPayload, opts: EngineRunOptions): Promise<Execut
               page, flow.assertions, consoleLogs, networkRequests, artifactsDir, data.id, flow.mode || data.mode, data.task, tracker, flow.name
             );
             assertionResults.push(...flowResults);
+            flowPassed = flowResults.every(r => r.passed);
+          }
+
+          // ── Auth state reuse: save ──────────────────────────────────────────
+          // Only a verified-good session is worth reusing: steps ran without
+          // throwing and every flow assertion passed.
+          if (flow.saveState && flowPassed) {
+            const p = storageStatePath(stateDir, flow.saveState);
+            fs.mkdirSync(path.dirname(p), { recursive: true });
+            await context.storageState({ path: p });
+            console.log(`   💾 Saved storage state "${flow.saveState}" for reuse via useState`);
+            tracker.pushEvent('action', `saved storage state "${flow.saveState}"`, { flow: flow.name, state: flow.saveState }, { category: 'info' });
           }
         }
       }

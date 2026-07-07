@@ -72,6 +72,12 @@ export interface Flow {
   assertions?: AssertionDefinition[];
   // Clear cookies + local/session storage before this flow runs.
   clearState?: boolean;
+  // Restore the named storage state (cookies + localStorage) saved by a
+  // previous run. Applied at browser-context creation, before navigation.
+  useState?: string;
+  // After this flow's steps and assertions pass, save the context's storage
+  // state under this name so later runs can restore it via `useState`.
+  saveState?: string;
 }
 
 export interface JobPayload {
