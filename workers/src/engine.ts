@@ -291,7 +291,10 @@ async function execute(data: JobPayload, opts: EngineRunOptions): Promise<Execut
           if (flow.saveState && flowPassed) {
             const p = storageStatePath(stateDir, flow.saveState);
             fs.mkdirSync(path.dirname(p), { recursive: true });
-            await context.storageState({ path: p });
+            // indexedDB covers Firebase Auth / MSAL-style token caches.
+            // ponytail: sessionStorage is NOT captured (no Playwright support,
+            // per-tab semantics) — apps keeping tokens only there re-login.
+            await context.storageState({ path: p, indexedDB: true });
             console.log(`   💾 Saved storage state "${flow.saveState}" for reuse via useState`);
             tracker.pushEvent('action', `saved storage state "${flow.saveState}"`, { flow: flow.name, state: flow.saveState }, { category: 'info' });
           }
