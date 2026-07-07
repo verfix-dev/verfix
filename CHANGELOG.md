@@ -5,9 +5,10 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.3.6] - 2026-07-07
 
 ### Changed
+- **`@verfix/engine` bumped to `0.1.4`.** CLI dependency bumped to `^0.1.4`.
 - **JSON output is now a summary by default; `--full` restores the raw timeline.** `verfix run --output json` no longer embeds the full ExecutionResult (`raw`) — the event timeline was ~93% of the payload and agents paid for it on every fix-loop iteration. The summary is lossless for anything non-nominal: every failure now carries the `flow` and `assertion` that produced it, skipped `optional` steps are listed explicitly in `skipped_optional_steps` (never silent), `ai_summary` stays when present, and `retry_count` > 0 signals crash-retries. `detail_commands` in the output names the exact `verfix show` commands that return console/network detail on demand. `--quiet` (added earlier in this cycle, now the default behavior) is kept as a no-op alias. Taken while pre-1.0 with no known consumers.
 
 ### Added
