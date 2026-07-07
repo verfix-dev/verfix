@@ -1812,6 +1812,106 @@ program
     process.exit(res.status ?? 0);
   });
 
+// ─── probe command ────────────────────────────────────────────────────────────
+
+program
+  .command('probe [executionId]')
+  .description('Dry-run selectors/text against a run\'s saved DOM snapshot (~1s) instead of a full verification run (newest run if no id given)')
+  .option('-s, --selector <selectors...>', 'CSS selector(s) to check (config `selectors` aliases resolve first)')
+  .option('-t, --text <texts...>', 'Text content to check (same matching as text_visible)')
+  .option('-c, --config <file>', 'Path to verfix.config.json (for the selectors alias map)')
+  .option('-o, --output <format>', 'Output format: pretty | json', 'pretty')
+  .action(async (executionId: string | undefined, opts) => {
+    const selectors: string[] = opts.selector || [];
+    const texts: string[] = opts.text || [];
+    const emitErr = (error: string, message: string, hint: string) => {
+      if (opts.output === 'json') emitJsonError({ error, message, hint });
+      else console.error(chalk.red(message) + '\n' + chalk.gray(hint));
+      process.exit(2);
+    };
+
+    if (selectors.length === 0 && texts.length === 0) {
+      emitErr('missing_query', 'probe needs at least one --selector or --text', 'Example: verfix probe --selector "[data-testid=submit]"');
+    }
+
+    const { findRunArtifact, probeSnapshot, ensureChromium } = await import('./local-runner');
+    const snapshotPath = findRunArtifact('.html', executionId);
+    if (!snapshotPath) {
+      emitErr(
+        'artifact_not_found',
+        executionId
+          ? `No DOM snapshot found for execution ${executionId} under .verfix/runs/`
+          : 'No local runs found under .verfix/runs/.',
+        'Run a verification first: verfix run --output json — probe checks selectors against its saved end-of-run DOM.',
+      );
+    }
+
+    // Resolve config `selectors` aliases so probing a logical name checks the
+    // same real selector a flow step would use.
+    let aliasMap: Record<string, string> = {};
+    let browserCfg: any;
+    const configPath = opts.config ? path.resolve(opts.config) : path.resolve(process.cwd(), DEFAULT_CONFIG);
+    if (fs.existsSync(configPath)) {
+      try {
+        const cfg = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+        aliasMap = cfg.selectors || {};
+        browserCfg = cfg.browser;
+      } catch {
+        // Unreadable config just means no alias resolution.
+      }
+    }
+
+    const queries = [
+      ...selectors.map(s => ({
+        kind: 'selector' as const,
+        query: s,
+        ...(Object.prototype.hasOwnProperty.call(aliasMap, s) ? { resolvedSelector: aliasMap[s] } : {}),
+      })),
+      ...texts.map(t => ({ kind: 'text' as const, query: t })),
+    ];
+
+    await ensureChromium(browserCfg);
+    const results = await (async () => {
+      try {
+        return await probeSnapshot(snapshotPath!, queries, browserCfg);
+      } catch (e: any) {
+        emitErr('probe_failed', `Probe failed: ${e.message}`, 'The snapshot may be corrupted — rerun the verification and probe again.');
+        return []; // unreachable
+      }
+    })();
+
+    const executionIdFromFile = path.basename(snapshotPath!, '.html');
+    const allMatched = results.every(r => r.count > 0);
+    if (opts.output === 'json') {
+      emitJson({
+        snapshot: snapshotPath,
+        execution_id: executionIdFromFile,
+        // The snapshot is END-OF-RUN state (at-failure state for failed runs),
+        // not per-step state — a selector present here can still be missing at
+        // the step where the flow needs it.
+        snapshot_semantics: 'end_of_run',
+        queries: results,
+        exit_code: allMatched ? 0 : 1,
+      });
+      process.exit(allMatched ? 0 : 1);
+    }
+
+    console.log(chalk.gray(`\n  Probing DOM snapshot of ${executionIdFromFile} (end-of-run state)\n`));
+    for (const r of results) {
+      const label = r.kind === 'selector' ? r.query + (r.resolved_selector ? chalk.gray(` → ${r.resolved_selector}`) : '') : `text "${r.query}"`;
+      if (r.count === 0) {
+        console.log(`  ${chalk.red('✗')} ${label} — ${chalk.red('0 matches')}`);
+      } else {
+        console.log(`  ${chalk.green('✓')} ${label} — ${r.count} match(es)`);
+        for (const m of r.matches) {
+          console.log(chalk.gray(`      ${m.visible ? '' : '[hidden] '}${m.excerpt.replace(/\s+/g, ' ').slice(0, 160)}`));
+        }
+      }
+    }
+    console.log('');
+    process.exit(allMatched ? 0 : 1);
+  });
+
 // ─── list command ─────────────────────────────────────────────────────────────
 
 program

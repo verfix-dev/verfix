@@ -142,6 +142,23 @@ async function main() {
   const resPrivate = await runCli('private');
   server.close();
 
+  // Probe the newest run's DOM snapshot (the /private page) — no server needed.
+  const resProbe = await new Promise<{ status: number | null; stdout: string; stderr: string }>((resolve, reject) => {
+    const child = spawn(
+      'npx',
+      ['ts-node', '--project', path.join(CLI_DIR, 'tsconfig.json'), path.join(CLI_DIR, 'src', 'index.ts'),
+        'probe', '--selector', '#content', '--selector', '#does-not-exist', '--text', 'Private OK', '--output', 'json'],
+      { cwd: projectDir, env: childEnv },
+    );
+    let stdout = '';
+    let stderr = '';
+    const killTimer = setTimeout(() => { child.kill('SIGKILL'); reject(new Error('probe timed out after 60s')); }, 60000);
+    child.stdout.on('data', d => { stdout += d; });
+    child.stderr.on('data', d => { stderr += d; });
+    child.on('error', reject);
+    child.on('close', status => { clearTimeout(killTimer); resolve({ status, stdout, stderr }); });
+  });
+
   // ── Assert: exit code, pure-JSON stdout, contract fields, persistence ──
   try {
     assert.strictEqual(res.status, 0, `exit code 0 expected.\nstdout: ${res.stdout}\nstderr: ${res.stderr}`);
@@ -198,7 +215,16 @@ async function main() {
     assert.strictEqual(privateJson.passed, true, `private flow should start logged-in via useState — got: ${resPrivate.stdout}`);
     console.log('✓ separate run with useState starts authenticated (no login steps)');
 
-    console.log('\n8 passed, 0 failed\n');
+    assert.strictEqual(resProbe.status, 1, `probe with one miss should exit 1.\nstdout: ${resProbe.stdout}\nstderr: ${resProbe.stderr}`);
+    const probeJson = JSON.parse(resProbe.stdout);
+    const byQuery = Object.fromEntries(probeJson.queries.map((q: any) => [q.query, q]));
+    assert.strictEqual(byQuery['#content'].count, 1, 'existing selector should match the snapshot');
+    assert.ok(byQuery['#content'].matches[0].excerpt.includes('Private OK'), 'excerpt carries the matched outerHTML');
+    assert.strictEqual(byQuery['#does-not-exist'].count, 0, 'missing selector reports 0 matches');
+    assert.strictEqual(byQuery['Private OK'].count, 1, 'text query matches like text_visible');
+    console.log('✓ probe dry-runs selectors/text against the saved DOM snapshot');
+
+    console.log('\n9 passed, 0 failed\n');
   } finally {
     fs.rmSync(projectDir, { recursive: true, force: true });
   }

@@ -162,6 +162,13 @@ verfix show <execution_id>
 # Omit <execution_id> to use the newest run.
 verfix show <execution_id> --console --output json
 verfix show <execution_id> --network --output json
+
+# Dry-run a selector/text against the last run's saved DOM (~1s) BEFORE paying
+# for a full re-run — exit 0 = all matched, 1 = something didn't. Config
+# \`selectors\` aliases resolve. Caveat: the snapshot is END-OF-RUN state, so a
+# match here doesn't guarantee the element existed at the step that failed.
+verfix probe --selector "[data-testid=submit]" --output json
+verfix probe --text "Welcome back" --output json
 \`\`\`
 
 ---
@@ -433,7 +440,7 @@ ${failureList}
 
 | Failure type | What to do |
 |---|---|
-| \`selector_not_found\` | Inspect the source, find the correct selector, update the step. |
+| \`selector_not_found\` | Inspect the source, find the correct selector, update the step. Check candidate selectors with \`verfix probe --selector "..."\` (~1s) before paying for a full re-run. |
 | \`selector_not_visible\` | Element exists but is hidden. Check conditional rendering logic (CSS \`display:none\`, \`visibility:hidden\`, or zero dimensions). |
 | \`text_mismatch\` | Expected text not on page. Check if text is dynamically loaded — add a \`wait_for_selector\` step before the assertion. |
 | \`url_mismatch\` | Navigation didn't reach expected URL. Check routing, redirects, or auth guards. |
@@ -449,8 +456,10 @@ ${failureList}
 \`\`\`
 1. Read failures[0].type
 2. Apply the fix strategy from the table above
-3. Re-run:  verfix run --flow <id> --output json
-4. If still failing after 3 attempts → stop, give the user the show_command
+3. For selector/text fixes: verfix probe --selector "..." first (~1s dry-run
+   against the failed run's DOM) — only re-run once the probe matches
+4. Re-run:  verfix run --flow <id> --output json
+5. If still failing after 3 attempts → stop, give the user the show_command
 \`\`\`
 
 ---

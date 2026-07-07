@@ -160,6 +160,8 @@ npx verfix flows             # List all flows in verfix.config.json
 npx verfix run               # Run all flows
 npx verfix run --flow <id>   # Run a specific flow
 npx verfix show [id]         # Open the Playwright trace viewer for a run
+npx verfix show --console    # Print a run's captured console log (--network for requests)
+npx verfix probe -s "<css>"  # Dry-run a selector against the last run's DOM (~1s)
 npx verfix list              # List recent runs
 npx verfix status            # Check setup health (config, browser, last run)
 npx verfix doctor            # Diagnose common setup issues
