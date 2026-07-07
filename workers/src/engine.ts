@@ -16,6 +16,7 @@ import { executeFlow } from './browser/flow-executor';
 import { waitForStableDOM } from './reliability/retry';
 import { pool } from './browser/pool';
 import { generateFailureSummary } from './ai/summarizer';
+import { resetAIBreaker } from './ai/circuit-breaker';
 import { runExploration } from './ai/exploration';
 
 export * from './assertions/types';
@@ -117,6 +118,9 @@ export async function shutdownEngine(): Promise<void> {
 }
 
 async function execute(data: JobPayload, opts: EngineRunOptions): Promise<ExecutionResult> {
+  // Per-run AI state: a rate-limit breaker opened by a previous job must not
+  // leak into this one (long-lived server workers).
+  resetAIBreaker();
   const startTime = Date.now();
   const attempt = opts.attempt ?? 0;
   const artifactsDir = opts.artifactsDir;

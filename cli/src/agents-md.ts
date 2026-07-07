@@ -139,6 +139,10 @@ verfix status
 # Run a specific flow
 verfix run --flow <flow-id> --output json
 
+# Same, without the raw event timeline (much smaller output; fetch details
+# on demand with \`verfix show\` below)
+verfix run --flow <flow-id> --output json --quiet
+
 # Run all flows
 verfix run --output json
 
@@ -150,6 +154,13 @@ verfix run --flow <flow-id> --url http://localhost:5173 --output json
 
 # Open the recorded Playwright trace of a run (for the human to inspect)
 verfix show <execution_id>
+
+# Print a run's FULL captured console errors / network requests — use this to
+# inspect failure detail (e.g. before writing no_console_errors "exclude"
+# patterns) instead of reading files out of .verfix/runs/.
+# Omit <execution_id> to use the newest run.
+verfix show <execution_id> --console --output json
+verfix show <execution_id> --network --output json
 \`\`\`
 
 ---

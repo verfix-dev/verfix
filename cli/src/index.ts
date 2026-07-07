@@ -1297,6 +1297,7 @@ program
   .option('-f, --flow <id>', 'Flow id or name to run')
   .option('-m, --mode <mode>', 'Verification mode: strict | assisted | smoke | exploratory')
   .option('-o, --output <format>', 'Output format: pretty | json', 'json')
+  .option('-q, --quiet', 'JSON output: omit the raw event timeline — only the stable contract fields (passed, failures, fix_hints, trace_path)', false)
   .option('--dashboard <url>', 'Dashboard base URL for timeline links')
   .option('--timeout <ms>', 'Timeout in milliseconds', '15000')
   .option('--retries <n>', 'Number of retries on failure', '2')
@@ -1616,7 +1617,10 @@ program
         ...(runnerMode === 'local' ? { trace_path: tracePath, show_command: showCommand } : {}),
         exit_code: passed ? 0 : 1,
         execution_id: result.executionId,
-        raw: result,
+        // The full ExecutionResult (event timeline, per-step artifact paths) is
+        // pull-when-needed data — agents on --quiet fetch details via
+        // `verfix show <id> --console/--network` instead of paying for it here.
+        ...(opts.quiet ? {} : { raw: result }),
       };
       // End the verify cycle only on a clean pass; keep the baseline otherwise so
       // a revert-and-rerun resolves cleanly.
@@ -1702,9 +1706,68 @@ program
 
 program
   .command('show [executionId]')
-  .description('Open the Playwright trace viewer for a local run (newest run if no id given)')
-  .action(async (executionId?: string) => {
-    const { findTraceZip, playwrightCliPath } = await import('./local-runner');
+  .description('Open the Playwright trace viewer for a local run (newest run if no id given); --console/--network print the captured logs instead')
+  .option('--console', 'Print the run\'s captured console log (full untruncated error text)', false)
+  .option('--network', 'Print the run\'s captured network requests', false)
+  .option('-o, --output <format>', 'Output format for --console/--network: pretty | json', 'pretty')
+  .action(async (executionId: string | undefined, opts) => {
+    const { findTraceZip, findRunArtifact, playwrightCliPath } = await import('./local-runner');
+
+    // ── Log inspection: first-class access to the artifacts every run already
+    // writes, so nobody has to spelunk in .verfix/runs/ with a script.
+    if (opts.console || opts.network) {
+      const readArtifact = (suffix: string, label: string): any[] | null => {
+        const p = findRunArtifact(suffix, executionId);
+        if (!p) {
+          if (opts.output === 'json') {
+            emitJsonError({
+              error: 'artifact_not_found',
+              message: executionId
+                ? `No ${label} log found for execution ${executionId} under .verfix/runs/`
+                : 'No local runs found under .verfix/runs/.',
+              hint: 'Run a verification first: verfix run --output json',
+            });
+          } else {
+            console.error(chalk.red(executionId
+              ? `No ${label} log found for execution ${executionId} under .verfix/runs/`
+              : 'No local runs found under .verfix/runs/. Run a verification first: verfix run --output json'));
+          }
+          process.exit(2);
+        }
+        try {
+          return JSON.parse(fs.readFileSync(p, 'utf-8'));
+        } catch (e: any) {
+          console.error(chalk.red(`Could not parse ${p}: ${e.message}`));
+          process.exit(2);
+        }
+      };
+
+      const out: { console_logs?: any[]; network_requests?: any[] } = {};
+      if (opts.console) out.console_logs = readArtifact('_console.json', 'console') ?? [];
+      if (opts.network) out.network_requests = readArtifact('_network.json', 'network') ?? [];
+
+      if (opts.output === 'json') {
+        emitJson(out);
+        return;
+      }
+      if (out.console_logs) {
+        console.log(chalk.bold(`\n  Console log (${out.console_logs.length} entries):`));
+        for (const l of out.console_logs) {
+          const color = l.type === 'error' ? chalk.red : l.type === 'warning' ? chalk.yellow : chalk.gray;
+          console.log(`    ${color(`[${l.type}]`)} ${l.text}`);
+        }
+      }
+      if (out.network_requests) {
+        console.log(chalk.bold(`\n  Network requests (${out.network_requests.length}):`));
+        for (const r of out.network_requests) {
+          const color = r.status >= 400 ? chalk.red : r.status >= 300 ? chalk.yellow : chalk.green;
+          console.log(`    ${color(String(r.status))} ${r.method} ${r.url} ${chalk.gray(`(${r.timing_ms}ms)`)}`);
+        }
+      }
+      console.log('');
+      return;
+    }
+
     const traceZip = findTraceZip(executionId);
 
     if (!traceZip) {

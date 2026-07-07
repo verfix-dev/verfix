@@ -291,21 +291,26 @@ export async function runLocal(payload: any, opts: LocalRunOptions): Promise<Exe
   return result;
 }
 
-/** Find the trace zip for an execution id (or the newest run when omitted). */
-export function findTraceZip(executionId?: string, cwd: string = process.cwd()): string | null {
+/** Find a run artifact by filename suffix for an execution id (or the newest run when omitted). */
+export function findRunArtifact(suffix: string, executionId?: string, cwd: string = process.cwd()): string | null {
   const runsDir = localRunsDir(cwd);
   if (!fs.existsSync(runsDir)) return null;
 
   if (executionId) {
-    const p = path.join(runsDir, `${executionId}_trace.zip`);
+    const p = path.join(runsDir, `${executionId}${suffix}`);
     return fs.existsSync(p) ? p : null;
   }
 
-  const traces = fs.readdirSync(runsDir)
-    .filter(f => f.endsWith('_trace.zip'))
+  const matches = fs.readdirSync(runsDir)
+    .filter(f => f.endsWith(suffix))
     .map(f => path.join(runsDir, f))
     .sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs);
-  return traces[0] ?? null;
+  return matches[0] ?? null;
+}
+
+/** Find the trace zip for an execution id (or the newest run when omitted). */
+export function findTraceZip(executionId?: string, cwd: string = process.cwd()): string | null {
+  return findRunArtifact('_trace.zip', executionId, cwd);
 }
 
 /** Read a persisted local run result by execution id. */

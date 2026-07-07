@@ -14,6 +14,7 @@
 
 import { ProviderAdapter, ChatMessage, CompletionOptions } from './types'
 import { fetchWithTimeout, parseJsonSafe } from './_http'
+import { reportRateLimit } from '../circuit-breaker'
 
 const OPENROUTER_BASE_URL = 'https://openrouter.ai'
 
@@ -72,6 +73,7 @@ export class OpenRouterAdapter implements ProviderAdapter {
       }
       if (res.status === 429) {
         console.warn('  ⚠ OpenRouter: Rate limited.')
+        reportRateLimit('OpenRouter')
         return null
       }
       if (!res.ok) {

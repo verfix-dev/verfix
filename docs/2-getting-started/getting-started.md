@@ -63,6 +63,15 @@ Or a specific run by its execution id (printed in the run output):
 npx verfix show exec_abc123
 ```
 
+To read a run's captured logs in the terminal instead of the trace viewer —
+full untruncated console error text and every network request with status and
+timing (handy for writing `exclude` / `acceptStatuses` after a failure):
+
+```bash
+npx verfix show --console            # newest run's console log
+npx verfix show exec_abc123 --network --output json
+```
+
 `npx verfix list` shows the recent runs, and `npx verfix status` summarizes your
 setup (config, browser, last run).
 
