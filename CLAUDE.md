@@ -69,8 +69,9 @@ No repo-wide build/test command — each package is independent.
 # Type check (required for any cli/, workers/, or sdk/ change)
 (cd cli && npx tsc --noEmit) && (cd workers && npx tsc --noEmit --skipLibCheck) && echo "✅ All types clean"
 
-# Build
-(cd cli && npm run build) && (cd workers && npx tsc --skipLibCheck)
+# Build (workers MUST use npm run build — bare `npx tsc` has no outDir and
+# litters src/ and test/ with in-place .js files)
+(cd cli && npm run build) && (cd workers && npm run build)
 
 # CLI tests (each is a standalone ts-node script, not a test runner)
 cd cli && npm test                       # runs all four below

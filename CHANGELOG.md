@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Built-in `${TIMESTAMP}` / `${RANDOM}` value macros.** Resolve once per run (the same token yields the same value across every step and assertion, so a flow can type `item-${RANDOM}` and assert it visible later). Makes "create X" flows idempotent against backends with uniqueness validation — no more hand-bumping product codes between reruns. An explicitly-set env var of the same name still wins.
+- **`waitUntil` field on `navigate` steps.** Choose `load` (new default), `domcontentloaded`, `networkidle`, or `commit`.
+- **sessionStorage in `saveState`/`useState`.** Captured to a `<name>.session.json` sidecar (Playwright's `storageState` can't carry it) and re-seeded per tab via an init script on restore, keyed to the saved origin. JWT-in-sessionStorage SPAs now restore a working session instead of a logged-out browser.
+- **Crash artifacts.** A crashed run (hard timeout, browser death, navigation failure) now saves its Playwright trace, failure screenshot, DOM snapshot, and HAR, so `verfix show` works on crashes — previously only completed runs had artifacts.
+- **Agent instructions self-refresh.** `.verfix/INSTRUCTIONS.md` now carries the generating CLI's version stamp; `verfix run` regenerates it when the stamp doesn't match the running CLI, so agents learn about new step fields/macros/commands after a `verfix` update without re-running init. Only the Verfix-owned file is touched — AGENTS.md is never modified automatically.
+- **Per-run AI time budget** (`AI_TIME_BUDGET_MS`, default 20s). AI calls (self-healing, failure analysis) share a wall-clock budget; once spent, the circuit breaker opens and the run continues deterministically. The breaker also opens on 3 consecutive failures of *any* kind (5xx storms, request timeouts, invalid keys) — previously only 429s counted.
+
+### Fixed
+- **Hard-timeout race spawning concurrent attempts.** The hard job timeout used to reject while the stuck attempt kept running, and the retry then executed *concurrently* with it — two simultaneous logins triggering app session-conflict dialogs. A hard timeout now tears the attempt down (preserving its trace), returns a failed result, and is never retried.
+- **Hard job timeout now scales with flow size** — `max(timeout × 4, timeout × (steps + assertions + 2), 60s)` instead of a flat `max(timeout × 4, 60s)`, so a long multi-flow chain whose steps are each within budget no longer hits a fixed 60s wall clock (previously worked around by splitting into separate `verfix run` invocations). Documented in configuration.md.
+- **`navigate` no longer hardcodes `networkidle`.** Default is now the `load` event: on pages with continuous polling (stats, live dashboards) the network never goes quiet, so navigate timed out nondeterministically. Opt back in per step with `"waitUntil": "networkidle"` or a `wait_for_network_idle` step.
+
 ## [0.3.6] - 2026-07-07
 
 ### Changed
