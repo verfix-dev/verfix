@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.9] - 2026-07-08
+
+### Fixed
+- **First-run JSON purity.** On a machine that had never shown the one-time telemetry notice, the notice printed to stdout and corrupted `--output json` — an agent's very first `verfix doctor --output json` on a fresh install got invalid JSON. The notice and the update-available banners now go to stderr (stdout is the pure-JSON data channel). `json-purity.sh` gained a fresh-HOME first-run check so warmed dev machines can't mask this class of bug.
+
 ## [0.3.8] - 2026-07-08
 
 ### Changed
