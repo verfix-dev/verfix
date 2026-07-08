@@ -168,7 +168,10 @@ async function executeStep(page: Page, step: FlowStep, knownSelectors: Record<st
     }
     case 'navigate': {
       const targetUrl = step.value || step.url || '';
-      await page.goto(targetUrl, { waitUntil: 'networkidle', timeout: t });
+      // Default 'load', not 'networkidle': pages with continuous polling never
+      // reach network-quiet, so networkidle times out nondeterministically.
+      // Opt in per step via waitUntil, or use a wait_for_network_idle step.
+      await page.goto(targetUrl, { waitUntil: step.waitUntil || 'load', timeout: t });
       console.log(`    navigate → ${targetUrl}`);
       break;
     }

@@ -14,6 +14,9 @@ export const FlowStepSchema = z.object({
   text: z.string().optional(),
   value: z.string().optional(),
   url: z.string().optional(),
+  // navigate: load state to wait for (default 'load'). 'networkidle' never
+  // settles on pages that poll continuously — prefer wait_for_selector after.
+  waitUntil: z.enum(['load', 'domcontentloaded', 'networkidle', 'commit']).optional(),
   // Keyboard key for the 'press' action (Playwright key names, e.g. "Enter", "Escape", "Tab").
   key: z.string().optional(),
   timeout: z.number().optional(),
