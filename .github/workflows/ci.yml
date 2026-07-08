@@ -1,0 +1,97 @@
+# Repo test CI: typecheck, build, package test suites, JSON-purity guard, and
+# a dogfood run of verfix itself against testbed/ (local mode, strict, no AI key).
+#
+# This is NOT the Phase 4 GitHub Action product (PR comments, preview-URL
+# verification, artifact presentation) — that ships separately, after Phase 2.
+#
+# The dashboard is not linted here: it is part of the frozen server mode and its
+# build is exercised by publish-server.yml whenever dashboard/** changes.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  node:
+    name: CLI + engine
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install (workspaces link cli <-> workers <-> sdk)
+        run: npm install
+
+      - name: Type check
+        run: (cd cli && npx tsc --noEmit) && (cd workers && npx tsc --noEmit --skipLibCheck)
+
+      - name: Build
+        run: (cd cli && npm run build) && (cd workers && npm run build)
+
+      - name: Cache Playwright Chromium
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      # Installed from workers/ so the browser version is resolved through the
+      # engine's own Playwright dependency — same rule as cli/src/local-runner.ts.
+      - name: Install Chromium
+        run: cd workers && npx playwright install --with-deps chromium
+
+      - name: Engine tests
+        run: cd workers && npm test
+
+      - name: CLI tests (includes local-runner e2e)
+        run: cd cli && npm test
+
+      - name: JSON purity guard
+        run: bash cli/test/json-purity.sh
+
+      - name: Dogfood — verfix verifies the testbed
+        run: |
+          node testbed/server.js &
+          for i in $(seq 1 20); do
+            curl -fs http://127.0.0.1:3947 >/dev/null && break
+            sleep 0.5
+          done
+          node cli/dist/index.js run --config testbed/verfix.config.json --output json
+
+      # Debugging aid for red runs only — not artifact handling for users.
+      - name: Upload run traces on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verfix-traces
+          path: .verfix/runs/
+          if-no-files-found: ignore
+
+  api:
+    name: Go API
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: api/go.mod
+          cache-dependency-path: api/go.sum
+
+      - name: Build and test
+        run: cd api && go build ./... && go test ./...
+
+      - name: gofmt
+        run: |
+          cd api
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "gofmt needed on:"
+            echo "$unformatted"
+            exit 1
+          fi
