@@ -28,11 +28,16 @@ jobs:
       - name: Install (workspaces link cli <-> workers <-> sdk)
         run: npm install
 
+      # The engine builds first: @verfix/engine's types live in workers/dist,
+      # so the cli typecheck cannot resolve the module until it exists.
+      - name: Build engine
+        run: cd workers && npm run build
+
       - name: Type check
         run: (cd cli && npx tsc --noEmit) && (cd workers && npx tsc --noEmit --skipLibCheck)
 
-      - name: Build
-        run: (cd cli && npm run build) && (cd workers && npm run build)
+      - name: Build CLI
+        run: cd cli && npm run build
 
       - name: Cache Playwright Chromium
         uses: actions/cache@v4
