@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.8] - 2026-07-08
+
+### Changed
+- **`@verfix/engine` bumped to `0.1.6`.** CLI dependency bumped to `^0.1.6`.
+
+### Fixed
+- **Step selector misses now classify as `selector_not_found` / `selector_not_visible`, not `timeout`.** A step (`click`, `type`, …) whose target never appeared surfaced Playwright's raw TimeoutError — failure type `timeout` with the hint "increase timeout", steering agents away from the actual fix. The engine now classifies the wait failure at the step (`locator.count()` distinguishes "matched nothing in the DOM" from "matched N elements, none visible"), the failure carries the missing selector in its `selector` field, and the `fix_hint` points at the config-first path (`verfix probe` dry-runs a replacement selector in ~1s). Genuine waits (`wait_for_url`, `wait_for_network_idle`, navigation) still report `timeout`. The CLI also recognizes raw Playwright locator-wait messages, so it classifies correctly even against an older engine.
+- **ANSI escape codes stripped from failure `detail`s.** Playwright call logs embedded terminal color codes inside the JSON contract — token noise for agents, now removed.
+
+### Added
+- **Self-verification in CI.** The repo now dogfoods itself: `testbed/` (a zero-dependency app + flow library exercising the Phase 2 step surface) runs through the built CLI on every push/PR, alongside all package test suites and the JSON-purity guard (`.github/workflows/ci.yml`). This also restores the smoke test documented in CONTRIBUTING.
+
 ## [0.3.7] - 2026-07-08
 
 ### Changed
