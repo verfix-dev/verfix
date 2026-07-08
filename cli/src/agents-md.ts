@@ -4,13 +4,15 @@ import { FAILURE_TYPES } from './constants';
 
 // ─── AGENTS.md generation ────────────────────────────────────────────────────
 
-/** CLI version, read from package.json (works from src/ under ts-node and dist/ built). */
+/** CLI version, read from package.json (works from src/ under ts-node and dist/ built). Memoized — package.json doesn't change mid-process. */
+let cachedCliVersion: string | undefined;
 export function getCliVersion(): string {
+  if (cachedCliVersion) return cachedCliVersion;
   try {
     const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf-8'));
-    if (pkg?.version) return pkg.version;
+    if (pkg?.version) return (cachedCliVersion = pkg.version);
   } catch { /* fall through */ }
-  return '0.0.0';
+  return (cachedCliVersion = '0.0.0');
 }
 
 /** Matches the version stamp embedded in generated instructions, so a CLI

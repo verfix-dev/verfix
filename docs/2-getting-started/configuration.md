@@ -93,6 +93,14 @@ breach the run is torn down and reported as a failed result (with its trace
 preserved); it is **not retried**, since a timed-out job would collide with
 its own retry. Raise `timeout` to raise the cap.
 
+Two related knobs are env vars rather than config, since they tune AI-provider
+behavior rather than the flow itself:
+
+| Env var | Default | Purpose |
+|---|---|---|
+| `AI_TIME_BUDGET_MS` | 20000 | Per-run budget for AI self-healing calls; once spent, the breaker opens and further calls fail fast. Raise it if your flows lean on AI healing across multiple steps. |
+| `TEARDOWN_GRACE_MS` | 35000 | Extra time given to a timed-out attempt to tear down before the run is force-rejected. Raise it if you use a slower AI provider whose in-flight calls take longer to unwind. |
+
 ## External Dependencies
 
 Local mode (the default) has none — results are plain files under

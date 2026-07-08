@@ -1373,7 +1373,11 @@ program
         if (refreshVerfixInstructionsIfStale(process.cwd(), config)) {
           console.error(chalk.gray(`ℹ ${'.verfix/INSTRUCTIONS.md'} refreshed for verfix v${version}`));
         }
-      } catch { /* best-effort */ }
+      } catch (e: any) {
+        // Best-effort — a docs refresh must never fail a run — but per repo
+        // convention, don't swallow it silently (helps debug prod issues).
+        console.error(chalk.gray(`ℹ Could not refresh ${'.verfix/INSTRUCTIONS.md'}: ${e?.message || e}`));
+      }
     }
 
     let selectedFlows: any[] = [];

@@ -122,8 +122,9 @@ interface CancelState {
 
 // Extra time the backstop gives a timed-out attempt to tear down before we
 // give up and reject anyway (e.g. stuck outside Playwright entirely). Covers
-// the 30s AI fetch timeout.
-const TEARDOWN_GRACE_MS = 35000;
+// the 30s AI fetch timeout. Override via TEARDOWN_GRACE_MS for slower AI
+// providers that need more room to unwind.
+const TEARDOWN_GRACE_MS = parseInt(process.env.TEARDOWN_GRACE_MS || '35000');
 
 /**
  * Run one verification job end-to-end. Never rejects for in-page/assertion
