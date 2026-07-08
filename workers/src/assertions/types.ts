@@ -59,6 +59,10 @@ export interface FlowStep {
   };
   value?: string;
   url?: string;
+  // navigate: Playwright load state to wait for (default 'load'). 'networkidle'
+  // never settles on pages with continuous polling — prefer a follow-up
+  // wait_for_selector, or an explicit wait_for_network_idle step.
+  waitUntil?: 'load' | 'domcontentloaded' | 'networkidle' | 'commit';
   // Keyboard key for the 'press' action (Playwright key names, e.g. "Enter", "Escape", "Tab").
   key?: string;
   // For 'upload_file': a project-relative path to a committed fixture, or
@@ -80,8 +84,9 @@ export interface Flow {
   assertions?: AssertionDefinition[];
   // Clear cookies + local/session storage before this flow runs.
   clearState?: boolean;
-  // Restore the named storage state (cookies + localStorage) saved by a
-  // previous run. Applied at browser-context creation, before navigation.
+  // Restore the named storage state (cookies + localStorage + IndexedDB +
+  // sessionStorage) saved by a previous run. Applied at browser-context
+  // creation, before navigation.
   useState?: string;
   // After this flow's steps and assertions pass, save the context's storage
   // state under this name so later runs can restore it via `useState`.

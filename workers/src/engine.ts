@@ -44,11 +44,22 @@ const IS_DOCKER =
   );
 
 // State names become filenames — reject anything that could escape stateDir.
-function storageStatePath(stateDir: string, name: string): string {
+function validateStateName(name: string): void {
   if (!/^[A-Za-z0-9_-]+$/.test(name)) {
     throw new Error(`Invalid storage state name "${name}" — use only letters, digits, dash, underscore`);
   }
+}
+
+function storageStatePath(stateDir: string, name: string): string {
+  validateStateName(name);
   return path.join(stateDir, `${name}.json`);
+}
+
+// Playwright's storageState covers cookies/localStorage/IndexedDB but not
+// sessionStorage, so that lives in a sidecar file next to the state file.
+function sessionStatePath(stateDir: string, name: string): string {
+  validateStateName(name);
+  return path.join(stateDir, `${name}.session.json`);
 }
 
 function resolveTargetUrl(rawUrl: string): string {
@@ -85,7 +96,11 @@ export interface EngineRunOptions {
   headless?: boolean;
   /** Playwright browser channel (e.g. 'chrome' to reuse installed Chrome). */
   channel?: string;
-  /** Hard wall-clock cap; default max(timeout*4, 60s). Rejects on breach. */
+  /** Hard wall-clock cap. Default scales with the job's size:
+   *  max(timeout*4, timeout*(steps+assertions+2), 60s). On breach the
+   *  in-flight attempt is torn down and a 'failed' result is returned
+   *  (no rejection — a hard timeout must never trigger a retry that runs
+   *  concurrently with the stuck attempt). */
   hardTimeoutMs?: number;
   /** Await the AI failure summary inline instead of firing it detached. */
   awaitSummary?: boolean;
@@ -94,22 +109,53 @@ export interface EngineRunOptions {
   onUpdate?: (result: Partial<ExecutionResult>) => void | Promise<void>;
 }
 
+// Shared between runVerification's timers and execute(): lets the hard-timeout
+// timer tear down the in-flight attempt (aborting its Playwright calls) instead
+// of racing past it — a rejected-but-still-running attempt plus a caller-side
+// retry means two concurrent logins against the app under test.
+interface CancelState {
+  timedOut: boolean;
+  hardTimeoutMs: number;
+  /** Set by execute() once page/context exist; captures the trace then closes them. */
+  teardown?: () => Promise<void>;
+}
+
+// Extra time the backstop gives a timed-out attempt to tear down before we
+// give up and reject anyway (e.g. stuck outside Playwright entirely). Covers
+// the 30s AI fetch timeout.
+const TEARDOWN_GRACE_MS = 35000;
+
 /**
  * Run one verification job end-to-end. Never rejects for in-page/assertion
- * failures (those return a 'completed'/'failed' ExecutionResult); rejects only
- * when the hard wall-clock timeout is breached.
+ * failures or hard timeouts (those return a 'completed'/'failed'
+ * ExecutionResult); rejects only if a timed-out attempt cannot be torn down
+ * within a grace period.
  */
 export function runVerification(data: JobPayload, opts: EngineRunOptions): Promise<ExecutionResult> {
   const base = data.timeout || 15000;
-  const hardTimeoutMs = opts.hardTimeoutMs ?? Math.max(base * 4, 60000);
-  let timer: ReturnType<typeof setTimeout>;
-  const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(
-      () => reject(new Error(`Job exceeded hard timeout of ${hardTimeoutMs}ms`)),
-      hardTimeoutMs,
+  // Scale the cap with the job's size: a long multi-flow chain whose steps are
+  // each individually within budget must not hit a fixed 60s wall clock.
+  const units = (data.flows || []).reduce(
+    (n, f) => n + (f.steps?.length || 0) + (f.assertions?.length || 0), 0,
+  ) + (data.assertions?.length || 0) + 2; // +2: initial navigation + DOM settle
+  const hardTimeoutMs = opts.hardTimeoutMs ?? Math.max(base * 4, base * units, 60000);
+
+  const cancel: CancelState = { timedOut: false, hardTimeoutMs };
+  const timer = setTimeout(() => {
+    cancel.timedOut = true;
+    console.error(`\n⏱ Job exceeded hard timeout of ${hardTimeoutMs}ms — tearing down the attempt...`);
+    cancel.teardown?.().catch(() => {});
+  }, hardTimeoutMs);
+
+  let backstopTimer: ReturnType<typeof setTimeout>;
+  const backstop = new Promise<never>((_, reject) => {
+    backstopTimer = setTimeout(
+      () => reject(new Error(`Job exceeded hard timeout of ${hardTimeoutMs}ms and could not be torn down`)),
+      hardTimeoutMs + TEARDOWN_GRACE_MS,
     );
   });
-  return Promise.race([execute(data, opts), timeout]).finally(() => clearTimeout(timer));
+  return Promise.race([execute(data, opts, cancel), backstop])
+    .finally(() => { clearTimeout(timer); clearTimeout(backstopTimer); });
 }
 
 /** Close the pooled browser. Call once when done issuing runs. */
@@ -117,7 +163,11 @@ export async function shutdownEngine(): Promise<void> {
   await pool.shutdown();
 }
 
-async function execute(data: JobPayload, opts: EngineRunOptions): Promise<ExecutionResult> {
+async function execute(
+  data: JobPayload,
+  opts: EngineRunOptions,
+  cancel: CancelState = { timedOut: false, hardTimeoutMs: 0 },
+): Promise<ExecutionResult> {
   // Per-run AI state: a rate-limit breaker opened by a previous job must not
   // leak into this one (long-lived server workers).
   resetAIBreaker();
@@ -157,8 +207,16 @@ async function execute(data: JobPayload, opts: EngineRunOptions): Promise<Execut
   // Acquire browser from pool (respects concurrency limit)
   const browser = await pool.acquire({ headless: opts.headless, channel: opts.channel });
 
+  // Hoisted so the crash path and the hard-timeout teardown can reach them.
+  let page: import('playwright').Page | undefined;
+  let context: import('playwright').BrowserContext | undefined;
+  const harPath = path.join(artifactsDir, `${data.id}.har`);
+  const tracePath = path.join(artifactsDir, `${data.id}_trace.zip`);
+  // Trace captured by the hard-timeout teardown (which must stop tracing
+  // before force-closing the context, or the trace is lost).
+  let teardownTrace: string | undefined;
+
   try {
-    const harPath = path.join(artifactsDir, `${data.id}.har`);
 
     // ── Auth state reuse: restore ─────────────────────────────────────────────
     // Storage state must be applied at context creation so cookies/localStorage
@@ -182,14 +240,51 @@ async function execute(data: JobPayload, opts: EngineRunOptions): Promise<Execut
       }
     }
 
-    const context = await browser.newContext({
+    context = await browser.newContext({
       recordHar: { path: harPath },
       ...(restoredState ? { storageState: restoredState } : {}),
     });
 
+    // sessionStorage sidecar restore: Playwright's storageState can't carry it,
+    // so seed it via an init script that runs before the app boots. Seeded once
+    // per tab (marker key) so values the app updates later aren't clobbered.
+    if (restoredState) {
+      const sp = sessionStatePath(stateDir, restoreNames[0]);
+      if (fs.existsSync(sp)) {
+        try {
+          const saved = JSON.parse(fs.readFileSync(sp, 'utf-8')) as { origin: string; entries: Record<string, string> };
+          await context.addInitScript((data: { origin: string; entries: Record<string, string> }) => {
+            if (location.origin === data.origin && !sessionStorage.getItem('__verfix_ss_seeded')) {
+              for (const [k, v] of Object.entries(data.entries)) sessionStorage.setItem(k, v);
+              sessionStorage.setItem('__verfix_ss_seeded', '1');
+            }
+          }, saved);
+          console.log(`   🔑 Restoring saved sessionStorage for "${restoreNames[0]}"`);
+        } catch (e: any) {
+          console.warn(`   ⚠ Could not restore sessionStorage sidecar for "${restoreNames[0]}": ${e.message}`);
+        }
+      }
+    }
+
     await context.tracing.start({ screenshots: true, snapshots: true, sources: true });
 
-    const page = await context.newPage();
+    page = await context.newPage();
+
+    // From here on the hard-timeout timer can abort the attempt: stop tracing
+    // (preserving it for the failed result), then force-close so every
+    // in-flight Playwright call throws and execute() unwinds into its catch.
+    {
+      const ctx = context;
+      const pg = page;
+      cancel.teardown = async () => {
+        try {
+          await ctx.tracing.stop({ path: tracePath });
+          teardownTrace = tracePath;
+        } catch { /* tracing already stopped or context gone */ }
+        try { await pg.close(); } catch { /* already closed */ }
+        try { await ctx.close(); } catch { /* already closed */ }
+      };
+    }
     const requestStartTimes = new Map<any, number>();
 
     page.on('console', msg => {
@@ -296,9 +391,30 @@ async function execute(data: JobPayload, opts: EngineRunOptions): Promise<Execut
             const p = storageStatePath(stateDir, flow.saveState);
             fs.mkdirSync(path.dirname(p), { recursive: true });
             // indexedDB covers Firebase Auth / MSAL-style token caches.
-            // ponytail: sessionStorage is NOT captured (no Playwright support,
-            // per-tab semantics) — apps keeping tokens only there re-login.
             await context.storageState({ path: p, indexedDB: true });
+            // sessionStorage isn't part of Playwright's storageState — capture
+            // the current page's origin to a sidecar so JWT-in-sessionStorage
+            // apps (most SPAs) restore a working session via useState.
+            try {
+              const entries = await page.evaluate(() => {
+                const out: Record<string, string> = {};
+                for (let i = 0; i < sessionStorage.length; i++) {
+                  const k = sessionStorage.key(i);
+                  if (k !== null && k !== '__verfix_ss_seeded') out[k] = sessionStorage.getItem(k) ?? '';
+                }
+                return out;
+              });
+              const sp = sessionStatePath(stateDir, flow.saveState);
+              if (Object.keys(entries).length > 0) {
+                fs.writeFileSync(sp, JSON.stringify({ origin: new URL(page.url()).origin, entries }, null, 2));
+              } else {
+                // Nothing in sessionStorage now — drop any stale sidecar so a
+                // future restore matches what this login actually produced.
+                fs.rmSync(sp, { force: true });
+              }
+            } catch (e: any) {
+              console.warn(`   ⚠ Could not capture sessionStorage for "${flow.saveState}": ${e.message}`);
+            }
             console.log(`   💾 Saved storage state "${flow.saveState}" for reuse via useState`);
             tracker.pushEvent('action', `saved storage state "${flow.saveState}"`, { flow: flow.name, state: flow.saveState }, { category: 'info' });
           }
@@ -372,7 +488,32 @@ async function execute(data: JobPayload, opts: EngineRunOptions): Promise<Execut
 
   } catch (error: any) {
     const duration = Date.now() - startTime;
-    console.error(`\n💥 Job crashed: ${error.message}`);
+    // A hard-timeout teardown surfaces as whatever Playwright call it aborted
+    // ("Target closed", …) — report the timeout, not the symptom.
+    const message = cancel.timedOut
+      ? `Job exceeded hard timeout of ${cancel.hardTimeoutMs}ms (set a higher "timeout" in verfix.config.json or --timeout to raise it)`
+      : error.message;
+    console.error(`\n💥 Job crashed: ${message}`);
+
+    // Crashes need artifacts most of all — best-effort trace/screenshot/DOM
+    // so `verfix show` works on a crashed run, not just completed ones.
+    let crashArtifacts: ExecutionResult['artifacts'] = {};
+    if (page && context && !cancel.timedOut) {
+      try {
+        crashArtifacts = await collectArtifacts(
+          page, context, artifactsDir, data.id, consoleLogs, networkRequests, true,
+        );
+        await tracker.captureStateSync(page, undefined, 'failure');
+      } catch { /* collection is best-effort on a crashed run */ }
+    } else if (teardownTrace) {
+      // Hard timeout: the teardown already stopped tracing before force-close.
+      crashArtifacts.trace = teardownTrace;
+    }
+
+    // Close page/context (aborts anything still in flight; flushes the HAR).
+    try { await page?.close(); } catch { /* already closed */ }
+    try { await context?.close(); } catch { /* already closed */ }
+    if (fs.existsSync(harPath)) crashArtifacts.har = harPath;
 
     executionResult = {
       executionId: data.id,
@@ -385,14 +526,15 @@ async function execute(data: JobPayload, opts: EngineRunOptions): Promise<Execut
       retry_count: attempt,
       events: tracker.getEvents(),
       assertions: [],
-      artifacts: {},
+      artifacts: crashArtifacts,
       console_logs: consoleLogs,
       network_requests: networkRequests,
-      error: error.message,
+      error: message,
       created_at: new Date(startTime).toISOString(),
       completed_at: new Date().toISOString(),
     };
   } finally {
+    cancel.teardown = undefined;
     pool.release();
   }
 
