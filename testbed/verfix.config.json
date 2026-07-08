@@ -1,0 +1,52 @@
+{
+  "baseUrl": "http://127.0.0.1:3947",
+  "mode": "strict",
+  "flows": [
+    {
+      "id": "homepage-smoke",
+      "name": "Homepage loads without errors",
+      "steps": [
+        { "action": "navigate", "url": "/" },
+        { "action": "wait_for_selector", "selector": "[data-testid=\"heading\"]" }
+      ],
+      "assertions": [
+        { "type": "page_loaded" },
+        { "type": "text_visible", "value": "Verfix Testbed" },
+        { "type": "selector_visible", "selector": "[data-testid=\"nav-login\"]" },
+        { "type": "no_console_errors" }
+      ]
+    },
+    {
+      "id": "login",
+      "name": "Login with valid credentials reaches the secure area",
+      "steps": [
+        { "action": "navigate", "url": "/login" },
+        { "action": "type", "selector": "#username", "value": "verfix" },
+        { "action": "type", "selector": "#password", "value": "s3cret" },
+        { "action": "click", "selector": "button[type=submit]" },
+        { "action": "wait_for_url", "value": "/secure" }
+      ],
+      "assertions": [
+        { "type": "url_contains", "value": "/secure" },
+        { "type": "text_visible", "value": "Welcome back", "selector": "[data-testid=\"welcome\"]" },
+        { "type": "no_console_errors" }
+      ]
+    },
+    {
+      "id": "form-controls",
+      "name": "Select, checkbox, and hover interactions update the page",
+      "steps": [
+        { "action": "navigate", "url": "/" },
+        { "action": "select_option", "selector": "[data-testid=\"plan\"]", "value": "pro" },
+        { "action": "check", "selector": "[data-testid=\"tos\"]" },
+        { "action": "hover", "selector": "[data-testid=\"hover-hint\"]" }
+      ],
+      "assertions": [
+        { "type": "text_visible", "value": "Plan selected: pro" },
+        { "type": "text_visible", "value": "Terms accepted" },
+        { "type": "text_visible", "value": "Hint revealed" },
+        { "type": "no_console_errors" }
+      ]
+    }
+  ]
+}
