@@ -15,6 +15,11 @@ import { spawn } from 'child_process';
 
 const CLI_DIR = path.resolve(__dirname, '..');
 
+// Invoke ts-node through the current Node binary instead of `npx`: Windows
+// can't spawn 'npx' without a shell, and a shell doesn't escape args
+// (e.g. --text "Private OK" would split on the space).
+const TS_NODE_BIN = require.resolve('ts-node/dist/bin');
+
 const PAGE_HTML = `<!doctype html>
 <html>
   <head><title>Verfix Test App</title></head>
@@ -23,14 +28,16 @@ const PAGE_HTML = `<!doctype html>
   </body>
 </html>`;
 
-// Client-side "auth": login sets a localStorage token; /private only renders
-// its content when the token is present — exactly what saveState/useState
-// must carry across two separate CLI runs.
+// Client-side "auth": login sets a localStorage token AND a sessionStorage
+// token; /private only renders its content when both are present — exactly
+// what saveState/useState must carry across two separate CLI runs.
+// (sessionStorage travels via the .session.json sidecar, not Playwright's
+// storageState — most real SPAs keep their JWT there.)
 const LOGIN_HTML = `<!doctype html>
 <html>
   <head><title>Login</title></head>
   <body>
-    <button data-testid="login-btn" onclick="localStorage.setItem('token','t0k3n');document.getElementById('status').textContent='Logged in';">Log in</button>
+    <button data-testid="login-btn" onclick="localStorage.setItem('token','t0k3n');sessionStorage.setItem('ss_token','s3ss10n');document.getElementById('status').textContent='Logged in';">Log in</button>
     <div id="status"></div>
   </body>
 </html>`;
@@ -42,7 +49,8 @@ const PRIVATE_HTML = `<!doctype html>
     <div id="content"></div>
     <script>
       document.getElementById('content').textContent =
-        localStorage.getItem('token') === 't0k3n' ? 'Private OK' : 'Access Denied';
+        localStorage.getItem('token') === 't0k3n' && sessionStorage.getItem('ss_token') === 's3ss10n'
+          ? 'Private OK' : 'Access Denied';
     </script>
   </body>
 </html>`;
@@ -121,8 +129,8 @@ async function main() {
   delete childEnv.VERFIX_RUNNER;
   const runCli = (flowIds: string) => new Promise<{ status: number | null; stdout: string; stderr: string }>((resolve, reject) => {
     const child = spawn(
-      'npx',
-      ['ts-node', '--project', path.join(CLI_DIR, 'tsconfig.json'), path.join(CLI_DIR, 'src', 'index.ts'),
+      process.execPath,
+      [TS_NODE_BIN, '--project', path.join(CLI_DIR, 'tsconfig.json'), path.join(CLI_DIR, 'src', 'index.ts'),
         'run', '--flow', flowIds, '--output', 'json'],
       {
         cwd: projectDir,
@@ -145,8 +153,8 @@ async function main() {
   // Probe the newest run's DOM snapshot (the /private page) — no server needed.
   const resProbe = await new Promise<{ status: number | null; stdout: string; stderr: string }>((resolve, reject) => {
     const child = spawn(
-      'npx',
-      ['ts-node', '--project', path.join(CLI_DIR, 'tsconfig.json'), path.join(CLI_DIR, 'src', 'index.ts'),
+      process.execPath,
+      [TS_NODE_BIN, '--project', path.join(CLI_DIR, 'tsconfig.json'), path.join(CLI_DIR, 'src', 'index.ts'),
         'probe', '--selector', '#content', '--selector', '#does-not-exist', '--text', 'Private OK', '--output', 'json'],
       { cwd: projectDir, env: childEnv },
     );
@@ -210,6 +218,13 @@ async function main() {
     assert.ok(JSON.stringify(state).includes('t0k3n'), 'state file carries the localStorage token');
     console.log('✓ passing login flow with saveState wrote .verfix/state/auth.json');
 
+    const sessionFile = path.join(projectDir, '.verfix', 'state', 'auth.session.json');
+    assert.ok(fs.existsSync(sessionFile), `sessionStorage sidecar exists: ${sessionFile}`);
+    const session = JSON.parse(fs.readFileSync(sessionFile, 'utf-8'));
+    assert.strictEqual(session.entries.ss_token, 's3ss10n', 'sidecar carries the sessionStorage token');
+    assert.ok(session.origin?.startsWith('http://127.0.0.1'), 'sidecar records the origin it applies to');
+    console.log('✓ saveState also captured sessionStorage to the .session.json sidecar');
+
     assert.strictEqual(resPrivate.status, 0, `private run exit 0 expected.\nstdout: ${resPrivate.stdout}\nstderr: ${resPrivate.stderr}`);
     const privateJson = JSON.parse(resPrivate.stdout);
     assert.strictEqual(privateJson.passed, true, `private flow should start logged-in via useState — got: ${resPrivate.stdout}`);
@@ -224,7 +239,7 @@ async function main() {
     assert.strictEqual(byQuery['Private OK'].count, 1, 'text query matches like text_visible');
     console.log('✓ probe dry-runs selectors/text against the saved DOM snapshot');
 
-    console.log('\n9 passed, 0 failed\n');
+    console.log('\n10 passed, 0 failed\n');
   } finally {
     fs.rmSync(projectDir, { recursive: true, force: true });
   }

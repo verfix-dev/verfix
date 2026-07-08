@@ -34,6 +34,7 @@ function makeFakePage(currentUrl = 'https://example.com/dashboard') {
       if (!predicate(new URL(currentUrl))) throw new Error(`Timeout waiting for URL, current: ${currentUrl}`);
     },
     waitForLoadState: async (state: string, _o?: unknown) => { calls.push({ method: 'waitForLoadState', arg: state }); },
+    goto: async (url: string, opts?: { waitUntil?: string }) => { calls.push({ method: 'goto', arg: { url, waitUntil: opts?.waitUntil } }); },
   } as any;
   return { page, calls, frameLocatorCalls };
 }
@@ -80,6 +81,26 @@ async function test_wait_for_network_idle_waits_on_load_state() {
   console.log('✓ wait_for_network_idle waits for the networkidle load state');
 }
 
+async function test_navigate_defaults_to_load_not_networkidle() {
+  const { page, calls } = makeFakePage();
+  const flow: Flow = { name: 'nav', steps: [{ action: 'navigate', url: 'https://example.com/list', timeout: 500 }] };
+  await executeFlow(page, flow, job);
+  assert.deepStrictEqual(calls[0], { method: 'goto', arg: { url: 'https://example.com/list', waitUntil: 'load' } },
+    'navigate must default to load — networkidle never settles on polling pages');
+  console.log('✓ navigate waits for load by default (not networkidle)');
+}
+
+async function test_navigate_honors_waituntil_override() {
+  const { page, calls } = makeFakePage();
+  const flow: Flow = {
+    name: 'nav',
+    steps: [{ action: 'navigate', url: 'https://example.com/list', waitUntil: 'networkidle', timeout: 500 }],
+  };
+  await executeFlow(page, flow, job);
+  assert.deepStrictEqual(calls[0], { method: 'goto', arg: { url: 'https://example.com/list', waitUntil: 'networkidle' } });
+  console.log('✓ navigate honors an explicit waitUntil override');
+}
+
 async function test_frame_scopes_selector_resolution() {
   const { page, calls, frameLocatorCalls } = makeFakePage();
   const flow: Flow = {
@@ -112,6 +133,8 @@ const tests: Array<{ name: string; fn: () => Promise<void> }> = [
   { name: 'test_wait_for_url_fails_on_non_matching_url', fn: test_wait_for_url_fails_on_non_matching_url },
   { name: 'test_wait_for_url_requires_value', fn: test_wait_for_url_requires_value },
   { name: 'test_wait_for_network_idle_waits_on_load_state', fn: test_wait_for_network_idle_waits_on_load_state },
+  { name: 'test_navigate_defaults_to_load_not_networkidle', fn: test_navigate_defaults_to_load_not_networkidle },
+  { name: 'test_navigate_honors_waituntil_override', fn: test_navigate_honors_waituntil_override },
   { name: 'test_frame_scopes_selector_resolution', fn: test_frame_scopes_selector_resolution },
   { name: 'test_frame_scopes_testid_resolution', fn: test_frame_scopes_testid_resolution },
 ];

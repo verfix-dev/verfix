@@ -1,6 +1,23 @@
+import fs from 'fs';
+import path from 'path';
 import { FAILURE_TYPES } from './constants';
 
 // ─── AGENTS.md generation ────────────────────────────────────────────────────
+
+/** CLI version, read from package.json (works from src/ under ts-node and dist/ built). Memoized — package.json doesn't change mid-process. */
+let cachedCliVersion: string | undefined;
+export function getCliVersion(): string {
+  if (cachedCliVersion) return cachedCliVersion;
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf-8'));
+    if (pkg?.version) return (cachedCliVersion = pkg.version);
+  } catch { /* fall through */ }
+  return (cachedCliVersion = '0.0.0');
+}
+
+/** Matches the version stamp embedded in generated instructions, so a CLI
+ *  update can detect and refresh a stale .verfix/INSTRUCTIONS.md. */
+export const INSTRUCTIONS_VERSION_PATTERN = /<!-- verfix-instructions-version: (\S+) -->/;
 
 /**
  * Path (relative to project root) where the full Verfix reference lives.
@@ -67,6 +84,7 @@ export function generateAgentsSection(
   ).join('\n');
 
   return `## Verfix — Browser Verification
+<!-- verfix-instructions-version: ${getCliVersion()} -->
 
 ### Verfix Setup (for AI agents)
 
@@ -534,6 +552,15 @@ If verification runs are misbehaving, use these commands to diagnose and fix:
   // secrets never need to be committed here. An unset variable fails the
   // run immediately with a clear error naming it.
   // "value": "\${TEST_PASSWORD}"
+  //
+  // Built-in macros for run-unique values (no env var needed):
+  //   \${TIMESTAMP} — epoch milliseconds at run start
+  //   \${RANDOM}    — 8 random alphanumerics
+  // Each resolves ONCE per run: the same token yields the same value in every
+  // step and assertion, so you can type it in one step and assert it visible
+  // later. Use these for any "create X" flow against a backend that rejects
+  // duplicates — reruns stay idempotent without hand-bumping values.
+  // "value": "item-\${RANDOM}"
 
   // OPTIONAL — App metadata. Helps the AI in assisted/exploratory mode.
   "metadata": {
@@ -568,9 +595,9 @@ If verification runs are misbehaving, use these commands to diagnose and fix:
 
       // OPTIONAL — Auth state reuse, so flows don't re-implement login.
       // On the flow that logs in: "saveState": "auth" — once the flow's steps
-      // and assertions pass, its cookies + localStorage + IndexedDB are saved
-      // under that name (in .verfix/state/, never committed). sessionStorage
-      // is not captured.
+      // and assertions pass, its cookies + localStorage + IndexedDB +
+      // sessionStorage are saved under that name (in .verfix/state/, never
+      // committed).
       // On flows that need a session: "useState": "auth" — the saved state is
       // restored before the run navigates, so the flow starts logged in.
       // If the state doesn't exist yet (or the session expired and the flow
@@ -641,7 +668,10 @@ dialog that never shows doesn't cost the full default wait:
 { "action": "navigate", "url": "/your-page" }
 \`\`\`
 - \`url\` is resolved relative to \`baseUrl\` unless it's an absolute URL.
-- Waits for \`networkidle\` before continuing.
+- Waits for the \`load\` event by default. Set \`"waitUntil"\` to
+  \`"domcontentloaded"\`, \`"networkidle"\`, or \`"commit"\` to change that — but
+  avoid \`networkidle\` on pages that poll continuously (it never settles and
+  times out); prefer a \`wait_for_selector\` step for the content you need.
 
 **\`click\`** — Click an element
 \`\`\`json

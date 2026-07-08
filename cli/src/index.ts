@@ -1364,6 +1364,20 @@ program
         console.error(chalk.red(e.message));
         await finishTelemetryAndExit(2, 'config_validation_failed');
       }
+
+      // Keep agent instructions current after a CLI update: regenerate the
+      // Verfix-owned .verfix/INSTRUCTIONS.md when its version stamp doesn't
+      // match this CLI. Best-effort — a docs refresh must never fail a run.
+      try {
+        const { refreshVerfixInstructionsIfStale } = await import('./agent-writer');
+        if (refreshVerfixInstructionsIfStale(process.cwd(), config)) {
+          console.error(chalk.gray(`ℹ ${'.verfix/INSTRUCTIONS.md'} refreshed for verfix v${version}`));
+        }
+      } catch (e: any) {
+        // Best-effort — a docs refresh must never fail a run — but per repo
+        // convention, don't swallow it silently (helps debug prod issues).
+        console.error(chalk.gray(`ℹ Could not refresh ${'.verfix/INSTRUCTIONS.md'}: ${e?.message || e}`));
+      }
     }
 
     let selectedFlows: any[] = [];
@@ -2053,6 +2067,7 @@ function normalizeFlows(flows: any[]): any[] {
                 : undefined,
           value: step.value ?? step.url,
           url: step.url,
+          waitUntil: step.waitUntil,
           key: step.key,
           file: step.file,
           frame: step.frame,

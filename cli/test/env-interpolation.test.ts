@@ -68,6 +68,28 @@ function test_interpolate_assertions_resolves_value() {
   console.log('✓ interpolateAssertions resolves ${VAR} in assertion value');
 }
 
+function test_builtin_timestamp_macro_resolves() {
+  const result = interpolateEnv('product-${TIMESTAMP}', 'flows[0].steps[0].value');
+  assert.match(result, /^product-\d{13,}$/, `TIMESTAMP should resolve to epoch ms, got: ${result}`);
+  console.log('✓ built-in ${TIMESTAMP} resolves to epoch milliseconds');
+}
+
+function test_builtin_random_macro_is_stable_within_a_run() {
+  const a = interpolateEnv('code-${RANDOM}', 'flows[0].steps[0].value');
+  const b = interpolateEnv('${RANDOM}', 'assertions[0].value');
+  assert.match(a, /^code-[a-z0-9]{8}$/, `RANDOM should be 8 alphanumerics, got: ${a}`);
+  assert.strictEqual(a, `code-${b}`, 'the same macro must yield the same value across the whole run');
+  console.log('✓ built-in ${RANDOM} is unique per run but stable within it');
+}
+
+function test_env_var_overrides_builtin_macro() {
+  withEnv({ TIMESTAMP: 'pinned' }, () => {
+    const result = interpolateEnv('${TIMESTAMP}', 'field');
+    assert.strictEqual(result, 'pinned', 'an explicitly-set env var must win over the built-in macro');
+  });
+  console.log('✓ an explicitly-set env var overrides the built-in macro');
+}
+
 const tests: Array<{ name: string; fn: () => void }> = [
   { name: 'test_substitutes_single_var', fn: test_substitutes_single_var },
   { name: 'test_substitutes_multiple_vars_in_one_string', fn: test_substitutes_multiple_vars_in_one_string },
@@ -75,6 +97,9 @@ const tests: Array<{ name: string; fn: () => void }> = [
   { name: 'test_unset_var_throws_missing_env_var_error', fn: test_unset_var_throws_missing_env_var_error },
   { name: 'test_interpolate_step_resolves_value_and_url', fn: test_interpolate_step_resolves_value_and_url },
   { name: 'test_interpolate_assertions_resolves_value', fn: test_interpolate_assertions_resolves_value },
+  { name: 'test_builtin_timestamp_macro_resolves', fn: test_builtin_timestamp_macro_resolves },
+  { name: 'test_builtin_random_macro_is_stable_within_a_run', fn: test_builtin_random_macro_is_stable_within_a_run },
+  { name: 'test_env_var_overrides_builtin_macro', fn: test_env_var_overrides_builtin_macro },
 ];
 
 (() => {

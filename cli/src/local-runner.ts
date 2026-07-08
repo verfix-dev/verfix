@@ -202,10 +202,12 @@ export async function ensureChromium(browser?: LocalBrowserConfig, skipDownload 
 
 /**
  * Run one verification in-process and persist the result + artifacts under
- * .verfix/runs/. Mirrors the server's retry semantics: assertion failures do
- * NOT retry (the engine returns a result for those); only engine rejections
- * (hard timeout, browser-pool crash) are retried, `retries` total attempts
- * with exponential 1500ms backoff.
+ * .verfix/runs/. Mirrors the server's retry semantics: assertion failures,
+ * crashes, and hard timeouts do NOT retry (the engine returns a result for
+ * those — retrying a timed-out job would just time out again, and must never
+ * run concurrently with a stuck attempt); only engine rejections (browser-pool
+ * crash, un-teardownable timeout) are retried, `retries` total attempts with
+ * exponential 1500ms backoff.
  */
 export async function runLocal(payload: any, opts: LocalRunOptions): Promise<ExecutionResult> {
   const runsDir = localRunsDir();
