@@ -127,15 +127,17 @@ function printBanner(lines: string[]): void {
   const contentWidth = Math.max(...lines.map(visibleLength));
   const innerWidth = contentWidth + PAD * 2;
   const border = chalk.yellow('─'.repeat(innerWidth));
-  console.log('');
-  console.log(chalk.yellow('┌') + border + chalk.yellow('┐'));
+  // stderr, never stdout: banners are diagnostics; stdout is the pure-JSON
+  // data channel under `--output json` (guarded by cli/test/json-purity.sh).
+  console.error('');
+  console.error(chalk.yellow('┌') + border + chalk.yellow('┐'));
   for (const line of lines) {
     const rightPad = ' '.repeat(contentWidth - visibleLength(line));
-    console.log(
+    console.error(
       chalk.yellow('│') + ' '.repeat(PAD) + line + rightPad + ' '.repeat(PAD) + chalk.yellow('│')
     );
   }
-  console.log(chalk.yellow('└') + border + chalk.yellow('┘'));
+  console.error(chalk.yellow('└') + border + chalk.yellow('┘'));
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────

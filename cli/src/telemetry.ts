@@ -114,11 +114,13 @@ function showNoticeOnce(): void {
   try {
     if (fs.existsSync(NOTICE_MARKER)) return;
 
-    console.log('');
-    console.log('  \u2139  Verfix collects anonymous usage analytics to improve the tool.');
-    console.log('     No API keys, URLs, or personal data are sent.');
-    console.log('     Opt out anytime: VERFIX_TELEMETRY=off');
-    console.log('');
+    // stderr, never stdout: stdout is the pure-JSON data channel under
+    // `--output json` (guarded by cli/test/json-purity.sh).
+    console.error('');
+    console.error('  \u2139  Verfix collects anonymous usage analytics to improve the tool.');
+    console.error('     No API keys, URLs, or personal data are sent.');
+    console.error('     Opt out anytime: VERFIX_TELEMETRY=off');
+    console.error('');
 
     const dir = path.dirname(NOTICE_MARKER);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });

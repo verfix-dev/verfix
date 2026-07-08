@@ -39,6 +39,21 @@ else
   echo "✅ PASS: doctor --output json is valid JSON"
 fi
 
+# Test 3b: first-run purity — a machine that has never shown the one-time
+# telemetry notice must still emit pure JSON (notices belong on stderr).
+# Caught in CI: local dev machines all had ~/.verfix/.telemetry-notice-shown.
+fresh_home=$(mktemp -d)
+output=$(HOME="$fresh_home" $CLI_BIN doctor --output json 2>/dev/null)
+rm -rf "$fresh_home"
+echo "$output" | jq . > /dev/null 2>&1
+if [ $? -ne 0 ]; then
+  echo "❌ FAIL: doctor --output json on a fresh HOME is not valid JSON (first-run notice on stdout?)"
+  echo "Output was: $output"
+  failed=1
+else
+  echo "✅ PASS: doctor --output json is valid JSON on a fresh HOME (first run)"
+fi
+
 # Test 4: run --flow nonexistent --output json
 output=$($CLI_BIN run --flow nonexistent --output json 2>/dev/null)
 echo "$output" | jq . > /dev/null 2>&1
