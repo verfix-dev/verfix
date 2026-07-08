@@ -1,8 +1,8 @@
 # Verfix Roadmap
 
-**Goal:** Be the deterministic verification layer between AI-generated code and production — the gate every automated change passes through before it reaches users.
+**Goal:** Be the trust layer between an AI coding agent's claim of "done" and your users — the same flow, authored once, is replayed deterministically at three moments: in the agent's edit→verify loop, at the PR gate, and against the deployed app. Typed failures close the agent's fix loop without a human; the PR comment and post-deploy result tell humans it worked without them clicking through the app. (Expanded, with the metric and the definition of "best in field," in [NORTH_STAR.md](./NORTH_STAR.md).)
 
-**Where we are:** local-first runtime works end-to-end (in-process engine, typed failures, traces, source guard). The engine supports 12 actions (incl. form interaction, upload, iframe targeting, auth state reuse) and 8 failure types. We have zero users. Everything below is ordered by what gets us from "works" to "used," and every phase has an explicit exit condition so we don't polish forever.
+**Where we are:** local-first runtime works end-to-end (in-process engine, typed failures, traces, source guard); `verfix` 0.3.7 / `@verfix/engine` 0.1.5 are on npm. The engine supports 12 actions (incl. form interaction, upload, iframe targeting, auth state reuse) and 8 failure types. Two independent coding-agent field reviews exist (a live SaaS app, and the-internet testbed — see the backlogs below); the second one recommends Verfix as the agent trust layer. We still have ~zero users. Everything below is ordered by what gets us from "works" to "used," and every phase has an explicit exit condition so we don't polish forever.
 
 **Operating principle:** deterministic first, one config surface, frozen failure taxonomy. Capability grows by adding *steps and assertion detail inside the existing JSON schema* — never by adding a second config format, a plugin system, or a new mode.
 
@@ -72,15 +72,45 @@ Real SPAs fire unrelated transient errors on every run (branding fetch, session-
 - **Anything about the target app's missing `data-testid`s** — not Verfix's bug. One cheap action: a line in `generateAgentsSection()` guidance noting that when the agent owns the app source (outside a verify-fix loop), adding `data-testid`s is the durable fix for selector brittleness.
 - **New failure types** — nothing above needs one; the taxonomy stays frozen.
 
+## Field-review backlog #2 — the-internet testbed run (July 2026)
+
+*Source: a second coding agent bootstrapped Verfix from scratch (`init --yes` → wrote flows from the app's real ERB source → all three flows green) against the-internet.herokuapp.com, then reviewed it. Its verdict: recommend Verfix as the agent trust layer ("prove it before you call it done"), with maturity caveats. Every claim was verified against the current code before triage — and three of its seven issues turned out to be version skew or already-shipped features. That is itself the headline finding: **discoverability and version skew now cost adoption more than missing features do.***
+
+### Confirmed — do first
+
+- [ ] **Console/network error entries omit the source URL.** `page.on('console')` in `workers/src/engine.ts` records only type/text/timestamp — `msg.location()` is dropped. `Failed to load resource: net::ERR_NAME_NOT_RESOLVED` with no origin makes a precise `exclude` guesswork; the reviewing agent ended up with `exclude: ["404"]`, which would mask exactly the regression a login flow exists to catch. Fix: capture `msg.location().url` into console log entries and thread it through `no_console_errors` failure `details.errors`. Pairs with the next item.
+- [ ] **Suggested `exclude` patterns from one failing run** — was Tier 3's "do now" above; a second independent review has now hit the identical three-iteration discovery loop and produced the predicted over-broad exclude. Emit the full deduped error list (with URLs, per the item above) plus ready-to-paste suggested `exclude` regexes in the failure payload. Elevated: do together with the URL capture.
+- [ ] **Version-skew warning in `doctor`.** Two of the seven reported issues (a `text_visible` strict-mode violation, an init→status "config not found" race) do not exist in the current code — the reviewer's global `verfix` binary was stale while `npx verfix` was current, so it debugged phantom bugs and filed them as product feedback. Fix: `doctor` already knows the installed version and the update-checker caches the npm latest — compare and warn loudly on skew, and keep the one-line update nudge in `run`'s pretty output.
+- [ ] **Teach the generated instructions what already exists.** The agent read `AGENTS.md` and `.verfix/INSTRUCTIONS.md` and still wished for three features that already shipped: per-step screenshots (every trace records them — `verfix show`), non-interactive run data (`show --console/--network --output json`), and scoped `text_visible` (the `selector` field, shipped in the Phase 2 release). The contract only counts if agents discover it: update `generateAgentsSection()` to cover these, plus one line stating that selectors are full Playwright selector syntax (CSS, `:has-text()`, `text=`, `role=`) — also the answer to "document which selector engines are supported."
+
+### Confirmed — small and additive
+
+- [ ] **`selector_count` assertion.** "Exactly N items exist" is real verification surface for dynamic lists (the add/remove-elements flow could only assert visibility, not count). Additive assertion type mapping onto the existing failure taxonomy (`selector_not_found` when 0 found, `assertion_failed` on count mismatch) — no new failure types, so no Discussion needed.
+- [ ] **`--base-url` alias on `run`.** `init` says `--base-url`, `run` says `--url`; the inconsistency tripped the agent. Keep `--url`, add the alias — additive, no contract break.
+
+### Stale or already shipped (no code action; covered by the discoverability item)
+
+- `text_visible` multi-match strict violation — fixed in 5c2c132 (scoped `selector` support + pass-if-any-visible-match semantics); the reviewer ran an older binary.
+- init→status race — not reproducible in current code (config detection is a synchronous fs read); same stale-global-binary suspect.
+- "`--show-browser` silently falls back without a display" — the human operator watched the browser window during the run; there was a display. No fallback exists to warn about.
+
+### Declined
+
+- **Selector linter against source files in `validate`** — framework-specific (ERB/JSX/Vue/Svelte/…), brittle against build-time class mangling, and `verfix probe` already answers "does this selector resolve" in ~1s against the last run's *real* DOM. A source linter would be a second, worse source of truth.
+- **Per-flow `baseUrl` override** — a flow library describes one app. For the rare cross-origin hop, `navigate` steps already accept absolute URLs (`resolveNavigateUrl` passes any `scheme:` URL through untouched). Wait for user pull.
+- **Built-in "third-party/favicon" console-error category** — same call as Tier 3: a default that silently swallows error classes is how a flow misses a real failure. Make excludes precise (URL capture) and cheap (suggested excludes) instead.
+
 ## Phase 4 — GitHub Action: from tool to gate (~1 month, after Phase 2 exit)
 
-*Why: this is the moment Verfix becomes infrastructure. The same `verfix.config.json` the agent used locally gates the PR — that's the portability story made visible.*
+*Why: this is the moment Verfix becomes infrastructure, and the moment it starts solving the original pain point end-to-end: after an agent's change is raised as a PR — and after it deploys — no human should have to open a browser to learn whether it worked. The same `verfix.config.json` the agent used locally gates the PR and smoke-tests the deployment — that's the portability story made visible.*
 
 - [ ] Composite GitHub Action: install CLI, cache Chromium, run flows, upload trace zips as artifacts.
-- [ ] PR comment: pass/fail per flow, typed failure list with fix_hints, screenshot of the failure point.
+- [ ] PR comment: pass/fail per flow, typed failure list with fix_hints, screenshot of the failure point. This comment *is* the human-facing product — a reviewer should be able to trust a green comment instead of manually clicking through the app.
+- [ ] Preview-deploy verification: the base-URL input accepts the PR's preview deployment URL (Vercel/Netlify/custom), so flows run against the *deployed* change, not just a local build. The engine already supports this today (`verfix run --url <deployed-url>` — field review #2 ran against a live Heroku app); this is wiring, not engine work.
+- [ ] Post-deploy smoke: document (and ship an example workflow for) running the same flows on `deployment_status`/post-merge against staging or production — the "did it actually work for users" check. Notifications beyond CI status (Slack, dashboards, scheduled re-runs) belong to the future hosted product, not this phase.
 - [ ] Zero new config: the action reads the existing `verfix.config.json`. If it needs its own YAML beyond `uses:` + a base-URL input, we've failed.
 
-**Exit condition:** Verfix's own repo is gated by the action, and the PR comment is good enough to screenshot for the launch post.
+**Exit condition:** Verfix's own repo is gated by the action, a PR's flows run against its preview deployment, and the PR comment is good enough to screenshot for the launch post.
 
 ## Phase 5 — Distribution (starts the day Phase 1 ships, never stops)
 
