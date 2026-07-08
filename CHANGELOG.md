@@ -5,7 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.3.7] - 2026-07-08
+
+### Changed
+- **`@verfix/engine` bumped to `0.1.5`.** CLI dependency bumped to `^0.1.5`.
+- **`TEARDOWN_GRACE_MS` is now configurable via env var** (default 35s, matching the existing `AI_TIME_BUDGET_MS` pattern), for AI providers whose in-flight calls take longer to unwind on a hard timeout. Documented alongside `AI_TIME_BUDGET_MS` in configuration.md.
+- `getCliVersion()` is now memoized instead of re-reading `package.json` on every call.
 
 ### Added
 - **Built-in `${TIMESTAMP}` / `${RANDOM}` value macros.** Resolve once per run (the same token yields the same value across every step and assertion, so a flow can type `item-${RANDOM}` and assert it visible later). Makes "create X" flows idempotent against backends with uniqueness validation — no more hand-bumping product codes between reruns. An explicitly-set env var of the same name still wins.
