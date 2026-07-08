@@ -136,6 +136,44 @@ function humanize(token: string): string {
     .trim();
 }
 
+/**
+ * Wait for a step's target element, classifying the failure when it never
+ * shows up. Playwright reports "element never appeared" and "operation timed
+ * out" with the same TimeoutError — but the first is a selector problem, not a
+ * timing one, and an agent told to "increase the timeout" for a drifted
+ * selector is steered away from the real fix. The thrown message's
+ * `selector_not_found:` / `selector_not_visible:` prefix is mapped onto the
+ * failure taxonomy by the CLI. Genuine waits (wait_for_url, network idle,
+ * navigation) don't go through here and keep reporting `timeout`.
+ */
+async function waitForTarget(
+  step: FlowStep,
+  locator: Locator,
+  t: number,
+  state: 'visible' | 'attached' = 'visible',
+): Promise<void> {
+  try {
+    await locator.waitFor({ state, timeout: t });
+  } catch (err: any) {
+    if (err?.name !== 'TimeoutError') throw err;
+    const target = JSON.stringify(step.target);
+    let matches = 0;
+    try {
+      matches = await locator.count();
+    } catch {
+      // Page/context gone — report the plain not-found below.
+    }
+    if (matches > 0 && state === 'visible') {
+      throw new Error(
+        `selector_not_visible: ${step.action} target ${target} matches ${matches} element(s) but none became visible within ${t}ms`,
+      );
+    }
+    throw new Error(
+      `selector_not_found: ${step.action} target ${target} did not match any element in the DOM within ${t}ms`,
+    );
+  }
+}
+
 function resolveNavigateUrl(value: string, baseUrl: string | undefined): string {
   if (!value) return value;
   if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(value)) return value;
@@ -154,14 +192,14 @@ async function executeStep(page: Page, step: FlowStep, knownSelectors: Record<st
   switch (step.action) {
     case 'click': {
       const locator = await resolveLocator(page, step, knownSelectors, mode, t);
-      await locator.waitFor({ state: 'visible', timeout: t });
+      await waitForTarget(step, locator, t);
       await locator.click({ timeout: t });
       console.log(`    click → ${JSON.stringify(step.target)}`);
       break;
     }
     case 'type': {
       const locator = await resolveLocator(page, step, knownSelectors, mode, t);
-      await locator.waitFor({ state: 'visible', timeout: t });
+      await waitForTarget(step, locator, t);
       await locator.fill(step.value || '', { timeout: t });
       console.log(`    type "${step.value}" → ${JSON.stringify(step.target)}`);
       break;
@@ -177,7 +215,7 @@ async function executeStep(page: Page, step: FlowStep, knownSelectors: Record<st
     }
     case 'wait_for_selector': {
       const locator = await resolveLocator(page, step, knownSelectors, mode, t);
-      await locator.waitFor({ state: 'visible', timeout: t });
+      await waitForTarget(step, locator, t);
       console.log(`    wait_for_selector → ${JSON.stringify(step.target)}`);
       break;
     }
@@ -196,7 +234,7 @@ async function executeStep(page: Page, step: FlowStep, knownSelectors: Record<st
     }
     case 'select_option': {
       const locator = await resolveLocator(page, step, knownSelectors, mode, t);
-      await locator.waitFor({ state: 'visible', timeout: t });
+      await waitForTarget(step, locator, t);
       // Playwright matches the string against the option's value or label.
       await locator.selectOption(step.value || '', { timeout: t });
       console.log(`    select_option "${step.value}" → ${JSON.stringify(step.target)}`);
@@ -205,7 +243,7 @@ async function executeStep(page: Page, step: FlowStep, knownSelectors: Record<st
     case 'check':
     case 'uncheck': {
       const locator = await resolveLocator(page, step, knownSelectors, mode, t);
-      await locator.waitFor({ state: 'visible', timeout: t });
+      await waitForTarget(step, locator, t);
       if (step.action === 'check') await locator.check({ timeout: t });
       else await locator.uncheck({ timeout: t });
       console.log(`    ${step.action} → ${JSON.stringify(step.target)}`);
@@ -217,7 +255,7 @@ async function executeStep(page: Page, step: FlowStep, knownSelectors: Record<st
       // File inputs are routinely hidden behind styled buttons/drop zones —
       // require the input to exist, not to be visible (setInputFiles works
       // on hidden inputs).
-      await locator.waitFor({ state: 'attached', timeout: t });
+      await waitForTarget(step, locator, t, 'attached');
       if (typeof step.file === 'string') {
         const filePath = path.resolve(process.cwd(), step.file);
         if (!fs.existsSync(filePath)) {
@@ -237,7 +275,7 @@ async function executeStep(page: Page, step: FlowStep, knownSelectors: Record<st
     }
     case 'hover': {
       const locator = await resolveLocator(page, step, knownSelectors, mode, t);
-      await locator.waitFor({ state: 'visible', timeout: t });
+      await waitForTarget(step, locator, t);
       await locator.hover({ timeout: t });
       console.log(`    hover → ${JSON.stringify(step.target)}`);
       break;
@@ -246,7 +284,7 @@ async function executeStep(page: Page, step: FlowStep, knownSelectors: Record<st
       const key = step.key || step.value || '';
       if (step.target) {
         const locator = await resolveLocator(page, step, knownSelectors, mode, t);
-        await locator.waitFor({ state: 'visible', timeout: t });
+        await waitForTarget(step, locator, t);
         await locator.press(key, { timeout: t });
       } else {
         await page.keyboard.press(key);

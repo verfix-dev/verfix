@@ -2097,6 +2097,12 @@ function validateConfigSchema(config: any, configPath: string): void {
   }
 }
 
+// Playwright embeds terminal color codes in its call logs; they are token
+// noise inside a JSON contract.
+function stripAnsi(text: string): string {
+  return text.replace(/\u001b\[[0-9;]*m/g, '');
+}
+
 function buildFailures(result: any): Array<{ type: string; flow?: string; assertion?: string; selector?: string; detail?: string; fix_hint?: string }> {
   const failures = (result.assertions || [])
     .filter((a: any) => !a.passed)
@@ -2106,15 +2112,17 @@ function buildFailures(result: any): Array<{ type: string; flow?: string; assert
       flow: a.flow_name,
       assertion: a.type,
       selector: a.details?.selector || a.details?.resolved_selector,
-      detail: a.error,
+      detail: a.error ? stripAnsi(a.error) : a.error,
       fix_hint: a.fix_hint,
     }));
 
   if (failures.length === 0 && result.error) {
-    const type = inferFailureTypeFromError(result.error);
+    const detail = stripAnsi(result.error);
+    const type = inferFailureTypeFromError(detail);
     failures.push({
       type,
-      detail: result.error,
+      selector: extractSelector(detail),
+      detail,
       fix_hint: renderFixHint(type),
     });
   }
@@ -2122,13 +2130,39 @@ function buildFailures(result: any): Array<{ type: string; flow?: string; assert
   return failures;
 }
 
+// Step failures arrive as a message string; the engine prefixes selector
+// misses (see waitForTarget in @verfix/engine) so they map onto the taxonomy
+// instead of masquerading as timeouts.
 function inferFailureTypeFromError(error: string): string {
+  if (error.startsWith('selector_not_found:')) return 'selector_not_found';
+  if (error.startsWith('selector_not_visible:')) return 'selector_not_visible';
+  // Older engine versions surface a step's locator wait as a raw Playwright
+  // timeout — still a selector miss, not a timing problem.
+  if (/waiting for locator\(/i.test(error)) return 'selector_not_found';
   if (/timeout|timed out|waiting for/i.test(error)) return 'timeout';
   return 'assertion_failed';
 }
 
+function extractSelector(error: string): string | undefined {
+  // Engine-prefixed step failures embed the step target as JSON:
+  //   selector_not_found: type target {"selector":"#user-name"} did not match …
+  const target = error.match(/target (\{.*?\}) /)?.[1];
+  if (target) {
+    try {
+      const parsed = JSON.parse(target);
+      return parsed.selector || parsed.testId || parsed.text;
+    } catch { /* fall through */ }
+  }
+  // Raw Playwright message from an older engine: waiting for locator('#x')
+  return error.match(/waiting for locator\('([^']+)'\)/)?.[1];
+}
+
 function renderFixHint(type: string): string {
   switch (type) {
+    case 'selector_not_found':
+      return 'Selector did not match any element. Fix the selector in verfix.config.json to match the app source (verfix probe -s "<css>" dry-runs a selector against the last run\'s DOM in ~1s) — do not edit app source to satisfy it.';
+    case 'selector_not_visible':
+      return 'Selector matches an element that never became visible. Check conditional rendering/CSS state, or add a wait_for_selector step for the state that reveals it.';
     case 'timeout':
       return 'Operation timed out. Increase timeout or wait for network/DOM to settle before retrying.';
     default:

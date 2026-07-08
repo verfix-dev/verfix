@@ -117,6 +117,20 @@ async function main() {
           { type: 'text_visible', value: 'Private OK' },
         ],
       },
+      {
+        // A drifted step selector must surface as selector_not_found with the
+        // selector and a config-first hint — never as a generic `timeout`
+        // telling the agent to wait longer for an element that doesn't exist.
+        id: 'drifted-selector',
+        clearState: true,
+        steps: [
+          { action: 'navigate', url: '/' },
+          { action: 'click', selector: '[data-testid="never-existed"]', timeout: 1500 },
+        ],
+        assertions: [
+          { type: 'text_visible', value: 'irrelevant — the step above fails first' },
+        ],
+      },
     ],
   };
   fs.writeFileSync(path.join(projectDir, 'verfix.config.json'), JSON.stringify(config, null, 2));
@@ -147,6 +161,9 @@ async function main() {
   });
 
   const res = await runCli('smoke,optional-and-clear-state,login');
+  // Before 'private': the probe below reads the NEWEST run's DOM snapshot and
+  // expects the /private page.
+  const resDrifted = await runCli('drifted-selector');
   const resPrivate = await runCli('private');
   server.close();
 
@@ -239,7 +256,19 @@ async function main() {
     assert.strictEqual(byQuery['Private OK'].count, 1, 'text query matches like text_visible');
     console.log('✓ probe dry-runs selectors/text against the saved DOM snapshot');
 
-    console.log('\n10 passed, 0 failed\n');
+    assert.strictEqual(resDrifted.status, 1, `drifted run should exit 1.\nstdout: ${resDrifted.stdout}\nstderr: ${resDrifted.stderr}`);
+    const driftedJson = JSON.parse(resDrifted.stdout);
+    assert.strictEqual(driftedJson.passed, false);
+    const drifted = driftedJson.failures[0];
+    assert.strictEqual(drifted.type, 'selector_not_found',
+      `drifted step selector must classify as selector_not_found, got: ${JSON.stringify(driftedJson.failures)}`);
+    assert.strictEqual(drifted.selector, '[data-testid="never-existed"]', 'failure carries the missing selector');
+    assert.ok(!/increase timeout/i.test(drifted.fix_hint), `hint must not tell the agent to wait longer: ${drifted.fix_hint}`);
+    assert.ok(/verfix\.config\.json/.test(drifted.fix_hint), 'hint points at the config-first fix');
+    assert.ok(!/\u001b/.test(resDrifted.stdout), 'no ANSI escape codes in JSON output');
+    console.log('✓ drifted step selector reports selector_not_found with the selector, config-first hint, no ANSI');
+
+    console.log('\n11 passed, 0 failed\n');
   } finally {
     fs.rmSync(projectDir, { recursive: true, force: true });
   }
