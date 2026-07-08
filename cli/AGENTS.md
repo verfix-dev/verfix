@@ -392,7 +392,10 @@ Every step in a flow has an `action` and a target. These are the **only** action
 { "action": "navigate", "url": "/your-page" }
 ```
 - `url` is resolved relative to `baseUrl` unless it's an absolute URL.
-- Waits for `networkidle` before continuing.
+- Waits for the `load` event by default. Set `"waitUntil"` to
+  `"domcontentloaded"`, `"networkidle"`, or `"commit"` to change that — but
+  avoid `networkidle` on pages that poll continuously (it never settles and
+  times out); prefer a `wait_for_selector` step for the content you need.
 
 **`click`** — Click an element
 ```json
