@@ -1,6 +1,6 @@
 import { Page } from 'playwright';
 import { ASSERTION_TYPES, AssertionDefinition, AssertionResult, ConsoleLine, NetworkRequest } from './types';
-import { inferFailureType, renderFixHint } from './failure-hints';
+import { appendStaleStateHint, inferFailureType, renderFixHint } from './failure-hints';
 import { resolveWithHealing } from '../ai/self-healing';
 import { EventTracker } from '../artifacts/event-tracker';
 
@@ -33,6 +33,7 @@ export async function runAssertions(
   task: string = '',
   tracker?: EventTracker,
   flowName?: string,
+  stateRestored?: boolean,
 ): Promise<AssertionResult[]> {
   const results: AssertionResult[] = [];
 
@@ -215,6 +216,7 @@ export async function runAssertions(
         error: result.error,
         details: result.details,
       });
+      fix_hint = appendStaleStateHint(fix_hint, failure_type, stateRestored, networkRequests);
     }
 
     let screenshot_on_failure: string | undefined;

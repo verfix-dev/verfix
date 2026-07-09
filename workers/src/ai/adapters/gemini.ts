@@ -84,7 +84,7 @@ export class GeminiAdapter implements ProviderAdapter {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
-      })
+      }, opts?.timeoutMs)
 
       if (res.status === 400 || res.status === 401 || res.status === 403) {
         const errBody = await parseJsonSafe(res) as any
@@ -111,7 +111,7 @@ export class GeminiAdapter implements ProviderAdapter {
       return data?.candidates?.[0]?.content?.parts?.[0]?.text ?? null
     } catch (e: any) {
       if (e.name === 'AbortError') {
-        console.warn('  ⚠ Gemini: Request timed out after 30s')
+        console.warn(`  ⚠ Gemini: Request timed out after ${Math.round((opts?.timeoutMs ?? 30_000) / 1000)}s`)
       } else {
         console.warn(`  ⚠ Gemini error: ${e.message}`)
       }

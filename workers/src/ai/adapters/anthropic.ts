@@ -87,6 +87,7 @@ export class AnthropicAdapter implements ProviderAdapter {
           },
           body: JSON.stringify(body),
         },
+        opts?.timeoutMs,
       )
 
       if (res.status === 401) {
@@ -113,7 +114,7 @@ export class AnthropicAdapter implements ProviderAdapter {
       return textBlock?.text ?? null
     } catch (e: any) {
       if (e.name === 'AbortError') {
-        console.warn('  ⚠ Anthropic: Request timed out after 30s')
+        console.warn(`  ⚠ Anthropic: Request timed out after ${Math.round((opts?.timeoutMs ?? 30_000) / 1000)}s`)
       } else {
         console.warn(`  ⚠ Anthropic error: ${e.message}`)
       }

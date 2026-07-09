@@ -58,8 +58,15 @@ export function reportAIOutcome(ok: boolean, elapsedMs: number): void {
     }
   }
   if (timeSpentMs >= AI_TIME_BUDGET_MS) {
-    openBreaker(`AI time budget exhausted (${Math.round(timeSpentMs / 1000)}s spent of ${Math.round(AI_TIME_BUDGET_MS / 1000)}s — set AI_TIME_BUDGET_MS to allow more)`);
+    openBreaker(`AI time budget exhausted (${Math.round(timeSpentMs / 1000)}s spent, budget ${Math.round(AI_TIME_BUDGET_MS / 1000)}s — set AI_TIME_BUDGET_MS to allow more)`);
   }
+}
+
+/** Milliseconds left in this run's AI time budget, floored at 0. Used by the
+ *  provider layer to clamp each call's timeout so a single slow request can't
+ *  spend more than what's actually left of the budget. */
+export function remainingAIBudgetMs(): number {
+  return Math.max(0, AI_TIME_BUDGET_MS - timeSpentMs);
 }
 
 export function reportAISuccess(): void {

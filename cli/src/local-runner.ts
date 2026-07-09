@@ -293,6 +293,26 @@ export async function runLocal(payload: any, opts: LocalRunOptions): Promise<Exe
   return result;
 }
 
+/**
+ * Delete saved storage states by name (plus sessionStorage sidecars) so the
+ * next run re-authenticates from scratch (`verfix run --fresh-state`).
+ * Returns the names that actually had a state file to remove.
+ */
+export function discardLocalStates(names: string[], cwd: string = process.cwd()): string[] {
+  const stateDir = path.join(path.dirname(localRunsDir(cwd)), 'state');
+  const removed: string[] = [];
+  for (const name of names) {
+    if (!/^[A-Za-z0-9_-]+$/.test(name)) continue; // names are filenames — never escape stateDir
+    const statePath = path.join(stateDir, `${name}.json`);
+    if (fs.existsSync(statePath)) {
+      fs.rmSync(statePath, { force: true });
+      removed.push(name);
+    }
+    fs.rmSync(path.join(stateDir, `${name}.session.json`), { force: true });
+  }
+  return removed;
+}
+
 /** Find a run artifact by filename suffix for an execution id (or the newest run when omitted). */
 export function findRunArtifact(suffix: string, executionId?: string, cwd: string = process.cwd()): string | null {
   const runsDir = localRunsDir(cwd);

@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.12] - 2026-07-09
+
+### Changed
+- **`@verfix/engine` bumped to `0.1.8`.** CLI dependency bumped to `^0.1.8`.
+- **Per-flow storage-state lifecycle.** A flow's `useState` is now restored immediately before *that flow* runs instead of once per run at browser-context creation — a `clearState` flow batched ahead of a `useState` flow gets a genuinely clean slate, and multiple state names per run work. The run's first flow keeps the context-creation fast path (the only path that can restore IndexedDB token caches — Firebase/MSAL).
+
+### Added
+- **Rotating (single-use) refresh-token support.** After a flow that restored a state passes, the live session is re-captured to the same name (`refreshState`, default `true`; set `false` on a flow that ends logged out) — so backends that rotate refresh tokens never leave the saved state stale on disk. New `verfix run --fresh-state` discards the selected flows' saved states so login flows re-authenticate from scratch.
+- **Stale restored-session detection in fix hints.** When a flow restored a saved state and fails with `selector_not_found` / `selector_not_visible` / `url_mismatch` / `timeout` while the network log shows a 401/403 on an auth-looking endpoint, `fix_hint` now names the rejected endpoint (query string stripped) and points at re-running the saving flow or `--fresh-state`. Deterministic; no new failure type.
+- **`verfix show --filter <pattern>`.** Case-insensitive substring filter on `--network` URLs and `--console` text/source URLs. Pretty `--network` output now leads with a `⚠ N failed request(s)` summary (status ≥ 400 or 0); JSON gains an additive `failed_requests` array.
+
+### Fixed
+- **AI call timeout now clamped to the remaining per-run budget.** A single slow AI call could spend 30s of the 20s budget, producing the confusing "30s spent of 20s" breaker message. Calls now use `min(30s, remaining budget)`, skip entirely when under 2s remains, and the message reads "Xs spent, budget Ys".
+
 ## [0.3.11] - 2026-07-09
 
 ### Added

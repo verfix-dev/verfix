@@ -72,6 +72,19 @@ npx verfix show --console            # newest run's console log
 npx verfix show exec_abc123 --network --output json
 ```
 
+Pretty `--network` output leads with an anomaly summary (`⚠ N failed
+request(s):`) for any request with status `>= 400` or `0`, so you don't have
+to eyeball hundreds of 2xx requests to spot the one that broke. Narrow either
+`--console` or `--network` to entries containing a plain (case-insensitive,
+non-regex) substring with `--filter` — it matches URL for `--network`, and
+text/source_url for `--console`. JSON output also gets a `failed_requests`
+array alongside `network_requests`:
+
+```bash
+npx verfix show --network --filter auth
+npx verfix show exec_abc123 --network --filter auth --output json
+```
+
 When a selector fails, dry-run replacements against the run's saved DOM
 snapshot in about a second — instead of paying for a full re-run per guess:
 

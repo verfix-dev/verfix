@@ -31,6 +31,13 @@ export interface CompletionOptions {
    *   - Gemini: generationConfig.responseMimeType: 'application/json'
    */
   json?: boolean;
+  /**
+   * Request timeout in milliseconds, forwarded to fetchWithTimeout. Set by
+   * provider.ts to the remaining per-run AI time budget (capped at the
+   * adapter default) so one slow call can't overspend the run's budget.
+   * Falls back to fetchWithTimeout's own default when omitted.
+   */
+  timeoutMs?: number;
 }
 
 /**
