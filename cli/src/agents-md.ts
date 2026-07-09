@@ -181,6 +181,11 @@ verfix show <execution_id>
 verfix show <execution_id> --console --output json
 verfix show <execution_id> --network --output json
 
+# Narrow either to entries whose URL (network) or text/source_url (console)
+# contain a plain substring (case-insensitive, not a regex). --network JSON
+# output also includes a \`failed_requests\` array (status >= 400 or 0).
+verfix show <execution_id> --network --filter auth --output json
+
 # Dry-run a selector/text against the last run's saved DOM (~1s) BEFORE paying
 # for a full re-run — exit 0 = all matched, 1 = something didn't. Config
 # \`selectors\` aliases resolve. Caveat: the snapshot is END-OF-RUN state, so a

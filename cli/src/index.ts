@@ -1799,6 +1799,7 @@ program
   .description('Open the Playwright trace viewer for a local run (newest run if no id given); --console/--network print the captured logs instead')
   .option('--console', 'Print the run\'s captured console log (full untruncated error text)', false)
   .option('--network', 'Print the run\'s captured network requests', false)
+  .option('--filter <pattern>', 'Case-insensitive substring filter: matches URL for --network, text/source_url for --console', undefined)
   .option('-o, --output <format>', 'Output format for --console/--network: pretty | json', 'pretty')
   .action(async (executionId: string | undefined, opts) => {
     const { findTraceZip, findRunArtifact, playwrightCliPath } = await import('./local-runner');
@@ -1832,9 +1833,27 @@ program
         }
       };
 
-      const out: { console_logs?: any[]; network_requests?: any[] } = {};
-      if (opts.console) out.console_logs = readArtifact('_console.json', 'console') ?? [];
-      if (opts.network) out.network_requests = readArtifact('_network.json', 'network') ?? [];
+      const filter: string | undefined = opts.filter ? String(opts.filter).toLowerCase() : undefined;
+      const isFailedRequest = (r: any) => r.status >= 400 || r.status === 0;
+
+      const out: { console_logs?: any[]; network_requests?: any[]; failed_requests?: any[] } = {};
+      if (opts.console) {
+        let logs = readArtifact('_console.json', 'console') ?? [];
+        if (filter) {
+          logs = logs.filter((l: any) =>
+            String(l.text ?? '').toLowerCase().includes(filter) ||
+            String(l.source_url ?? '').toLowerCase().includes(filter));
+        }
+        out.console_logs = logs;
+      }
+      if (opts.network) {
+        let reqs = readArtifact('_network.json', 'network') ?? [];
+        if (filter) {
+          reqs = reqs.filter((r: any) => String(r.url ?? '').toLowerCase().includes(filter));
+        }
+        out.network_requests = reqs;
+        out.failed_requests = reqs.filter(isFailedRequest);
+      }
 
       if (opts.output === 'json') {
         emitJson(out);
@@ -1848,6 +1867,12 @@ program
         }
       }
       if (out.network_requests) {
+        if (out.failed_requests && out.failed_requests.length > 0) {
+          console.log(chalk.bold.red(`\n  ⚠ ${out.failed_requests.length} failed request(s):`));
+          for (const r of out.failed_requests) {
+            console.log(`    ${chalk.red(String(r.status))} ${r.method} ${r.url} ${chalk.gray(`(${r.timing_ms}ms)`)}`);
+          }
+        }
         console.log(chalk.bold(`\n  Network requests (${out.network_requests.length}):`));
         for (const r of out.network_requests) {
           const color = r.status >= 400 ? chalk.red : r.status >= 300 ? chalk.yellow : chalk.green;
