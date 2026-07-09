@@ -1,4 +1,4 @@
-import { AssertionDefinition, AssertionType, FailureType } from './types';
+import { AssertionDefinition, AssertionType, FailureType, NetworkRequest } from './types';
 
 export type FailureContext = {
   assertion_type: AssertionType;
@@ -90,4 +90,48 @@ export function renderFixHint(type: FailureType, context: FailureContext): strin
     default:
       return 'Assertion failed. Verify assertion inputs and app state before retrying.';
   }
+}
+
+// Failure types where a silent 401/403 redirect-to-login is a plausible root
+// cause — a stale/rejected restored session, not the assertion itself.
+const STALE_STATE_FAILURE_TYPES: ReadonlySet<FailureType> = new Set([
+  'selector_not_found',
+  'selector_not_visible',
+  'url_mismatch',
+  'timeout',
+]);
+
+const AUTH_URL_REGEX = /(auth|token|refresh|session|login|oauth|signin)/i;
+
+// Drops the query string — tokens live there, and fix_hints end up in logs.
+function truncateToPath(url: string): string {
+  try {
+    const parsed = new URL(url);
+    return `${parsed.origin}${parsed.pathname}`;
+  } catch {
+    return url.split('?')[0];
+  }
+}
+
+// When a restored useState session has been invalidated server-side (single-use
+// refresh token consumed, expiry, server-side logout), the app silently 401s on
+// its auth/refresh call and redirects to login — surfacing as a generic
+// selector/url/timeout failure with no hint of the real cause. If this flow
+// restored a saved state and the network log shows a 401/403 against an
+// auth-ish endpoint, append that context to the hint deterministically.
+export function appendStaleStateHint(
+  hint: string,
+  failureType: FailureType,
+  stateRestored: boolean | undefined,
+  networkRequests: NetworkRequest[],
+): string {
+  if (!stateRestored || !STALE_STATE_FAILURE_TYPES.has(failureType)) return hint;
+
+  const staleRequest = networkRequests.find(
+    (r) => (r.status === 401 || r.status === 403) && AUTH_URL_REGEX.test(r.url),
+  );
+  if (!staleRequest) return hint;
+
+  const path = truncateToPath(staleRequest.url);
+  return `${hint} Note: a saved session state was restored for this flow and the server returned ${staleRequest.status} on ${staleRequest.method} ${path} — the saved state may be stale or single-use. Re-run the flow that saves it, or run with --fresh-state.`;
 }

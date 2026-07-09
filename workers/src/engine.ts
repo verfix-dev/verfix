@@ -384,7 +384,7 @@ async function execute(
             ranFlowAssertions = true;
             console.log(`\n🔍 Running ${flow.assertions.length} flow assertion(s)...`);
             const flowResults = await runAssertions(
-              page, flow.assertions, consoleLogs, networkRequests, artifactsDir, data.id, flow.mode || data.mode, data.task, tracker, flow.name
+              page, flow.assertions, consoleLogs, networkRequests, artifactsDir, data.id, flow.mode || data.mode, data.task, tracker, flow.name, stateRestored
             );
             assertionResults.push(...flowResults);
             flowPassed = flowResults.every(r => r.passed);
