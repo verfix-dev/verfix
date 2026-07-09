@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.11] - 2026-07-09
+
+### Added
+- **Version-skew warning in `doctor`.** A field review filed two phantom bug reports caused entirely by a stale global `verfix` install shadowing a current `npx verfix` — `doctor` now does a live (not cache-throttled) check against the npm registry and reports the installed version, whether it's current, and the absolute path of the binary actually executing, so agents/humans can tell "this is really a bug" from "you're running an old binary" without guessing. Offline machines get an informational skip, never a false warning. Additive `version` field in `doctor --output json`.
+
 ## [0.3.10] - 2026-07-09
 
 ### Changed

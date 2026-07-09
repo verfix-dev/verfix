@@ -18,7 +18,7 @@ import {
 import { waitForHealth, isApiHealthy, isDashboardReachable, resolveApiBase } from './health';
 import { buildDashboardBase, getRuntimePorts } from './runtime';
 import { emitJson, emitJsonError, isJsonMode } from './json-output';
-import { showPendingNotifications, scheduleBackgroundCheck, clearImageCache } from './update-check';
+import { showPendingNotifications, scheduleBackgroundCheck, clearImageCache, checkVersionSkewLive } from './update-check';
 import { trackEvent, flushTelemetry } from './telemetry';
 import {
   evaluateSourceChanges, buildSourceFinding, clearSourceBaseline,
@@ -508,6 +508,34 @@ async function runLocalDoctor(opts: any): Promise<never> {
     warnings++;
   }
 
+  // 5b. CLI version — live check (doctor is explicitly diagnostic; a couple
+  // seconds of network latency here is fine, unlike normal commands where
+  // the cache-only showPendingNotifications() pattern applies instead).
+  // Surfaces which binary is actually executing: a stale global install
+  // shadowed by a current `npx verfix` reports a different path than a
+  // fresh npx run, which a version number alone doesn't reveal.
+  let versionSkew: Awaited<ReturnType<typeof checkVersionSkewLive>> | null = null;
+  try {
+    versionSkew = await checkVersionSkewLive();
+  } catch {
+    versionSkew = null;
+  }
+  if (versionSkew) {
+    const { currentVersion, latestVersion, upToDate, binaryPath } = versionSkew;
+    if (latestVersion === null) {
+      printCheck(chalk.gray('•'), chalk.gray(`verfix v${currentVersion} (offline — skipped npm version check)`));
+    } else if (upToDate) {
+      printCheck(chalk.green('✓'), `verfix v${currentVersion} (latest)`);
+    } else {
+      printCheck(
+        chalk.yellow('⚠'),
+        `verfix v${currentVersion} — v${latestVersion} available`,
+        `Running from: ${binaryPath}. If you also have a global or npx install, they may be out of sync — run: npm i -g verfix to update, or npx verfix@latest to always use the latest.`
+      );
+      warnings++;
+    }
+  }
+
   // 5. App base URL reachable (only a warning — the app may just not be running)
   let baseUrlReachable: boolean | null = null;
   const baseUrl = config.baseUrl || config.url;
@@ -584,6 +612,12 @@ async function runLocalDoctor(opts: any): Promise<never> {
         provider_configured: providerConfigured,
         key_found: keyFound,
         key_format_valid: keyFormatValid,
+      },
+      version: versionSkew && {
+        current: versionSkew.currentVersion,
+        latest: versionSkew.latestVersion,
+        up_to_date: versionSkew.upToDate,
+        binary_path: versionSkew.binaryPath,
       },
       mode,
       failures,
