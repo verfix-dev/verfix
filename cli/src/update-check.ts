@@ -20,6 +20,7 @@ import path from 'path';
 import { spawnSync, spawn } from 'child_process';
 import chalk from 'chalk';
 import os from 'os';
+import https from 'https';
 import { getDockerImage, getRunnerMode } from './constants';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -70,7 +71,7 @@ function clearNpmCache(): void {
 }
 
 /** Read the actually-installed CLI version from package.json (dist/ -> ../package.json). */
-function getCurrentVersion(): string {
+export function getCurrentVersion(): string {
   try {
     const pkgPath = path.join(__dirname, '..', 'package.json');
     const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
@@ -138,6 +139,61 @@ function printBanner(lines: string[]): void {
     );
   }
   console.error(chalk.yellow('└') + border + chalk.yellow('┘'));
+}
+
+// ─── Version-skew diagnostic (used by `verfix doctor`) ─────────────────────────
+//
+// Unlike showPendingNotifications()/scheduleBackgroundCheck() above (fire-and-
+// forget, cache-only, never block a normal command), `doctor` is a command the
+// user explicitly runs to diagnose problems and is willing to wait a couple
+// seconds for a live answer — so it does its own bounded, synchronous check
+// instead of relying on the 24h-throttled background cache, which may simply
+// not have run yet on a machine that just installed Verfix.
+
+function httpsGetLatestVersion(timeoutMs: number): Promise<string | null> {
+  return new Promise(resolve => {
+    const req = https.get(
+      'https://registry.npmjs.org/verfix/latest',
+      { timeout: timeoutMs },
+      res => {
+        let data = '';
+        res.on('data', chunk => { data += chunk; });
+        res.on('end', () => {
+          try {
+            resolve(JSON.parse(data).version || null);
+          } catch {
+            resolve(null);
+          }
+        });
+        res.on('error', () => resolve(null));
+      }
+    );
+    req.on('error', () => resolve(null));
+    req.on('timeout', () => { req.destroy(); resolve(null); });
+  });
+}
+
+export interface VersionSkewResult {
+  currentVersion: string;
+  latestVersion: string | null; // null when the registry was unreachable (offline) — not a failure
+  upToDate: boolean | null;
+  binaryPath: string;
+}
+
+/**
+ * Live (not cached) check of the running CLI's version against npm latest,
+ * plus the absolute path of the binary actually executing. The path is the
+ * key diagnostic: a stale global install and a current `npx verfix` resolve
+ * to different paths, and the reported version alone doesn't reveal that —
+ * this surfaced as phantom bug reports in a field review where the two were
+ * silently out of sync.
+ */
+export async function checkVersionSkewLive(timeoutMs = 2500): Promise<VersionSkewResult> {
+  const currentVersion = getCurrentVersion();
+  const binaryPath = require.main?.filename || process.argv[1] || 'unknown';
+  const latestVersion = await httpsGetLatestVersion(timeoutMs);
+  const upToDate = latestVersion ? !isNewerVersion(latestVersion, currentVersion) : null;
+  return { currentVersion, latestVersion, upToDate, binaryPath };
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────
