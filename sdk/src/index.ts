@@ -33,6 +33,8 @@ export type VerifyFailure = {
   /** Assertion type that failed (e.g. 'text_visible'). */
   assertion?: string;
   selector?: string;
+  /** console_error only: where the offending console message originated. */
+  source_url?: string;
   detail?: string;
   fix_hint?: string;
 };
@@ -340,6 +342,7 @@ function buildFailures(result: any): VerifyFailure[] {
       flow: a.flow_name,
       assertion: a.type,
       selector: a.details?.selector || a.details?.resolved_selector,
+      source_url: a.details?.source_url,
       detail: a.error,
       fix_hint: a.fix_hint,
     }));

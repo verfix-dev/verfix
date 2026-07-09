@@ -11,6 +11,17 @@ async function timed(fn: () => Promise<{ passed: boolean; details?: Record<strin
   return { ...result, duration_ms: Date.now() - start };
 }
 
+function safeOrigin(url: string): string | null {
+  try { return new URL(url).origin; } catch { return null; }
+}
+
+// Turns a console error's text into a literal regex ready to paste into the
+// `exclude` array — escapes regex metacharacters instead of returning a
+// pattern the user then has to debug.
+function escapeRegex(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 export async function runAssertions(
   page: Page,
   assertions: AssertionDefinition[],
@@ -134,10 +145,26 @@ export async function runAssertions(
             : rawErrors;
           const excluded_count = rawErrors.length - errors.length;
           const passed = errors.length === 0;
+          if (passed) {
+            return { passed, details: { error_count: 0, errors: [], excluded_count } };
+          }
+          const first = errors[0];
+          const pageOrigin = safeOrigin(page.url());
+          const errorOrigin = first.source_url ? safeOrigin(first.source_url) : null;
+          const third_party = !!errorOrigin && !!pageOrigin && errorOrigin !== pageOrigin;
+          const suggested_exclude = escapeRegex(first.text.slice(0, 80));
+          const location = first.source_url ? ` (at ${first.source_url}${first.line ? ':' + first.line : ''})` : '';
           return {
             passed,
-            details: { error_count: errors.length, errors: errors.map(e => e.text), excluded_count },
-            error: passed ? undefined : `${errors.length} console error(s), first: "${errors[0].text.slice(0, 200)}"`,
+            details: {
+              error_count: errors.length,
+              errors: errors.map(e => e.text),
+              excluded_count,
+              source_url: first.source_url,
+              third_party,
+              suggested_exclude,
+            },
+            error: `${errors.length} console error(s), first: "${first.text.slice(0, 200)}"${location}`,
           };
         });
         break;

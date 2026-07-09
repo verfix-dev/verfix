@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.10] - 2026-07-09
+
+### Changed
+- **`@verfix/engine` bumped to `0.1.7`.** CLI dependency bumped to `^0.1.7`.
+
+### Added
+- **Console error source URLs.** `page.on('console')` now captures `msg.location()`; every `console_logs` entry and `no_console_errors` failure carries `source_url`/`line`. A failure's `details` also gains `third_party` (true when the error's origin differs from the page's own origin) so agents can tell "your code" from "vendor script noise" without reading raw logs. The CLI/SDK `failures[]` JSON gained an additive `source_url` field.
+- **Suggested `exclude` patterns.** A failing `no_console_errors` assertion now carries `details.suggested_exclude` — the first error's text, regex-escaped and ready to paste — and `fix_hint` embeds it directly as `"exclude": ["..."]`, plus a note when the error is third-party. Previously the hint only said excludes existed, not what to write.
+
 ## [0.3.9] - 2026-07-08
 
 ### Fixed

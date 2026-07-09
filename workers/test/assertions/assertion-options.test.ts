@@ -68,8 +68,8 @@ async function test_no_matches_fails_with_clear_error() {
 
 // ─── no_console_errors / exclude ────────────────────────────────────────────
 
-function log(text: string): ConsoleLine {
-  return { type: 'error', text, timestamp: new Date().toISOString() };
+function log(text: string, source_url?: string, line?: number): ConsoleLine {
+  return { type: 'error', text, timestamp: new Date().toISOString(), source_url, line };
 }
 
 async function test_no_console_errors_fails_by_default() {
@@ -106,6 +106,40 @@ async function test_invalid_exclude_pattern_fails_clearly() {
   assert.strictEqual(result.passed, false);
   assert.ok(result.error?.includes('Invalid exclude pattern'), `error should flag the bad pattern, got: ${result.error}`);
   console.log('✓ an invalid exclude regex fails the assertion with a clear error');
+}
+
+async function test_console_error_flags_third_party_source() {
+  const assertions: AssertionDefinition[] = [{ type: 'no_console_errors' }];
+  const logs = [log('Uncaught TypeError: x is undefined', 'https://cdn.thirdparty.com/widget.js', 42)];
+  const [result] = await runAssertions(makeFakePage({ url: 'https://example.com/' }), assertions, logs, [], '/tmp', 'exec', 'strict', '');
+  assert.strictEqual(result.passed, false);
+  assert.strictEqual((result.details as any).third_party, true, 'error from a different origin should be flagged third_party');
+  assert.strictEqual((result.details as any).source_url, 'https://cdn.thirdparty.com/widget.js');
+  assert.ok(result.error?.includes('widget.js:42'), `error should include source location, got: ${result.error}`);
+  assert.ok(result.fix_hint?.includes('third-party'), `fix_hint should call out third-party origin, got: ${result.fix_hint}`);
+  console.log('✓ a console error from a different origin is flagged third_party with its source location');
+}
+
+async function test_console_error_same_origin_not_flagged_third_party() {
+  const assertions: AssertionDefinition[] = [{ type: 'no_console_errors' }];
+  const logs = [log('Uncaught ReferenceError: foo is not defined', 'https://example.com/app.js', 10)];
+  const [result] = await runAssertions(makeFakePage({ url: 'https://example.com/' }), assertions, logs, [], '/tmp', 'exec', 'strict', '');
+  assert.strictEqual(result.passed, false);
+  assert.strictEqual((result.details as any).third_party, false, 'error from the same origin should not be flagged third_party');
+  assert.ok(!result.fix_hint?.includes('third-party'), `fix_hint should not mention third-party for same-origin errors, got: ${result.fix_hint}`);
+  console.log('✓ a console error from the page\'s own origin is not flagged third_party');
+}
+
+async function test_console_error_fix_hint_suggests_pasteable_exclude() {
+  const assertions: AssertionDefinition[] = [{ type: 'no_console_errors' }];
+  const logs = [log('Failed to load resource: the server responded with a status of 409 ()')];
+  const [result] = await runAssertions(makeFakePage(), assertions, logs, [], '/tmp', 'exec', 'strict', '');
+  const suggested = (result.details as any).suggested_exclude as string;
+  assert.ok(suggested, 'details.suggested_exclude should be set');
+  assert.ok(result.fix_hint?.includes(suggested), `fix_hint should embed the suggested exclude pattern, got: ${result.fix_hint}`);
+  // The suggested pattern must actually work if pasted into `exclude` as-is.
+  assert.ok(new RegExp(suggested).test(logs[0].text), 'suggested_exclude should match the original error text as a regex');
+  console.log('✓ fix_hint embeds a suggested_exclude pattern that is valid and matches the error');
 }
 
 // ─── text_visible / selector scoping ────────────────────────────────────────
@@ -183,6 +217,9 @@ const tests: Array<{ name: string; fn: () => Promise<void> }> = [
   { name: 'test_exclude_pattern_suppresses_matching_error', fn: test_exclude_pattern_suppresses_matching_error },
   { name: 'test_exclude_pattern_can_suppress_all_errors', fn: test_exclude_pattern_can_suppress_all_errors },
   { name: 'test_invalid_exclude_pattern_fails_clearly', fn: test_invalid_exclude_pattern_fails_clearly },
+  { name: 'test_console_error_flags_third_party_source', fn: test_console_error_flags_third_party_source },
+  { name: 'test_console_error_same_origin_not_flagged_third_party', fn: test_console_error_same_origin_not_flagged_third_party },
+  { name: 'test_console_error_fix_hint_suggests_pasteable_exclude', fn: test_console_error_fix_hint_suggests_pasteable_exclude },
   { name: 'test_text_visible_passes_when_any_match_visible', fn: test_text_visible_passes_when_any_match_visible },
   { name: 'test_text_visible_scoped_searches_inside_selector', fn: test_text_visible_scoped_searches_inside_selector },
   { name: 'test_text_visible_scoped_fails_when_absent_in_scope', fn: test_text_visible_scoped_fails_when_absent_in_scope },

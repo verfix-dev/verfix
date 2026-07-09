@@ -291,7 +291,14 @@ async function execute(
     page.on('console', msg => {
       const ts = new Date().toISOString();
       if (consoleLogs.length >= MAX_CONSOLE_LOGS) consoleLogs.shift();
-      consoleLogs.push({ type: msg.type(), text: msg.text(), timestamp: ts });
+      const loc = msg.location();
+      consoleLogs.push({
+        type: msg.type(),
+        text: msg.text(),
+        timestamp: ts,
+        source_url: loc.url || undefined,
+        line: loc.url ? loc.lineNumber : undefined,
+      });
     });
     page.on('request', request => {
       requestStartTimes.set(request, Date.now());

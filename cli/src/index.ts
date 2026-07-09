@@ -2103,7 +2103,7 @@ function stripAnsi(text: string): string {
   return text.replace(/\u001b\[[0-9;]*m/g, '');
 }
 
-function buildFailures(result: any): Array<{ type: string; flow?: string; assertion?: string; selector?: string; detail?: string; fix_hint?: string }> {
+function buildFailures(result: any): Array<{ type: string; flow?: string; assertion?: string; selector?: string; source_url?: string; detail?: string; fix_hint?: string }> {
   const failures = (result.assertions || [])
     .filter((a: any) => !a.passed)
     .map((a: any) => ({
@@ -2112,6 +2112,8 @@ function buildFailures(result: any): Array<{ type: string; flow?: string; assert
       flow: a.flow_name,
       assertion: a.type,
       selector: a.details?.selector || a.details?.resolved_selector,
+      // console_error only: where the offending console message originated.
+      source_url: a.details?.source_url,
       detail: a.error ? stripAnsi(a.error) : a.error,
       fix_hint: a.fix_hint,
     }));

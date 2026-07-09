@@ -177,6 +177,10 @@ export interface ConsoleLine {
   type: string;
   text: string;
   timestamp: string;
+  // Where the console message originated (Playwright's msg.location()).
+  // Absent when the browser doesn't report a source (e.g. some 'log' calls).
+  source_url?: string;
+  line?: number;
 }
 
 export interface NetworkRequest {

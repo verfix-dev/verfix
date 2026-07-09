@@ -68,10 +68,18 @@ export function renderFixHint(type: FailureType, context: FailureContext): strin
       return context.expected && context.actual
         ? `Expected URL to contain "${context.expected}" but got "${context.actual}". Check routing/redirects and wait for navigation.`
         : 'Navigation did not reach the expected URL. Check routing/redirects and wait for navigation.';
-    case 'console_error':
-      return context.error
-        ? `Console errors detected — ${context.error}. Fix JS errors, or add "exclude" patterns to no_console_errors if the error is expected.`
-        : 'Console errors detected. Fix JS errors or mock failing dependencies.';
+    case 'console_error': {
+      if (!context.error) return 'Console errors detected. Fix JS errors or mock failing dependencies.';
+      const suggested = context.details?.suggested_exclude as string | undefined;
+      const thirdParty = context.details?.third_party as boolean | undefined;
+      const origin = thirdParty
+        ? ' This error originates from a third-party script, not your app code.'
+        : '';
+      const excludeAdvice = suggested
+        ? ` If expected, add "exclude": ["${suggested}"] to the no_console_errors assertion in verfix.config.json.`
+        : ' Fix JS errors, or add "exclude" patterns to no_console_errors if the error is expected.';
+      return `Console errors detected — ${context.error}.${origin}${excludeAdvice}`;
+    }
     case 'network_failure':
       return context.error
         ? `${context.error} Check backend availability, or add "acceptStatuses" to network_request_success if this status is expected.`
