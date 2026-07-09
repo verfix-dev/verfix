@@ -61,6 +61,7 @@ export class OpenRouterAdapter implements ProviderAdapter {
           },
           body: JSON.stringify(body),
         },
+        opts?.timeoutMs,
       )
 
       if (res.status === 401) {
@@ -86,7 +87,7 @@ export class OpenRouterAdapter implements ProviderAdapter {
       return data?.choices?.[0]?.message?.content ?? null
     } catch (e: any) {
       if (e.name === 'AbortError') {
-        console.warn('  ⚠ OpenRouter: Request timed out after 30s')
+        console.warn(`  ⚠ OpenRouter: Request timed out after ${Math.round((opts?.timeoutMs ?? 30_000) / 1000)}s`)
       } else {
         console.warn(`  ⚠ OpenRouter error: ${e.message}`)
       }

@@ -9,6 +9,7 @@
 import assert from 'assert';
 import {
   reportRateLimit, reportAISuccess, reportAIOutcome, isAIBreakerOpen, resetAIBreaker,
+  remainingAIBudgetMs,
 } from '../../src/ai/circuit-breaker';
 
 function test_opens_after_three_consecutive_429s() {
@@ -75,6 +76,18 @@ function test_opens_when_time_budget_exhausted_even_on_success() {
   console.log('✓ the per-run AI time budget opens the breaker regardless of call success');
 }
 
+function test_remaining_budget_tracks_time_spent() {
+  resetAIBreaker();
+  assert.strictEqual(remainingAIBudgetMs(), 20000, 'fresh run starts with the full 20s default budget');
+  reportAIOutcome(true, 25000); // one slow-but-successful call past the 20s default budget
+  assert.strictEqual(remainingAIBudgetMs(), 0, 'an outcome exceeding the budget leaves zero remaining, never negative');
+  assert.strictEqual(isAIBreakerOpen(), true, 'exhausting the budget must also open the breaker');
+  resetAIBreaker();
+  assert.strictEqual(remainingAIBudgetMs(), 20000, 'resetAIBreaker restores the full per-run budget');
+  assert.strictEqual(isAIBreakerOpen(), false, 'resetAIBreaker also closes the breaker');
+  console.log('✓ remainingAIBudgetMs tracks spend, floors at 0, and resets with resetAIBreaker()');
+}
+
 async function test_chat_completion_short_circuits_when_open() {
   resetAIBreaker();
   reportRateLimit('x'); reportRateLimit('x'); reportRateLimit('x');
@@ -98,6 +111,7 @@ async function test_chat_completion_short_circuits_when_open() {
     { name: 'test_opens_after_three_consecutive_failures_of_any_kind', fn: test_opens_after_three_consecutive_failures_of_any_kind },
     { name: 'test_success_outcome_resets_failure_streak', fn: test_success_outcome_resets_failure_streak },
     { name: 'test_opens_when_time_budget_exhausted_even_on_success', fn: test_opens_when_time_budget_exhausted_even_on_success },
+    { name: 'test_remaining_budget_tracks_time_spent', fn: test_remaining_budget_tracks_time_spent },
     { name: 'test_chat_completion_short_circuits_when_open', fn: test_chat_completion_short_circuits_when_open },
   ];
   for (const t of tests) {

@@ -72,7 +72,7 @@ export class OpenAIAdapter implements ProviderAdapter {
           'Authorization': `Bearer ${key}`,
         },
         body: JSON.stringify(body),
-      })
+      }, opts?.timeoutMs)
 
       if (res.status === 401) {
         console.warn('  ⚠ OpenAI: Invalid API key. Check OPENAI_API_KEY.')
@@ -105,7 +105,7 @@ export class OpenAIAdapter implements ProviderAdapter {
       return data?.choices?.[0]?.message?.content ?? null
     } catch (e: any) {
       if (e.name === 'AbortError') {
-        console.warn('  ⚠ OpenAI: Request timed out after 30s')
+        console.warn(`  ⚠ OpenAI: Request timed out after ${Math.round((opts?.timeoutMs ?? 30_000) / 1000)}s`)
       } else {
         console.warn(`  ⚠ OpenAI error: ${e.message}`)
       }

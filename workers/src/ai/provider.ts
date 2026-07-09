@@ -24,7 +24,11 @@
  */
 
 import { resolveAdapter } from './adapters/registry';
-import { isAIBreakerOpen, reportAIOutcome } from './circuit-breaker';
+import { isAIBreakerOpen, reportAIOutcome, remainingAIBudgetMs } from './circuit-breaker';
+
+// Below this much remaining budget, a call isn't worth starting: any real
+// provider round-trip takes longer, so we'd just eat the timeout for nothing.
+const MIN_VIABLE_BUDGET_MS = 2000;
 
 // Re-export ChatMessage so callers can use it without importing from the adapters module.
 export type { ChatMessage } from './adapters/types';
@@ -65,8 +69,23 @@ export async function chatCompletion(
   // for the rest of the run — callers already treat null as "AI unavailable"
   // and fall back to deterministic behavior.
   if (isAIBreakerOpen()) return null;
+
+  const remaining = remainingAIBudgetMs();
+  if (remaining < MIN_VIABLE_BUDGET_MS) {
+    // Not enough budget left to make a call worth starting. Consume what's
+    // left so reportAIOutcome's existing time-budget check opens the breaker
+    // with an accurate "spent == budget" message, instead of silently
+    // skipping every remaining call with no signal.
+    reportAIOutcome(true, remaining);
+    return null;
+  }
+
+  // Clamp the adapter's HTTP timeout to what's actually left of the run's AI
+  // budget — never more than the adapter default — so one slow call can't
+  // spend more of the budget than remains.
+  const timeoutMs = Math.min(30_000, remaining);
   const start = Date.now();
-  const result = await resolveAdapter().chat(messages, opts);
+  const result = await resolveAdapter().chat(messages, { ...opts, timeoutMs });
   reportAIOutcome(result !== null, Date.now() - start);
   return result;
 }
