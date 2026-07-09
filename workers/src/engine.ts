@@ -18,6 +18,7 @@ import { pool } from './browser/pool';
 import { generateFailureSummary } from './ai/summarizer';
 import { resetAIBreaker } from './ai/circuit-breaker';
 import { runExploration } from './ai/exploration';
+import { storageStatePath, sessionStatePath, restoreStateInPage, captureState, seedWebStorage } from './browser/storage-state';
 
 export * from './assertions/types';
 
@@ -42,25 +43,6 @@ const IS_DOCKER =
     process.env.IN_DOCKER === '1' ||
     fs.existsSync('/.dockerenv')
   );
-
-// State names become filenames — reject anything that could escape stateDir.
-function validateStateName(name: string): void {
-  if (!/^[A-Za-z0-9_-]+$/.test(name)) {
-    throw new Error(`Invalid storage state name "${name}" — use only letters, digits, dash, underscore`);
-  }
-}
-
-function storageStatePath(stateDir: string, name: string): string {
-  validateStateName(name);
-  return path.join(stateDir, `${name}.json`);
-}
-
-// Playwright's storageState covers cookies/localStorage/IndexedDB but not
-// sessionStorage, so that lives in a sidecar file next to the state file.
-function sessionStatePath(stateDir: string, name: string): string {
-  validateStateName(name);
-  return path.join(stateDir, `${name}.session.json`);
-}
 
 function resolveTargetUrl(rawUrl: string): string {
   // Host network mode: localhost IS the host, no rewrite needed.
@@ -220,24 +202,24 @@ async function execute(
   try {
 
     // ── Auth state reuse: restore ─────────────────────────────────────────────
-    // Storage state must be applied at context creation so cookies/localStorage
-    // exist before the app boots (SPAs read auth tokens on first load).
+    // Each flow's declared useState is restored right before THAT flow runs, so
+    // flows never see a session they didn't ask for (a clearState flow batched
+    // ahead of a useState flow gets a genuinely clean slate). One fast path:
+    // when the run's FIRST flow declares useState, its state is applied at
+    // context creation instead — nothing runs before it, and only context
+    // creation can restore IndexedDB (Firebase/MSAL token caches).
     const stateDir = opts.stateDir ?? path.join(artifactsDir, 'state');
-    const restoreNames = [...new Set((data.flows || []).map(f => f.useState).filter((n): n is string => !!n))];
-    if (restoreNames.length > 1) {
-      // ponytail: one restored state per run (it's context-level). Flows asking
-      // for a second name share the first; split into separate runs to upgrade.
-      console.warn(`   ⚠ Multiple useState names (${restoreNames.join(', ')}) — only "${restoreNames[0]}" is restored this run.`);
-    }
+    const firstFlow = (data.flows || [])[0];
+    const fastPathName = firstFlow?.useState && !firstFlow.clearState ? firstFlow.useState : undefined;
     let restoredState: string | undefined;
-    if (restoreNames.length > 0) {
-      const p = storageStatePath(stateDir, restoreNames[0]);
+    if (fastPathName) {
+      const p = storageStatePath(stateDir, fastPathName);
       if (fs.existsSync(p)) {
         restoredState = p;
-        console.log(`   🔑 Restoring saved storage state "${restoreNames[0]}"`);
-        tracker.pushEvent('action', `restored storage state "${restoreNames[0]}"`, { state: restoreNames[0] }, { category: 'info' });
+        console.log(`   🔑 Restoring saved storage state "${fastPathName}"`);
+        tracker.pushEvent('action', `restored storage state "${fastPathName}"`, { state: fastPathName }, { category: 'info' });
       } else {
-        console.log(`   ℹ️  No saved storage state "${restoreNames[0]}" yet — running without it (a flow with saveState creates it)`);
+        console.log(`   ℹ️  No saved storage state "${fastPathName}" yet — running without it (a flow with saveState creates it)`);
       }
     }
 
@@ -245,27 +227,6 @@ async function execute(
       recordHar: { path: harPath },
       ...(restoredState ? { storageState: restoredState } : {}),
     });
-
-    // sessionStorage sidecar restore: Playwright's storageState can't carry it,
-    // so seed it via an init script that runs before the app boots. Seeded once
-    // per tab (marker key) so values the app updates later aren't clobbered.
-    if (restoredState) {
-      const sp = sessionStatePath(stateDir, restoreNames[0]);
-      if (fs.existsSync(sp)) {
-        try {
-          const saved = JSON.parse(fs.readFileSync(sp, 'utf-8')) as { origin: string; entries: Record<string, string> };
-          await context.addInitScript((data: { origin: string; entries: Record<string, string> }) => {
-            if (location.origin === data.origin && !sessionStorage.getItem('__verfix_ss_seeded')) {
-              for (const [k, v] of Object.entries(data.entries)) sessionStorage.setItem(k, v);
-              sessionStorage.setItem('__verfix_ss_seeded', '1');
-            }
-          }, saved);
-          console.log(`   🔑 Restoring saved sessionStorage for "${restoreNames[0]}"`);
-        } catch (e: any) {
-          console.warn(`   ⚠ Could not restore sessionStorage sidecar for "${restoreNames[0]}": ${e.message}`);
-        }
-      }
-    }
 
     await context.tracing.start({ screenshots: true, snapshots: true, sources: true });
 
@@ -326,6 +287,21 @@ async function execute(
       console.log(`   ℹ️  URL rewritten for Docker: ${data.url} → ${targetUrl}`);
     }
 
+    // Fast path sessionStorage: Playwright's storageState can't carry it, so
+    // seed the sidecar before the initial navigation boots the app.
+    if (restoredState && fastPathName) {
+      const sp = sessionStatePath(stateDir, fastPathName);
+      if (fs.existsSync(sp)) {
+        try {
+          const saved = JSON.parse(fs.readFileSync(sp, 'utf-8')) as { origin: string; entries: Record<string, string> };
+          await seedWebStorage(page, saved.origin, undefined, saved.entries);
+          console.log(`   🔑 Restoring saved sessionStorage for "${fastPathName}"`);
+        } catch (e: any) {
+          console.warn(`   ⚠ Could not restore sessionStorage sidecar for "${fastPathName}": ${e.message}`);
+        }
+      }
+    }
+
     console.log(`\n🌐 Navigating to ${targetUrl}...`);
     try {
       await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout });
@@ -364,7 +340,7 @@ async function execute(
 
       if (data.flows && data.flows.length > 0) {
         console.log('\n▶ Executing flows...');
-        for (const flow of data.flows) {
+        for (const [flowIndex, flow] of data.flows.entries()) {
           if (flow.clearState) {
             // ponytail: clears cookies + local/session storage only — leaves
             // IndexedDB/service workers untouched. Upgrade to a fresh
@@ -377,6 +353,28 @@ async function execute(
             }
             tracker.pushEvent('dom_change', `cleared cookies/storage before flow ${flow.name}`, { flow: flow.name }, { category: 'info' });
           }
+
+          // ── Auth state reuse: per-flow restore ─────────────────────────────
+          // The first flow's state was already applied at context creation
+          // (fast path); every other useState flow is seeded here, immediately
+          // before its steps run.
+          let stateRestored = flowIndex === 0 && !!restoredState;
+          if (flow.useState && !stateRestored) {
+            stateRestored = await restoreStateInPage(context, page, stateDir, flow.useState);
+            if (stateRestored) {
+              console.log(`   🔑 Restored saved storage state "${flow.useState}" for flow ${flow.name}`);
+              tracker.pushEvent('action', `restored storage state "${flow.useState}"`, { flow: flow.name, state: flow.useState }, { category: 'info' });
+              // The page is parked on the blank seed document — boot the app
+              // with the restored session, unless the flow navigates itself.
+              if (flow.steps?.[0]?.action !== 'navigate') {
+                await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout });
+                await waitForStableDOM(page, 400, 8000);
+              }
+            } else {
+              console.log(`   ℹ️  No saved storage state "${flow.useState}" yet — running without it (a flow with saveState creates it)`);
+            }
+          }
+
           await executeFlow(page, flow, data, tracker);
           await waitForStableDOM(page, 400, 5000);
           tracker.pushEvent('dom_change', `DOM stabilized after flow ${flow.name}`, { flow: flow.name }, { category: 'info' });
@@ -393,38 +391,24 @@ async function execute(
           }
 
           // ── Auth state reuse: save ──────────────────────────────────────────
-          // Only a verified-good session is worth reusing: steps ran without
+          // Only a verified-good session is worth persisting: steps ran without
           // throwing and every flow assertion passed.
-          if (flow.saveState && flowPassed) {
-            const p = storageStatePath(stateDir, flow.saveState);
-            fs.mkdirSync(path.dirname(p), { recursive: true });
-            // indexedDB covers Firebase Auth / MSAL-style token caches.
-            await context.storageState({ path: p, indexedDB: true });
-            // sessionStorage isn't part of Playwright's storageState — capture
-            // the current page's origin to a sidecar so JWT-in-sessionStorage
-            // apps (most SPAs) restore a working session via useState.
-            try {
-              const entries = await page.evaluate(() => {
-                const out: Record<string, string> = {};
-                for (let i = 0; i < sessionStorage.length; i++) {
-                  const k = sessionStorage.key(i);
-                  if (k !== null && k !== '__verfix_ss_seeded') out[k] = sessionStorage.getItem(k) ?? '';
-                }
-                return out;
-              });
-              const sp = sessionStatePath(stateDir, flow.saveState);
-              if (Object.keys(entries).length > 0) {
-                fs.writeFileSync(sp, JSON.stringify({ origin: new URL(page.url()).origin, entries }, null, 2));
-              } else {
-                // Nothing in sessionStorage now — drop any stale sidecar so a
-                // future restore matches what this login actually produced.
-                fs.rmSync(sp, { force: true });
-              }
-            } catch (e: any) {
-              console.warn(`   ⚠ Could not capture sessionStorage for "${flow.saveState}": ${e.message}`);
+          if (flowPassed) {
+            if (flow.saveState) {
+              await captureState(context, page, stateDir, flow.saveState);
+              console.log(`   💾 Saved storage state "${flow.saveState}" for reuse via useState`);
+              tracker.pushEvent('action', `saved storage state "${flow.saveState}"`, { flow: flow.name, state: flow.saveState }, { category: 'info' });
             }
-            console.log(`   💾 Saved storage state "${flow.saveState}" for reuse via useState`);
-            tracker.pushEvent('action', `saved storage state "${flow.saveState}"`, { flow: flow.name, state: flow.saveState }, { category: 'info' });
+            // Rotating (single-use) refresh tokens: the app may have rotated
+            // the restored session's tokens on boot, making the file on disk
+            // dead for the next run. Re-capture the live session so a restore
+            // always sends the current tokens. Opt out with refreshState: false
+            // (e.g. a flow that ends logged out).
+            if (flow.useState && stateRestored && flow.useState !== flow.saveState && flow.refreshState !== false) {
+              await captureState(context, page, stateDir, flow.useState);
+              console.log(`   🔄 Refreshed storage state "${flow.useState}" (session tokens may have rotated)`);
+              tracker.pushEvent('action', `refreshed storage state "${flow.useState}"`, { flow: flow.name, state: flow.useState }, { category: 'info' });
+            }
           }
         }
       }

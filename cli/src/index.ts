@@ -1340,6 +1340,7 @@ program
   .option('--source-policy <policy>', 'Project-source edit policy: warn | block | off (overrides config)')
   .option('--reset-baseline', 'Reset the source-change baseline for this verify cycle', false)
   .option('--skip-download', 'Do not auto-download Chromium on first run; fail fast if missing (local mode only)', false)
+  .option('--fresh-state', 'Discard saved storage states used by the selected flows before running, so login flows re-authenticate from scratch (local mode only)', false)
   .option('--server', 'Run via the Docker server runtime instead of locally', false)
   .action(async (opts) => {
     applyRunnerFlag(opts);
@@ -1446,6 +1447,20 @@ program
     }
 
     trackFlowCount = flows.length > 0 ? flows.length : (assertions ? assertions.length : 0);
+
+    // ── --fresh-state: escape hatch for stale/rotated saved sessions ─────────
+    if (opts.freshState) {
+      if (getRunnerMode() === 'server') {
+        console.warn(chalk.yellow('⚠ --fresh-state is only supported in local mode (server-mode state lives inside the container). Ignoring.'));
+      } else {
+        const names = [...new Set(flows.map((f: any) => f.useState).filter(Boolean))] as string[];
+        const { discardLocalStates } = await import('./local-runner');
+        const removed = discardLocalStates(names);
+        if (removed.length > 0) {
+          console.error(chalk.gray(`ℹ Discarded saved state(s): ${removed.join(', ')} — include the flow that saves them so they are recreated`));
+        }
+      }
+    }
 
     // ── Source-change guard ───────────────────────────────────────────────────
     // Snapshot / compare the working tree at the START of the run so we can tell
@@ -2088,6 +2103,7 @@ function normalizeFlows(flows: any[]): any[] {
       clearState: flow.clearState,
       useState: flow.useState,
       saveState: flow.saveState,
+      refreshState: flow.refreshState,
       steps: (flow.steps || []).map((rawStep: any, stepIdx: number) => {
         const step = interpolateStep(rawStep, `${flowPath}.steps[${stepIdx}]`);
         return {

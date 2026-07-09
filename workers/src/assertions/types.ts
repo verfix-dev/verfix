@@ -84,13 +84,19 @@ export interface Flow {
   assertions?: AssertionDefinition[];
   // Clear cookies + local/session storage before this flow runs.
   clearState?: boolean;
-  // Restore the named storage state (cookies + localStorage + IndexedDB +
-  // sessionStorage) saved by a previous run. Applied at browser-context
-  // creation, before navigation.
+  // Restore the named storage state (cookies + localStorage + sessionStorage;
+  // plus IndexedDB when this is the run's first flow) saved by a previous run.
+  // Applied immediately before THIS flow runs — earlier flows in the same run
+  // never see the restored session.
   useState?: string;
   // After this flow's steps and assertions pass, save the context's storage
   // state under this name so later runs can restore it via `useState`.
   saveState?: string;
+  // After a flow that restored a state via `useState` passes, the live session
+  // is re-captured to the same name by default, so server-side token rotation
+  // (single-use refresh tokens) never leaves the file on disk stale. Set false
+  // to keep the saved state untouched (e.g. a flow that ends logged out).
+  refreshState?: boolean;
 }
 
 export interface JobPayload {

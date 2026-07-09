@@ -23,7 +23,7 @@
     "dev": "ts-node src/index.ts",
     "build": "tsc -p tsconfig.build.json",
     "prepublishOnly": "npm run build",
-    "test": "npm run test:registry && npm run test:circuit-breaker && npm run test:openai && npm run test:formats && npm run test:assertions && npm run test:assertion-options && npm run test:optional-steps && npm run test:press-step && npm run test:form-steps && npm run test:wait-and-frame && npm run test:engine",
+    "test": "npm run test:registry && npm run test:circuit-breaker && npm run test:openai && npm run test:formats && npm run test:assertions && npm run test:assertion-options && npm run test:optional-steps && npm run test:press-step && npm run test:form-steps && npm run test:wait-and-frame && npm run test:engine && npm run test:state",
     "test:registry": "ts-node test/ai/adapters/registry.test.ts",
     "test:circuit-breaker": "ts-node test/ai/circuit-breaker.test.ts",
     "test:openai": "ts-node test/ai/adapters/openai.test.ts",
@@ -35,7 +35,8 @@
     "test:press-step": "ts-node test/browser/press-step.test.ts",
     "test:form-steps": "ts-node test/browser/form-steps.test.ts",
     "test:wait-and-frame": "ts-node test/browser/wait-and-frame.test.ts",
-    "test:engine": "ts-node test/engine/transport-free.test.ts"
+    "test:engine": "ts-node test/engine/transport-free.test.ts",
+    "test:state": "ts-node test/engine/state-lifecycle.test.ts"
   },
   "dependencies": {
     "bullmq": "^5.76.9",

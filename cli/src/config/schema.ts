@@ -69,6 +69,10 @@ export const FlowSchema = z.object({
   // flow passes. Names become filenames under .verfix/state/.
   useState: z.string().regex(/^[A-Za-z0-9_-]+$/, 'useState must contain only letters, digits, dash, underscore').optional(),
   saveState: z.string().regex(/^[A-Za-z0-9_-]+$/, 'saveState must contain only letters, digits, dash, underscore').optional(),
+  // After a flow that restored a state via useState passes, the live session is
+  // re-captured to the same name by default (handles single-use/rotating
+  // refresh tokens). Set false to keep the saved state file untouched.
+  refreshState: z.boolean().optional(),
 })
 
 export const VerfixConfigSchema = z.object({

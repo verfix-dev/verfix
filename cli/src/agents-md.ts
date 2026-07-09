@@ -599,9 +599,14 @@ If verification runs are misbehaving, use these commands to diagnose and fix:
       // sessionStorage are saved under that name (in .verfix/state/, never
       // committed).
       // On flows that need a session: "useState": "auth" — the saved state is
-      // restored before the run navigates, so the flow starts logged in.
+      // restored immediately before THIS flow runs (earlier flows in the same
+      // run never see it), so the flow starts logged in. After the flow
+      // passes, the live session is re-captured to the same name by default
+      // (handles single-use/rotating refresh tokens); set
+      // "refreshState": false on a flow that ends logged out.
       // If the state doesn't exist yet (or the session expired and the flow
-      // fails), run the saving flow once to (re)create it.
+      // fails), run the saving flow once to (re)create it — or use
+      // "verfix run --fresh-state" to discard saved states and re-login.
       "saveState": "auth",
 
       // REQUIRED — Ordered list of browser actions to execute.
