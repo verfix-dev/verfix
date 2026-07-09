@@ -14,7 +14,7 @@
 
 - [x] Publish the pending release (`verfix` CLI + `@verfix/engine`) to npm; README quickstart must work in a clean directory in under 5 minutes.
 - [x] Dogfood: `testbed/` (zero-dep app + `verfix.config.json` exercising the Phase 2 step surface) runs in this repo's CI (`.github/workflows/ci.yml`) alongside every package test suite and the JSON-purity guard; this also un-broke the smoke test CLAUDE.md/CONTRIBUTING document. Flows for the dashboard itself stay deferred with server mode. Every gap we hit becomes a Phase 2 item — this is how the backlog gets prioritized instead of guessed.
-- [ ] Delete/park drift: docs or code that describe the old hybrid worker mode, `@verifyruntime` scope, or aspirational features (LangGraph wrappers, WebSockets, cross-browser) that we are not building yet.
+- [ ] Delete/park drift: docs or code that describe the old hybrid worker mode, `@verifyruntime` scope, or aspirational features (LangGraph wrappers, WebSockets, cross-browser) that we are not building yet. → [#64](https://github.com/verfix-dev/verfix/issues/64)
 
 **Exit condition:** a stranger can `npx verfix init && verfix run` successfully from the README alone.
 
@@ -32,15 +32,15 @@ Actions (each lands in the same step schema, each maps failures onto the *existi
 
 Assertions: **no new failure types.** Richness goes into the failure payload (see Phase 3), not the taxonomy. New types require a GitHub Discussion, per existing policy.
 
-**Exit condition:** we can write flows for 3 real open-source webapps (e.g. a Next.js SaaS starter, a Vite SPA, an admin dashboard) without hitting a missing action.
+**Exit condition:** we can write flows for 3 real open-source webapps (e.g. a Next.js SaaS starter, a Vite SPA, an admin dashboard) without hitting a missing action. → [#71](https://github.com/verfix-dev/verfix/issues/71)
 
 ## Phase 3 — Deepen the agent contract (parallel with Phase 2, ongoing)
 
 *Why: this is the moat. Determinism and JSON config are copyable; a failure payload that reliably closes an agent's edit→verify loop is not. It also compounds — every Phase 2 action ships with its failure detail as part of the definition of done.*
 
-- [ ] Richer failure `details`: DOM snippet around the failed selector, closest-matching selectors (computed deterministically — text/role similarity, no LLM), first console error, failing network request.
-- [ ] Measure the moat: a testbed of deliberately-broken apps + a harness that runs a coding agent against each failure and records whether the loop closes without human help. This number ("loop-closure rate") is the product metric; fix_hint changes are judged by whether it moves.
-- [ ] Source guard hardening: it's the feature nobody else has — make sure it survives real agent behavior (partial commits, formatter runs, config edits) without false positives.
+- [ ] Richer failure `details`: DOM snippet around the failed selector, closest-matching selectors (computed deterministically — text/role similarity, no LLM), first console error, failing network request. → selector pieces: [#65](https://github.com/verfix-dev/verfix/issues/65); console/network correlation: the failure-synthesis track, [#63](https://github.com/verfix-dev/verfix/issues/63)
+- [ ] Measure the moat: a testbed of deliberately-broken apps + a harness that runs a coding agent against each failure and records whether the loop closes without human help. This number ("loop-closure rate") is the product metric; fix_hint changes are judged by whether it moves. → [#66](https://github.com/verfix-dev/verfix/issues/66)
+- [ ] Source guard hardening: it's the feature nobody else has — make sure it survives real agent behavior (partial commits, formatter runs, config edits) without false positives. → [#67](https://github.com/verfix-dev/verfix/issues/67)
 
 **Exit condition:** loop-closure rate measured and improving release over release.
 
@@ -63,7 +63,8 @@ Assertions: **no new failure types.** Richness goes into the failure payload (se
 
 Real SPAs fire unrelated transient errors on every run (branding fetch, session-validate, language-detect racing navigation). The reviewer burned three run-iterations discovering them one failure at a time, because the failure summary truncates to the first error string. The tempting fix — a built-in "ignore transient errors" default — is rejected: a default that swallows 401s can mask the exact regression a login flow exists to catch.
 
-- [ ] **Do now (deterministic, zero risk):** make *one* failing run sufficient to write the excludes. The engine already collects every error string in `details.errors` (`workers/src/assertions/engine.ts`); surface the full deduped list in CLI output, and upgrade the `no_console_errors` template in `workers/src/assertions/failure-hints.ts` to emit ready-to-paste suggested `exclude` regexes derived from the actual errors. Collapses the three-iteration discovery loop into one.
+- [x] **Do now (deterministic, zero risk):** make *one* failing run sufficient to write the excludes. The engine already collects every error string in `details.errors` (`workers/src/assertions/engine.ts`); surface the full deduped list in CLI output, and upgrade the `no_console_errors` template in `workers/src/assertions/failure-hints.ts` to emit ready-to-paste suggested `exclude` regexes derived from the actual errors. Collapses the three-iteration discovery loop into one.
+  *(Shipped with field-review #2's suggested-excludes item below — `details.suggested_exclude` + ready-to-paste `fix_hint`.)*
 - [ ] **Discuss before building:** opt-in per-assertion `ignoreTransientNetworkErrors: true` (drops `Failed to fetch` / `net::ERR_*`-class errors that raced navigation). Failure behavior and `fix_hint` semantics are agent-facing contract, so this goes through a GitHub Discussion first, per existing policy.
 
 ### Declined
@@ -83,12 +84,12 @@ Real SPAs fire unrelated transient errors on every run (branding fetch, session-
 - [x] **Console/network error entries omit the source URL.** `page.on('console')` in `workers/src/engine.ts` recorded only type/text/timestamp — `msg.location()` was dropped, making a precise `exclude` guesswork (the reviewing agent ended up with `exclude: ["404"]`, which would mask exactly the regression a login flow exists to catch). Fixed: `ConsoleLine` now carries `source_url`/`line`; `no_console_errors` failure `details` gains `source_url` and a `third_party` flag (origin compared against `page.url()`) so agents can tell "your bug" from "vendor script noise" without reading raw console logs. Paired with the next item.
 - [x] **Suggested `exclude` patterns from one failing run** — was Tier 3's "do now" above; a second independent review hit the identical three-iteration discovery loop and produced the predicted over-broad exclude. Fixed: `no_console_errors` failures now carry `details.suggested_exclude` (the error text, regex-escaped) and `fix_hint` embeds it as a ready-to-paste `"exclude": [...]` line, plus the third-party note from the item above. The CLI/SDK `failures[]` JSON gained an additive `source_url` field.
 - [x] **Version-skew warning in `doctor`.** Two of the seven reported issues (a `text_visible` strict-mode violation, an init→status "config not found" race) do not exist in the current code — the reviewer's global `verfix` binary was stale while `npx verfix` was current, so it debugged phantom bugs and filed them as product feedback. Fixed: `doctor` now runs a live version check (not the 24h-throttled background cache, which may not have populated yet on a fresh install) and reports the installed version, whether it's current, and the resolved path of the binary actually executing — the path is what actually exposes a global/npx split, since the version number alone didn't.
-- [ ] **Teach the generated instructions what already exists.** The agent read `AGENTS.md` and `.verfix/INSTRUCTIONS.md` and still wished for three features that already shipped: per-step screenshots (every trace records them — `verfix show`), non-interactive run data (`show --console/--network --output json`), and scoped `text_visible` (the `selector` field, shipped in the Phase 2 release). The contract only counts if agents discover it: update `generateAgentsSection()` to cover these, plus one line stating that selectors are full Playwright selector syntax (CSS, `:has-text()`, `text=`, `role=`) — also the answer to "document which selector engines are supported."
+- [ ] **Teach the generated instructions what already exists.** → [#68](https://github.com/verfix-dev/verfix/issues/68) The agent read `AGENTS.md` and `.verfix/INSTRUCTIONS.md` and still wished for three features that already shipped: per-step screenshots (every trace records them — `verfix show`), non-interactive run data (`show --console/--network --output json`), and scoped `text_visible` (the `selector` field, shipped in the Phase 2 release). The contract only counts if agents discover it: update `generateAgentsSection()` to cover these, plus one line stating that selectors are full Playwright selector syntax (CSS, `:has-text()`, `text=`, `role=`) — also the answer to "document which selector engines are supported."
 
 ### Confirmed — small and additive
 
-- [ ] **`selector_count` assertion.** "Exactly N items exist" is real verification surface for dynamic lists (the add/remove-elements flow could only assert visibility, not count). Additive assertion type mapping onto the existing failure taxonomy (`selector_not_found` when 0 found, `assertion_failed` on count mismatch) — no new failure types, so no Discussion needed.
-- [ ] **`--base-url` alias on `run`.** `init` says `--base-url`, `run` says `--url`; the inconsistency tripped the agent. Keep `--url`, add the alias — additive, no contract break.
+- [ ] **`selector_count` assertion.** → [#69](https://github.com/verfix-dev/verfix/issues/69) "Exactly N items exist" is real verification surface for dynamic lists (the add/remove-elements flow could only assert visibility, not count). Additive assertion type mapping onto the existing failure taxonomy (`selector_not_found` when 0 found, `assertion_failed` on count mismatch) — no new failure types, so no Discussion needed.
+- [ ] **`--base-url` alias on `run`.** → [#70](https://github.com/verfix-dev/verfix/issues/70) `init` says `--base-url`, `run` says `--url`; the inconsistency tripped the agent. Keep `--url`, add the alias — additive, no contract break.
 
 ### Stale or already shipped (no code action; covered by the discoverability item)
 
@@ -125,7 +126,13 @@ Hints below encode decisions already made — don't re-litigate them. Every task
 - **`verfix validate` warning for batching `clearState` + `useState` flows** — the ordering bug it would have flagged is fixed; the combination is now valid and useful.
 - **Skip AI healing "when the previous run matched deterministically"** — healing already only fires after exact + semantic resolution both fail; cross-run memory adds state for no gain. The real cost was the budget/timeout mismatch, fixed above.
 
+## Field-review backlog #4 — evidence synthesis (July 2026)
+
+*Source: a fourth coding-agent review, after diagnosing two failures (occluding onboarding dialog reported as a bare `selector_not_found`; an early `Failed to fetch` console error never connected to a later selector failure) by hand-grepping raw artifacts. Its verdict: "Verfix did the capture work correctly — the gap is entirely in synthesis. Both issues were 'the evidence was in the trace the whole time,' not 'the evidence was missing.'" Since failure causes are open-ended, the response is architectural, not per-cause: a universal evidence surface (cause-agnostic failure-time facts, `show --timeline`/`--dom` queries, a diagnosis playbook in the generated instructions) plus a deterministic analyzer pipeline emitting additive `findings[]` for recurring causes. Tracked in [#63](https://github.com/verfix-dev/verfix/issues/63) (work items #55–#61). Feeds the same Phase 3 moat as the richer-`details` item above.*
+
 ## Phase 4 — GitHub Action: from tool to gate (~1 month, after Phase 2 exit)
+
+Tracked in [#72](https://github.com/verfix-dev/verfix/issues/72).
 
 *Why: this is the moment Verfix becomes infrastructure, and the moment it starts solving the original pain point end-to-end: after an agent's change is raised as a PR — and after it deploys — no human should have to open a browser to learn whether it worked. The same `verfix.config.json` the agent used locally gates the PR and smoke-tests the deployment — that's the portability story made visible.*
 
@@ -141,8 +148,8 @@ Hints below encode decisions already made — don't re-litigate them. Every task
 
 *Why: with zero users, adoption is a bigger risk than any missing feature. Verfix's natural audience lives in the coding-agent ecosystem — go where they are instead of waiting.*
 
-- [ ] Framework-aware `verfix init`: detect Next.js/Vite, scaffold a working flow against the dev server, so first success takes minutes.
-- [ ] First-class Claude Code / Cursor integration: the AGENTS.md stub already exists — package Verfix as a Claude Code plugin/skill and/or MCP server so agents can adopt it without the human wiring anything.
+- [ ] Framework-aware `verfix init`: detect Next.js/Vite, scaffold a working flow against the dev server, so first success takes minutes. → [#73](https://github.com/verfix-dev/verfix/issues/73)
+- [ ] First-class Claude Code / Cursor integration: the AGENTS.md stub already exists — package Verfix as a Claude Code plugin/skill and/or MCP server so agents can adopt it without the human wiring anything. → [#74](https://github.com/verfix-dev/verfix/issues/74)
 - [ ] Launch: Show HN + posts in agent-tooling communities, anchored on a real demo ("my agent broke the app, Verfix caught it, the agent fixed it — no human").
 - [ ] Talk to every early user personally; their init failures are the top of the backlog.
 
