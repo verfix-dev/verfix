@@ -2189,7 +2189,9 @@ function stripAnsi(text: string): string {
   return text.replace(/\u001b\[[0-9;]*m/g, '');
 }
 
-function buildFailures(result: any): Array<{ type: string; flow?: string; assertion?: string; selector?: string; source_url?: string; detail?: string; fix_hint?: string }> {
+type FailureFinding = { code: string; summary: string; evidence?: Record<string, unknown>; suggestion?: string };
+
+function buildFailures(result: any): Array<{ type: string; flow?: string; assertion?: string; selector?: string; source_url?: string; detail?: string; fix_hint?: string; findings?: FailureFinding[] }> {
   const failures = (result.assertions || [])
     .filter((a: any) => !a.passed)
     .map((a: any) => ({
@@ -2202,6 +2204,9 @@ function buildFailures(result: any): Array<{ type: string; flow?: string; assert
       source_url: a.details?.source_url,
       detail: a.error ? stripAnsi(a.error) : a.error,
       fix_hint: a.fix_hint,
+      // Deterministic post-failure analysis from the engine; absent when no
+      // analyzer matched. Additive contract field.
+      findings: a.findings,
     }));
 
   if (failures.length === 0 && result.error) {

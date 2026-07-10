@@ -1,6 +1,7 @@
 import { Page } from 'playwright';
 import { ASSERTION_TYPES, AssertionDefinition, AssertionResult, ConsoleLine, NetworkRequest } from './types';
-import { appendStaleStateHint, inferFailureType, renderFixHint } from './failure-hints';
+import { inferFailureType, renderFixHint } from './failure-hints';
+import { appendTopFinding, Finding, runAnalyzers } from './analyzers';
 import { resolveWithHealing } from '../ai/self-healing';
 import { EventTracker } from '../artifacts/event-tracker';
 
@@ -232,6 +233,7 @@ export async function runAssertions(
 
     let failure_type: AssertionResult['failure_type'];
     let fix_hint: string | undefined;
+    let findings: Finding[] | undefined;
     if (!result.passed) {
       failure_type = inferFailureType(assertion, result);
       fix_hint = renderFixHint(failure_type, {
@@ -243,7 +245,19 @@ export async function runAssertions(
         error: result.error,
         details: result.details,
       });
-      fix_hint = appendStaleStateHint(fix_hint, failure_type, stateRestored, networkRequests);
+      const found = runAnalyzers({
+        failure_type,
+        assertion,
+        error: result.error,
+        details: result.details,
+        state_restored: stateRestored,
+        console_logs: consoleLogs,
+        network_requests: networkRequests,
+      });
+      if (found.length > 0) {
+        findings = found;
+        fix_hint = appendTopFinding(fix_hint, found);
+      }
     }
 
     let screenshot_on_failure: string | undefined;
@@ -278,7 +292,7 @@ export async function runAssertions(
       }
     }
 
-    const assertionResult = { type: assertion.type, ...result, screenshot_on_failure, failure_type, fix_hint, flow_name: flowName };
+    const assertionResult = { type: assertion.type, ...result, screenshot_on_failure, failure_type, fix_hint, findings, flow_name: flowName };
     results.push(assertionResult);
 
     // Enhanced logging
