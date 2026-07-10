@@ -95,6 +95,13 @@ fi
 # ~300ms past the engine's 10s bound, so the abandoned call is still pending
 # when the CLI moves on. Uses ephemeral ports for both the target app and the
 # fake AI backend — self-contained, no fixed ports, no external network.
+#
+# The CLI child runs under a PRISTINE throwaway HOME (no ~/.verfix/ — no
+# machine-id, no telemetry-notice marker, no update-check cache) so this also
+# verifies issue #80's other hypothesized mechanisms — the first-run
+# notification / version-check epilogue and the background-check scheduler —
+# don't leak onto stdout either. PLAYWRIGHT_BROWSERS_PATH is pinned to the real
+# cache so Chromium isn't re-downloaded under the temp HOME.
 harness=$(mktemp --suffix=.js)
 cat > "$harness" <<'JS'
 const http = require('http');
@@ -146,6 +153,13 @@ async function main() {
     }],
   }));
 
+  // Pristine throwaway HOME: no ~/.verfix/ (no machine-id, no telemetry-notice
+  // marker, no update-check cache) → the CLI child is a true first run, so the
+  // notification/version-check/telemetry epilogue paths execute too. Pin the
+  // browser cache to the real location so Chromium isn't re-downloaded.
+  const pristineHome = fs.mkdtempSync(path.join(os.tmpdir(), 'verfix-pristine-home-'));
+  const realBrowsersPath = path.join(os.homedir(), '.cache', 'ms-playwright');
+
   const cliBin = process.argv[2];
   // Async spawn, not spawnSync: this script's own event loop must keep
   // servicing the app/AI HTTP servers above (they live in THIS process) while
@@ -157,6 +171,8 @@ async function main() {
     cwd: projDir,
     env: {
       ...process.env,
+      HOME: pristineHome,
+      PLAYWRIGHT_BROWSERS_PATH: realBrowsersPath,
       AI_PROVIDER: 'openai',
       AI_API_KEY: 'sk-test-fake-key',
       AI_BASE_URL: `http://127.0.0.1:${ai.port}`,
@@ -173,6 +189,7 @@ async function main() {
   app.server.close();
   ai.server.close();
   fs.rmSync(projDir, { recursive: true, force: true });
+  fs.rmSync(pristineHome, { recursive: true, force: true });
 
   try {
     JSON.parse(stdout);
@@ -188,11 +205,11 @@ JS
 harness_result=$(node "$harness" "$(pwd)/cli/dist/index.js" 2>/tmp/verfix-json-purity-test6.log)
 rm -f "$harness"
 if [ "$harness_result" != "PURE" ]; then
-  echo "❌ FAIL: run --output json leaks extra stdout content from an abandoned AI summary call (#80)"
+  echo "❌ FAIL: run --output json leaks extra stdout content from an abandoned AI summary call or first-run epilogue (#80)"
   cat /tmp/verfix-json-purity-test6.log
   failed=1
 else
-  echo "✅ PASS: run --output json stays pure even when the AI failure-summary call outlives its bound (#80)"
+  echo "✅ PASS: run --output json stays pure on a pristine first run even when the AI failure-summary call outlives its bound (#80)"
 fi
 rm -f /tmp/verfix-json-purity-test6.log
 

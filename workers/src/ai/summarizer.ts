@@ -26,6 +26,12 @@ export async function generateFailureSummary(
    */
   isAbandoned?: () => boolean,
 ): Promise<AISummary | null> {
+  // No isAbandoned guard here: when AI is disabled this returns null
+  // synchronously — before any await — so Promise.race resolves immediately and
+  // the timeout branch never fires (the flag can't be set yet). This log also
+  // runs while the CLI's console→stderr swap is still active (we're inside
+  // runVerification, before runLocal's finally restores stdout), so it can't
+  // reach stdout even in isolation.
   if (!isAIEnabled()) {
     console.log('  ℹ AI summarization skipped (no API key configured)');
     return null;
