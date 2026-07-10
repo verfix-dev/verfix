@@ -136,4 +136,5 @@ To verify that Hybrid Mode is operating correctly on host machines:
    ```bash
    verfix run --url https://example.com --show-browser
    ```
+   (`--base-url` is accepted as an alias for `--url`.)
    *Expected Output:* Browser window opens, job completes in under 2 seconds, and structured JSON/pretty report is output with generated artifacts (`.png`, `.har`, `.json`, `.html`).
