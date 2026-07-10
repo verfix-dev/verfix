@@ -1326,6 +1326,7 @@ program
   .command('run')
   .description('Run a verification job')
   .option('-u, --url <url>', 'Target URL to verify')
+  .option('--base-url <url>', 'Alias for --url')
   .option('-t, --task <task>', 'Task description')
   .option('-c, --config <file>', 'Path to verfix.config.json config file')
   .option('-f, --flow <id>', 'Flow id or name to run')
@@ -1347,6 +1348,16 @@ program
     if (opts.showBrowser && getRunnerMode() === 'server') {
       console.warn(chalk.yellow('⚠ --show-browser is only supported in local mode. Ignoring.'));
     }
+
+    if (opts.baseUrl && opts.url && opts.baseUrl !== opts.url) {
+      const msg = '--url and --base-url were both passed with different values. They are aliases for the same setting — pass only one.';
+      if (isJsonMode(opts)) {
+        emitJsonError({ error: 'conflicting_url_flags', message: msg, hint: 'Pass either --url or --base-url, not both.' });
+      }
+      console.error(chalk.red(msg));
+      process.exit(2);
+    }
+    opts.url = opts.url || opts.baseUrl;
 
     let trackMode = opts.mode || 'strict';
     let trackFlowCount = 0;
