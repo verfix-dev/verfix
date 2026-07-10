@@ -171,7 +171,10 @@ verfix run --flow <flow-id> --mode strict --output json
 # Override URL for a single run (--base-url is accepted as an alias for --url)
 verfix run --flow <flow-id> --url http://localhost:5173 --output json
 
-# Open the recorded Playwright trace of a run (for the human to inspect)
+# Open the recorded Playwright trace of a run (for the human to inspect).
+# Every step in the flow is recorded with its own screenshot — the trace
+# viewer's timeline lets you scrub through them action-by-action, so there's
+# no separate screenshot mechanism to reach for; it's already in the trace.
 verfix show <execution_id>
 
 # Print a run's FULL captured console errors / network requests — use this to
@@ -185,6 +188,14 @@ verfix show <execution_id> --network --output json
 # contain a plain substring (case-insensitive, not a regex). --network JSON
 # output also includes a \`failed_requests\` array (status >= 400 or 0).
 verfix show <execution_id> --network --filter auth --output json
+
+# Interleave steps + console + network into one time-sorted view — the
+# fastest way to see what led up to a failure without cross-referencing three
+# separate artifacts by hand. --last <seconds> narrows to events within that
+# many seconds of the run's last event (e.g. the moments before it died);
+# --filter (substring match) works here too, against message/flow/action/target.
+verfix show <execution_id> --timeline --output json
+verfix show <execution_id> --timeline --last 5 --output json
 
 # Dry-run a selector/text against the last run's saved DOM (~1s) BEFORE paying
 # for a full re-run — exit 0 = all matched, 1 = something didn't. Config
@@ -776,19 +787,30 @@ lives inside an embedded frame — payment widgets, embedded editors:
 3. **Text content** (last resort — breaks on i18n)
    \`text=Sign In\`
 
+> Selectors are full Playwright selector syntax, not a restricted subset —
+> standard CSS, \`:has-text("...")\`, the \`text=\` engine, and the \`role=\`
+> engine (e.g. \`role=button[name="Sign In"]\`) all work anywhere a step or
+> assertion takes a \`selector\`.
+
 #### Assertion types
 
 | Type | Required fields | What it checks |
 |------|----------------|----------------|
 | \`page_loaded\` | — | Page navigated successfully (not about:blank or chrome-error://) |
 | \`selector_visible\` | \`selector\` | A CSS selector is visible in the DOM |
-| \`text_visible\` | \`value\` | A text string appears anywhere on the page |
+| \`text_visible\` | \`value\` | A text string appears anywhere on the page — or, with \`selector\` also set, only within elements matching that selector (scopes the search instead of searching the whole page) |
 | \`url_contains\` | \`value\` | Current URL contains this substring |
 | \`title_contains\` | \`value\` | Page \`<title>\` contains this substring (case-insensitive) |
 | \`no_console_errors\` | — | Zero \`console.error()\` calls during execution (after \`exclude\`, see below) |
 | \`network_request_success\` | \`value\` | All requests matching this URL pattern returned 2xx-3xx, or a status in \`acceptStatuses\` if set |
+| \`selector_count\` | \`selector\`, \`count\` | The selector matches **exactly** \`count\` elements — neither more nor fewer (e.g. a list that must render exactly 3 rows) |
 
 All assertions accept an optional \`timeout\` (ms, default 5000).
+
+\`\`\`json
+{ "type": "text_visible", "selector": "[data-testid=cart-summary]", "value": "Total: $42.00" }
+{ "type": "selector_count", "selector": "[data-testid=cart-item]", "count": 3 }
+\`\`\`
 
 A flow can have more than one valid outcome — e.g. a login endpoint that
 returns \`200\` on success or \`409\` when a session is already active. Don't
@@ -806,6 +828,19 @@ warning) without silencing every error:
 On failure, both assertions' \`detail\`/\`fix_hint\` name the concrete matched
 request (method, URL, status) or console error text — use that to decide
 whether to add one of the exceptions above or fix a real bug.
+
+#### \`findings\` — read this before anything else on a failure
+
+A failed assertion may carry an additive \`findings\` array — deterministic,
+non-AI analysis the engine already ran over the captured evidence (console
+logs, network requests) for that failure, e.g. spotting a stale/rejected
+session behind what looks like a plain \`selector_not_found\`. It's absent
+when no analyzer matched (say nothing, don't guess). When present, each
+finding has a stable \`code\`, a one-line \`summary\` naming the concrete
+evidence, the \`evidence\` itself, and often a \`suggestion\`. **Check
+\`failures[].findings\` before \`fix_hint\` or manually re-deriving a root
+cause** — it's already looked at the evidence you'd otherwise have to pull
+via \`verfix show --console\`/\`--network\`.
 
 #### Mode selection guide
 
