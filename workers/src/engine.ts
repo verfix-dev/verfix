@@ -535,15 +535,24 @@ async function execute(
     if (opts.awaitSummary) {
       // Inline (local mode): the process exits right after the run, so a
       // detached enrichment would be lost. Bounded so it can't stall the run.
+      //
+      // Promise.race doesn't cancel the loser: if the timeout wins, the
+      // generateFailureSummary() call keeps running its AI HTTP request in
+      // the background. If that request finally settles while the CLI is
+      // still alive (e.g. mid-flush of telemetry, right before process.exit),
+      // its own console.log/warn would print to the now-restored real stdout,
+      // landing after the JSON result and corrupting --output json — the
+      // exact intermittent extra-stdout-content bug this timedOut flag closes.
       let summaryTimer: ReturnType<typeof setTimeout> | undefined;
+      let timedOut = false;
       try {
         const summary = await Promise.race([
-          generateFailureSummary(data.task, data.url, executionResult.assertions, consoleLogs, networkRequests),
-          new Promise<null>(resolve => { summaryTimer = setTimeout(() => resolve(null), SUMMARY_TIMEOUT_MS); }),
+          generateFailureSummary(data.task, data.url, executionResult.assertions, consoleLogs, networkRequests, undefined, () => timedOut),
+          new Promise<null>(resolve => { summaryTimer = setTimeout(() => { timedOut = true; resolve(null); }, SUMMARY_TIMEOUT_MS); }),
         ]);
         if (summary) executionResult.ai_summary = summary;
       } catch (err: any) {
-        console.warn(`⚠ Failed to generate AI summary for ${data.id}: ${err.message}`);
+        if (!timedOut) console.warn(`⚠ Failed to generate AI summary for ${data.id}: ${err.message}`);
       } finally {
         if (summaryTimer) clearTimeout(summaryTimer);
       }
