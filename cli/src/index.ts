@@ -1702,6 +1702,7 @@ program
           detail_commands: {
             console: `verfix show ${result.executionId} --console --output json`,
             network: `verfix show ${result.executionId} --network --output json`,
+            dom: `verfix show ${result.executionId} --dom --output json`,
           },
         } : {}),
         duration_ms: result.duration_ms,
@@ -1796,18 +1797,21 @@ program
 
 program
   .command('show [executionId]')
-  .description('Open the Playwright trace viewer for a local run (newest run if no id given); --console/--network print the captured logs instead')
+  .description('Open the Playwright trace viewer for a local run (newest run if no id given); --console/--network/--dom print captured artifacts instead')
   .option('--console', 'Print the run\'s captured console log (full untruncated error text)', false)
   .option('--network', 'Print the run\'s captured network requests', false)
+  .option('--dom [selector]', 'Query the run\'s saved DOM snapshot with a CSS selector (outline of landmarks/dialogs/headings if no selector given)')
   .option('--filter <pattern>', 'Case-insensitive substring filter: matches URL for --network, text/source_url for --console', undefined)
-  .option('-o, --output <format>', 'Output format for --console/--network: pretty | json', 'pretty')
+  .option('-o, --output <format>', 'Output format for --console/--network/--dom: pretty | json', 'pretty')
   .action(async (executionId: string | undefined, opts) => {
-    const { findTraceZip, findRunArtifact, playwrightCliPath } = await import('./local-runner');
+    const { findTraceZip, findRunArtifact, playwrightCliPath, queryDomSnapshot } = await import('./local-runner');
 
     // ── Log inspection: first-class access to the artifacts every run already
     // writes, so nobody has to spelunk in .verfix/runs/ with a script.
-    if (opts.console || opts.network) {
-      const readArtifact = (suffix: string, label: string): any[] | null => {
+    if (opts.console || opts.network || opts.dom) {
+      function readArtifact(suffix: string, label: string): any[] | null;
+      function readArtifact<T>(suffix: string, label: string, parse: (raw: string) => T): T | null;
+      function readArtifact(suffix: string, label: string, parse: (raw: string) => any = JSON.parse): any {
         const p = findRunArtifact(suffix, executionId);
         if (!p) {
           if (opts.output === 'json') {
@@ -1826,17 +1830,20 @@ program
           process.exit(2);
         }
         try {
-          return JSON.parse(fs.readFileSync(p, 'utf-8'));
+          return parse(fs.readFileSync(p, 'utf-8'));
         } catch (e: any) {
           console.error(chalk.red(`Could not parse ${p}: ${e.message}`));
           process.exit(2);
         }
-      };
+      }
 
       const filter: string | undefined = opts.filter ? String(opts.filter).toLowerCase() : undefined;
       const isFailedRequest = (r: any) => r.status >= 400 || r.status === 0;
 
-      const out: { console_logs?: any[]; network_requests?: any[]; failed_requests?: any[] } = {};
+      const out: {
+        console_logs?: any[]; network_requests?: any[]; failed_requests?: any[];
+        dom_matches?: any[]; dom_query?: string | null;
+      } = {};
       if (opts.console) {
         let logs = readArtifact('_console.json', 'console') ?? [];
         if (filter) {
@@ -1853,6 +1860,25 @@ program
         }
         out.network_requests = reqs;
         out.failed_requests = reqs.filter(isFailedRequest);
+      }
+      if (opts.dom) {
+        const selector: string | undefined = typeof opts.dom === 'string' ? opts.dom : undefined;
+        const html = readArtifact('.html', 'DOM snapshot', (raw) => raw) ?? '';
+        const { elements, error } = queryDomSnapshot(html, selector);
+        if (error) {
+          if (opts.output === 'json') {
+            emitJsonError({
+              error: 'invalid_selector',
+              message: error,
+              hint: 'Use a standard CSS selector, e.g. "button.primary" or "[data-testid=submit]".',
+            });
+          } else {
+            console.error(chalk.red(error));
+          }
+          process.exit(2);
+        }
+        out.dom_matches = elements;
+        out.dom_query = selector ?? null;
       }
 
       if (opts.output === 'json') {
@@ -1877,6 +1903,19 @@ program
         for (const r of out.network_requests) {
           const color = r.status >= 400 ? chalk.red : r.status >= 300 ? chalk.yellow : chalk.green;
           console.log(`    ${color(String(r.status))} ${r.method} ${r.url} ${chalk.gray(`(${r.timing_ms}ms)`)}`);
+        }
+      }
+      if (out.dom_matches) {
+        const modeLabel = out.dom_query ? `matches for "${out.dom_query}"` : 'outline (landmarks, dialogs, headings)';
+        if (out.dom_matches.length === 0) {
+          console.log(chalk.bold(`\n  DOM ${modeLabel}: `) + chalk.yellow('no matches'));
+        } else {
+          console.log(chalk.bold(`\n  DOM ${modeLabel} (${out.dom_matches.length}):`));
+          for (const el of out.dom_matches) {
+            const attrs = Object.entries(el.attributes).map(([k, v]) => `${k}="${v}"`).join(' ');
+            console.log(`    ${chalk.cyan('<' + el.tag + '>')}${attrs ? ' ' + chalk.gray(attrs) : ''}`);
+            if (el.text) console.log(`      ${chalk.gray(el.text)}`);
+          }
         }
       }
       console.log('');
