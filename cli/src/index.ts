@@ -1326,6 +1326,7 @@ program
   .command('run')
   .description('Run a verification job')
   .option('-u, --url <url>', 'Target URL to verify')
+  .option('--base-url <url>', 'Alias for --url')
   .option('-t, --task <task>', 'Task description')
   .option('-c, --config <file>', 'Path to verfix.config.json config file')
   .option('-f, --flow <id>', 'Flow id or name to run')
@@ -1347,6 +1348,16 @@ program
     if (opts.showBrowser && getRunnerMode() === 'server') {
       console.warn(chalk.yellow('⚠ --show-browser is only supported in local mode. Ignoring.'));
     }
+
+    if (opts.baseUrl && opts.url && opts.baseUrl !== opts.url) {
+      const msg = '--url and --base-url were both passed with different values. They are aliases for the same setting — pass only one.';
+      if (isJsonMode(opts)) {
+        emitJsonError({ error: 'conflicting_url_flags', message: msg, hint: 'Pass either --url or --base-url, not both.' });
+      }
+      console.error(chalk.red(msg));
+      process.exit(2);
+    }
+    opts.url = opts.url || opts.baseUrl;
 
     let trackMode = opts.mode || 'strict';
     let trackFlowCount = 0;
@@ -2246,7 +2257,9 @@ function stripAnsi(text: string): string {
   return text.replace(/\u001b\[[0-9;]*m/g, '');
 }
 
-function buildFailures(result: any): Array<{ type: string; flow?: string; assertion?: string; selector?: string; source_url?: string; detail?: string; fix_hint?: string }> {
+type FailureFinding = { code: string; summary: string; evidence?: Record<string, unknown>; suggestion?: string };
+
+function buildFailures(result: any): Array<{ type: string; flow?: string; assertion?: string; selector?: string; source_url?: string; detail?: string; fix_hint?: string; findings?: FailureFinding[] }> {
   const failures = (result.assertions || [])
     .filter((a: any) => !a.passed)
     .map((a: any) => ({
@@ -2259,6 +2272,9 @@ function buildFailures(result: any): Array<{ type: string; flow?: string; assert
       source_url: a.details?.source_url,
       detail: a.error ? stripAnsi(a.error) : a.error,
       fix_hint: a.fix_hint,
+      // Deterministic post-failure analysis from the engine; absent when no
+      // analyzer matched. Additive contract field.
+      findings: a.findings,
     }));
 
   if (failures.length === 0 && result.error) {

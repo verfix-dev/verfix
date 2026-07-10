@@ -37,6 +37,8 @@ export type VerifyFailure = {
   source_url?: string;
   detail?: string;
   fix_hint?: string;
+  /** Deterministic post-failure analysis; present only when an analyzer matched. */
+  findings?: Array<{ code: string; summary: string; evidence?: Record<string, unknown>; suggestion?: string }>;
 };
 
 export type VerifyResult = {

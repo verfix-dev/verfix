@@ -348,7 +348,7 @@ docker exec verfix curl -s http://localhost:3002/
 
 ```bash
 # Run with verbose output and look for the rewrite log line.
-# It should NOT appear on Linux:
+# It should NOT appear on Linux (--base-url works too, as an alias for --url):
 npx verfix run --url http://localhost:3002 --output json
 # No rewrite log should appear.
 ```

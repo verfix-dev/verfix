@@ -5,7 +5,7 @@
  * Zero dependencies, one file: serves three pages that exercise the step
  * surface (type, click, wait_for_url, select_option, check, hover) and the
  * assertion surface (page_loaded, text_visible incl. scoped, selector_visible,
- * url_contains, no_console_errors).
+ * url_contains, no_console_errors, selector_count).
  *
  * Used by CI (.github/workflows/ci.yml) and the documented local smoke test:
  *   node testbed/server.js &
@@ -38,6 +38,12 @@ const HOME_HTML = `<!doctype html>
     <p data-testid="plan-status"></p>
     <p data-testid="tos-status"></p>
     <p data-testid="hint-status"></p>
+
+    <ul>
+      <li class="todo-item">Write flows</li>
+      <li class="todo-item">Run verify</li>
+      <li class="todo-item">Ship it</li>
+    </ul>
 
     <script>
       const el = (id) => document.querySelector('[data-testid="' + id + '"]');
