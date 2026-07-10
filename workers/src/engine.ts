@@ -336,6 +336,13 @@ async function execute(
         { type: 'page_loaded' },
         { type: 'no_console_errors' },
       ];
+      // Job-wide console excludes: errors the user excluded anywhere in the
+      // config must not resurface via the prior_console_errors analyzer,
+      // regardless of which assertion list is currently running.
+      const consoleExcludes = [
+        ...(data.assertions ?? []),
+        ...(data.flows ?? []).flatMap(f => f.assertions ?? []),
+      ].filter(a => a.type === 'no_console_errors').flatMap(a => a.exclude ?? []);
       let ranFlowAssertions = false;
 
       if (data.flows && data.flows.length > 0) {
@@ -384,7 +391,7 @@ async function execute(
             ranFlowAssertions = true;
             console.log(`\n🔍 Running ${flow.assertions.length} flow assertion(s)...`);
             const flowResults = await runAssertions(
-              page, flow.assertions, consoleLogs, networkRequests, artifactsDir, data.id, flow.mode || data.mode, data.task, tracker, flow.name, stateRestored
+              page, flow.assertions, consoleLogs, networkRequests, artifactsDir, data.id, flow.mode || data.mode, data.task, tracker, flow.name, stateRestored, consoleExcludes
             );
             assertionResults.push(...flowResults);
             flowPassed = flowResults.every(r => r.passed);
@@ -416,13 +423,13 @@ async function execute(
       if (data.assertions && data.assertions.length > 0) {
         console.log(`\n🔍 Running ${data.assertions.length} assertion(s)...`);
         const baseResults = await runAssertions(
-          page, data.assertions, consoleLogs, networkRequests, artifactsDir, data.id, data.mode, data.task, tracker
+          page, data.assertions, consoleLogs, networkRequests, artifactsDir, data.id, data.mode, data.task, tracker, undefined, undefined, consoleExcludes
         );
         assertionResults.push(...baseResults);
       } else if (!ranFlowAssertions) {
         console.log(`\n🔍 Running ${defaultAssertions.length} assertion(s)...`);
         const baseResults = await runAssertions(
-          page, defaultAssertions, consoleLogs, networkRequests, artifactsDir, data.id, data.mode, data.task, tracker
+          page, defaultAssertions, consoleLogs, networkRequests, artifactsDir, data.id, data.mode, data.task, tracker, undefined, undefined, consoleExcludes
         );
         assertionResults.push(...baseResults);
       }
