@@ -1807,13 +1807,81 @@ program
 
 program
   .command('show [executionId]')
-  .description('Open the Playwright trace viewer for a local run (newest run if no id given); --console/--network print the captured logs instead')
+  .description('Open the Playwright trace viewer for a local run (newest run if no id given); --console/--network/--timeline print captured data instead')
   .option('--console', 'Print the run\'s captured console log (full untruncated error text)', false)
   .option('--network', 'Print the run\'s captured network requests', false)
-  .option('--filter <pattern>', 'Case-insensitive substring filter: matches URL for --network, text/source_url for --console', undefined)
-  .option('-o, --output <format>', 'Output format for --console/--network: pretty | json', 'pretty')
+  .option('--timeline', 'Print an interleaved, time-sorted view of steps + console + network', false)
+  .option('--last <seconds>', 'With --timeline, only show events within this many seconds of the run\'s last event', undefined)
+  .option('--filter <pattern>', 'Case-insensitive substring filter: matches URL for --network, text/source_url for --console, message/flow/action/target for --timeline steps', undefined)
+  .option('-o, --output <format>', 'Output format for --console/--network/--timeline: pretty | json', 'pretty')
   .action(async (executionId: string | undefined, opts) => {
-    const { findTraceZip, findRunArtifact, playwrightCliPath } = await import('./local-runner');
+    const { findTraceZip, findRunArtifact, readLocalResult, listLocalResults, playwrightCliPath } = await import('./local-runner');
+
+    // ── Timeline: interleave step events + console + network into one
+    // time-sorted view, so diagnosing a failure doesn't mean cross-referencing
+    // three separate artifacts by hand.
+    if (opts.timeline) {
+      const { buildTimeline } = await import('./timeline');
+
+      let result;
+      if (executionId) {
+        result = readLocalResult(executionId);
+      } else {
+        const all = listLocalResults();
+        result = all[0] ?? null;
+      }
+
+      if (!result) {
+        const message = executionId
+          ? `No run found for execution ${executionId} under .verfix/runs/`
+          : 'No local runs found under .verfix/runs/.';
+        if (opts.output === 'json') {
+          emitJsonError({
+            error: 'artifact_not_found',
+            message,
+            hint: 'Run a verification first: verfix run --output json',
+          });
+        } else {
+          console.error(chalk.red(executionId ? message : `${message} Run a verification first: verfix run --output json`));
+        }
+        process.exit(2);
+      }
+
+      const filter: string | undefined = opts.filter ? String(opts.filter) : undefined;
+      const lastSeconds: number | undefined = opts.last !== undefined ? Number(opts.last) : undefined;
+
+      const timeline = buildTimeline(result.events, result.console_logs, result.network_requests, {
+        filter,
+        lastSeconds,
+      });
+
+      if (opts.output === 'json') {
+        emitJson(timeline);
+        return;
+      }
+
+      console.log(chalk.bold(`\n  Timeline (${timeline.length} events):`));
+      if (timeline.length === 0) {
+        console.log(chalk.gray('    (no events)'));
+      } else {
+        const startMs = Date.parse(timeline[0].t);
+        for (const e of timeline) {
+          const ms = Date.parse(e.t);
+          const offset = Number.isNaN(ms) || Number.isNaN(startMs) ? '?' : `+${((ms - startMs) / 1000).toFixed(3)}s`;
+          if (e.kind === 'step') {
+            console.log(`    ${chalk.gray(offset.padStart(10))} ${chalk.cyan('[step]')} ${e.type} — ${e.message}`);
+          } else if (e.kind === 'console') {
+            const color = e.type === 'error' ? chalk.red : e.type === 'warning' ? chalk.yellow : chalk.gray;
+            console.log(`    ${chalk.gray(offset.padStart(10))} ${color('[console]')} [${e.type}] ${e.text}`);
+          } else {
+            const color = e.status >= 400 ? chalk.red : e.status >= 300 ? chalk.yellow : chalk.green;
+            console.log(`    ${chalk.gray(offset.padStart(10))} ${color('[network]')} ${e.status} ${e.method} ${e.url} ${chalk.gray(`(${e.timing_ms}ms)`)}`);
+          }
+        }
+      }
+      console.log('');
+      return;
+    }
 
     // ── Log inspection: first-class access to the artifacts every run already
     // writes, so nobody has to spelunk in .verfix/runs/ with a script.

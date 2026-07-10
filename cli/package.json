@@ -7,12 +7,13 @@
     "build": "tsc -p tsconfig.json",
     "dev": "ts-node src/index.ts",
     "prepublishOnly": "npm run build",
-    "test": "npm run test:engine-presence && npm run test:providers && npm run test:migration && npm run test:noninteractive && npm run test:env-interpolation && npm run test:local-run",
+    "test": "npm run test:engine-presence && npm run test:providers && npm run test:migration && npm run test:noninteractive && npm run test:env-interpolation && npm run test:timeline && npm run test:local-run",
     "test:engine-presence": "ts-node test/engine-presence.test.ts",
     "test:providers": "ts-node test/providers.test.ts",
     "test:migration": "ts-node test/config-migration.test.ts",
     "test:noninteractive": "ts-node test/noninteractive.test.ts",
     "test:env-interpolation": "ts-node test/env-interpolation.test.ts",
+    "test:timeline": "ts-node test/timeline.test.ts",
     "test:local-run": "ts-node test/local-run.test.ts"
   },
   "bin": {
