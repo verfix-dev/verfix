@@ -173,8 +173,15 @@ export async function runAssertions(
 
       case 'selector_count': {
         const selector = assertion.selector || '';
-        const expectedCount = assertion.count ?? 0;
+        const expectedCount = assertion.count;
         result = await timed(async () => {
+          if (typeof expectedCount !== 'number') {
+            return {
+              passed: false,
+              error: 'selector_count requires a numeric "count" field in verfix.config.json',
+              details: { selector },
+            };
+          }
           try {
             const actualCount = await page.locator(selector).count();
             const passed = actualCount === expectedCount;
