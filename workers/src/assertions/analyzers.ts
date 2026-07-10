@@ -29,6 +29,11 @@ export interface EvidenceBundle {
   details?: Record<string, unknown>;
   /** Whether this flow restored a saved storage state (useState). */
   state_restored?: boolean;
+  /**
+   * Job-wide `exclude` patterns from every no_console_errors assertion —
+   * errors the user explicitly excluded must not resurface as findings.
+   */
+  console_exclude_patterns?: string[];
   console_logs: ConsoleLine[];
   network_requests: NetworkRequest[];
 }
@@ -83,8 +88,47 @@ const staleSessionAnalyzer: Analyzer = {
   },
 };
 
+// Console errors are captured per-run but were treated as independent events —
+// nothing connected "an anomalous fetch failure early in the run" to "a missing
+// button late in the run". If non-excluded console errors preceded this
+// failure, surface the correlation instead of leaving it to the human.
+const priorConsoleErrorsAnalyzer: Analyzer = {
+  code: 'prior_console_errors',
+  analyze(bundle) {
+    // When the failure IS the console errors, they're already the headline.
+    if (bundle.failure_type === 'console_error') return null;
+
+    const patterns: RegExp[] = [];
+    for (const p of bundle.console_exclude_patterns ?? []) {
+      try {
+        patterns.push(new RegExp(p));
+      } catch {
+        // Invalid pattern already surfaces as a no_console_errors failure.
+      }
+    }
+    const errors = bundle.console_logs.filter(
+      (l) => l.type === 'error' && !patterns.some((rx) => rx.test(l.text)),
+    );
+    if (errors.length === 0) return null;
+
+    const first = errors[0];
+    const location = first.source_url ? ` (at ${first.source_url}${first.line ? ':' + first.line : ''})` : '';
+    return {
+      code: 'prior_console_errors',
+      summary: `${errors.length} console error(s) occurred earlier in this run and may be related. First: "${first.text.slice(0, 200)}"${location}.`,
+      evidence: {
+        error_count: errors.length,
+        first_error: { text: first.text, timestamp: first.timestamp, source_url: first.source_url },
+      },
+      suggestion: 'Inspect the full log with: verfix show --console (or --timeline to see ordering around the failure).',
+    };
+  },
+};
+
 // Priority order: the first finding is also rendered into fix_hint.
-const ANALYZERS: Analyzer[] = [staleSessionAnalyzer];
+// stale_session first — it names a root cause; prior_console_errors is a
+// broader correlation.
+const ANALYZERS: Analyzer[] = [staleSessionAnalyzer, priorConsoleErrorsAnalyzer];
 
 const MAX_FINDINGS = 3;
 

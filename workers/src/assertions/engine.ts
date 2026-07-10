@@ -35,6 +35,7 @@ export async function runAssertions(
   tracker?: EventTracker,
   flowName?: string,
   stateRestored?: boolean,
+  consoleExcludePatterns?: string[],
 ): Promise<AssertionResult[]> {
   const results: AssertionResult[] = [];
 
@@ -251,6 +252,7 @@ export async function runAssertions(
         error: result.error,
         details: result.details,
         state_restored: stateRestored,
+        console_exclude_patterns: consoleExcludePatterns,
         console_logs: consoleLogs,
         network_requests: networkRequests,
       });
