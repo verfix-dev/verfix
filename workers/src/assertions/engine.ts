@@ -172,6 +172,33 @@ export async function runAssertions(
         break;
       }
 
+      case 'selector_count': {
+        const selector = assertion.selector || '';
+        const expectedCount = assertion.count;
+        result = await timed(async () => {
+          if (typeof expectedCount !== 'number') {
+            return {
+              passed: false,
+              error: 'selector_count requires a numeric "count" field in verfix.config.json',
+              details: { selector },
+            };
+          }
+          try {
+            const actualCount = await page.locator(selector).count();
+            const passed = actualCount === expectedCount;
+            const details = { selector, expected_count: expectedCount, actual_count: actualCount };
+            if (passed) return { passed, details };
+            const error = actualCount === 0
+              ? `No elements matching "${selector}" were found`
+              : `Expected ${expectedCount} elements matching "${selector}" but found ${actualCount}`;
+            return { passed: false, details, error };
+          } catch (e: any) {
+            return { passed: false, error: e.message, details: { selector, expected_count: expectedCount, actual_count: 0 } };
+          }
+        });
+        break;
+      }
+
       case 'network_request_success': {
         const urlPattern = assertion.value || '';
         const acceptStatuses = assertion.acceptStatuses;

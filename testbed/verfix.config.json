@@ -47,6 +47,18 @@
         { "type": "text_visible", "value": "Hint revealed" },
         { "type": "no_console_errors" }
       ]
+    },
+    {
+      "id": "todo-list-count",
+      "name": "Todo list renders the expected number of items",
+      "steps": [
+        { "action": "navigate", "url": "/" },
+        { "action": "wait_for_selector", "selector": "[data-testid=\"heading\"]" }
+      ],
+      "assertions": [
+        { "type": "selector_count", "selector": ".todo-item", "count": 3 },
+        { "type": "no_console_errors" }
+      ]
     }
   ]
 }

@@ -7,11 +7,13 @@ export type AssertionType =
   | 'no_console_errors'
   | 'network_request_success'
   | 'title_contains'
-  | 'exploration_result';
+  | 'exploration_result'
+  | 'selector_count';
 
 export const ASSERTION_TYPES: AssertionType[] = [
   'page_loaded', 'selector_visible', 'text_visible', 'url_contains',
   'no_console_errors', 'network_request_success', 'title_contains', 'exploration_result',
+  'selector_count',
 ];
 
 export type FailureType =
@@ -26,11 +28,12 @@ export type FailureType =
 
 export interface AssertionDefinition {
   type: AssertionType;
-  selector?: string;      // for selector_visible; on text_visible, scopes the text search to matches inside this selector
+  selector?: string;      // for selector_visible; on text_visible, scopes the text search to matches inside this selector; also selector_count
   value?: string;         // for text_visible, url_contains, title_contains, network_request_success
   timeout?: number;
   acceptStatuses?: number[]; // network_request_success: replaces the default 200-399 range when set
   exclude?: string[];        // no_console_errors: regex patterns to ignore
+  count?: number;            // selector_count: exact number of elements the selector must match
 }
 
 export interface AssertionResult {
