@@ -85,6 +85,19 @@ npx verfix show --network --filter auth
 npx verfix show exec_abc123 --network --filter auth --output json
 ```
 
+To see steps, console lines, and network requests interleaved in one
+time-sorted view instead of cross-referencing three logs by hand, use
+`--timeline`. `--last <seconds>` narrows to the window before the run's
+final event (the part that matters when diagnosing a failure), and
+`--filter` composes with it the same way it does with `--console`/`--network`
+(matching the step's message/flow/action/target, the console text/source_url,
+or the network URL, depending on each entry's kind):
+
+```bash
+npx verfix show --timeline --last 5
+npx verfix show exec_abc123 --timeline --filter login --output json
+```
+
 When a selector fails, dry-run replacements against the run's saved DOM
 snapshot in about a second — instead of paying for a full re-run per guess:
 
