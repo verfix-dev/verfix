@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { spawnSync } from 'child_process';
+import { parse, HTMLElement } from 'node-html-parser';
 
 // The engine (and with it Playwright) is imported lazily inside runLocal() so
 // server-mode commands never pay its load cost.
@@ -333,6 +334,55 @@ export function findRunArtifact(suffix: string, executionId?: string, cwd: strin
 /** Find the trace zip for an execution id (or the newest run when omitted). */
 export function findTraceZip(executionId?: string, cwd: string = process.cwd()): string | null {
   return findRunArtifact('_trace.zip', executionId, cwd);
+}
+
+// ─── DOM snapshot query (verfix show --dom) ──────────────────────────────────
+
+/** Attribute names always surfaced for a matched element, plus anything starting with `aria-`. */
+const DOM_KEY_ATTRS = ['id', 'class', 'role', 'data-testid'];
+const DOM_TEXT_LIMIT = 200;
+/** Compact outline shown for `--dom` with no selector: landmarks, dialogs, headings. */
+const DOM_OUTLINE_SELECTOR = 'header, nav, main, footer, aside, dialog, h1, h2, h3, h4, h5, h6, [role], [aria-modal]';
+
+export interface DomElementSummary {
+  tag: string;
+  attributes: Record<string, string>;
+  text: string;
+}
+
+function summarizeDomElement(el: HTMLElement): DomElementSummary {
+  const attributes: Record<string, string> = {};
+  for (const [key, value] of Object.entries(el.attributes)) {
+    if (DOM_KEY_ATTRS.includes(key) || key.startsWith('aria-')) {
+      attributes[key] = value;
+    }
+  }
+  const text = el.text.replace(/\s+/g, ' ').trim();
+  return {
+    tag: el.tagName.toLowerCase(),
+    attributes,
+    text: text.length > DOM_TEXT_LIMIT ? text.slice(0, DOM_TEXT_LIMIT) + '…' : text,
+  };
+}
+
+/**
+ * Query a saved (static, end-of-run) DOM snapshot with a CSS selector — structural
+ * queries only (tag/attributes/text), no visibility or computed-style info since
+ * nothing is rendered. Omitting `selector` returns a compact outline of landmark
+ * elements, dialogs, and headings instead.
+ */
+export function queryDomSnapshot(html: string, selector?: string): { elements: DomElementSummary[]; error?: string } {
+  const root = parse(html);
+
+  if (!selector) {
+    return { elements: root.querySelectorAll(DOM_OUTLINE_SELECTOR).map(summarizeDomElement) };
+  }
+
+  try {
+    return { elements: root.querySelectorAll(selector).map(summarizeDomElement) };
+  } catch (e: any) {
+    return { elements: [], error: `Invalid selector "${selector}": ${e.message}` };
+  }
 }
 
 // ─── Selector dry-run (verfix probe) ─────────────────────────────────────────

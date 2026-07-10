@@ -109,6 +109,20 @@ Exit code 0 means every query matched; 1 means something didn't. The snapshot
 is end-of-run state (at-failure state for failed runs), so it's exactly the
 DOM your failed selector was tested against.
 
+To ask structural questions about that same saved snapshot — what does this
+selector actually match, what dialogs/headings are on the page — without
+spinning up a browser, use `--dom`:
+
+```bash
+npx verfix show --dom 'button'                          # matches: tag, key attributes, truncated text
+npx verfix show exec_abc123 --dom --output json          # no selector: outline of landmarks, dialogs, headings
+```
+
+Each match reports its tag, key attributes (`id`, `class`, `role`, `aria-*`,
+`data-testid`), and truncated text content. `--dom` parses the static HTML
+(no visibility or computed-style info — that's what `probe` is for); zero
+matches prints a clear message (`[]` in JSON mode).
+
 `npx verfix list` shows the recent runs, and `npx verfix status` summarizes your
 setup (config, browser, last run).
 

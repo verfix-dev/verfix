@@ -192,6 +192,12 @@ verfix show <execution_id> --network --filter auth --output json
 # match here doesn't guarantee the element existed at the step that failed.
 verfix probe --selector "[data-testid=submit]" --output json
 verfix probe --text "Welcome back" --output json
+
+# Query the same saved DOM snapshot structurally — tag, key attributes
+# (id, class, role, aria-*, data-testid), truncated text, and match count.
+# Omit the selector for a compact outline (landmarks, dialogs, headings).
+verfix show <execution_id> --dom "button" --output json
+verfix show <execution_id> --dom --output json
 \`\`\`
 
 ---
@@ -433,7 +439,8 @@ or opt into everything with \`--full\`):
   "show_command": "verfix show exec_abc123",
   "detail_commands": {
     "console": "verfix show exec_abc123 --console --output json",
-    "network": "verfix show exec_abc123 --network --output json"
+    "network": "verfix show exec_abc123 --network --output json",
+    "dom": "verfix show exec_abc123 --dom --output json"
   },
   "duration_ms": 4231,
   "retry_count": 0,
