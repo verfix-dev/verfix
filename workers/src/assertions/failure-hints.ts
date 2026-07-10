@@ -45,6 +45,8 @@ export function inferFailureType(
       return 'assertion_failed';
     case 'exploration_result':
       return 'assertion_failed';
+    case 'selector_count':
+      return (result.details as any)?.actual_count === 0 ? 'selector_not_found' : 'assertion_failed';
     default:
       return 'assertion_failed';
   }
@@ -86,7 +88,16 @@ export function renderFixHint(type: FailureType, context: FailureContext): strin
         : 'Network request failed or returned non-2xx. Check backend availability or mock API responses.';
     case 'timeout':
       return 'Operation timed out. Increase timeout or wait for network/DOM to settle before asserting.';
-    case 'assertion_failed':
+    case 'assertion_failed': {
+      if (context.assertion_type === 'selector_count') {
+        const expected = context.details?.expected_count;
+        const actual = context.details?.actual_count;
+        return context.selector && expected !== undefined && actual !== undefined
+          ? `Expected ${expected} elements matching "${context.selector}" but found ${actual} — check for duplicate rendering or stale list state.`
+          : 'Element count did not match. Check for duplicate rendering or stale list state.';
+      }
+      return 'Assertion failed. Verify assertion inputs and app state before retrying.';
+    }
     default:
       return 'Assertion failed. Verify assertion inputs and app state before retrying.';
   }
