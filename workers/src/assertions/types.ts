@@ -42,6 +42,10 @@ export interface AssertionResult {
   screenshot_on_failure?: string;
   failure_type?: FailureType;
   fix_hint?: string;
+  // Deterministic post-failure analysis (see analyzers.ts). Additive: present
+  // only when at least one analyzer matched; priority-ordered, first one is
+  // also rendered into fix_hint.
+  findings?: import('./analyzers').Finding[];
   // Identifier of the flow these assertions belong to. Absent for top-level /
   // default (page_loaded / no_console_errors) assertions. Used by the dashboard
   // assertion tab to group results by flow.
