@@ -7,11 +7,13 @@ export type AssertionType =
   | 'no_console_errors'
   | 'network_request_success'
   | 'title_contains'
-  | 'exploration_result';
+  | 'exploration_result'
+  | 'selector_count';
 
 export const ASSERTION_TYPES: AssertionType[] = [
   'page_loaded', 'selector_visible', 'text_visible', 'url_contains',
   'no_console_errors', 'network_request_success', 'title_contains', 'exploration_result',
+  'selector_count',
 ];
 
 export type FailureType =
@@ -26,11 +28,12 @@ export type FailureType =
 
 export interface AssertionDefinition {
   type: AssertionType;
-  selector?: string;      // for selector_visible; on text_visible, scopes the text search to matches inside this selector
+  selector?: string;      // for selector_visible; on text_visible, scopes the text search to matches inside this selector; also selector_count
   value?: string;         // for text_visible, url_contains, title_contains, network_request_success
   timeout?: number;
   acceptStatuses?: number[]; // network_request_success: replaces the default 200-399 range when set
   exclude?: string[];        // no_console_errors: regex patterns to ignore
+  count?: number;            // selector_count: exact number of elements the selector must match
 }
 
 export interface AssertionResult {
@@ -42,6 +45,10 @@ export interface AssertionResult {
   screenshot_on_failure?: string;
   failure_type?: FailureType;
   fix_hint?: string;
+  // Deterministic post-failure analysis (see analyzers.ts). Additive: present
+  // only when at least one analyzer matched; priority-ordered, first one is
+  // also rendered into fix_hint.
+  findings?: import('./analyzers').Finding[];
   // Identifier of the flow these assertions belong to. Absent for top-level /
   // default (page_loaded / no_console_errors) assertions. Used by the dashboard
   // assertion tab to group results by flow.

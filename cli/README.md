@@ -150,7 +150,7 @@ verfix run --config path/to/verfix.config.json --flow signup
 | Flag | Description | Default |
 |------|-------------|---------|
 | `-f, --flow <id>` | Flow ID to run | — |
-| `-u, --url <url>` | Override target URL | from config |
+| `-u, --url <url>` (alias `--base-url`) | Override target URL | from config |
 | `-m, --mode <mode>` | `strict` · `assisted` · `exploratory` | from config |
 | `-o, --output <fmt>` | `json` · `pretty` | `json` |
 | `-c, --config <path>` | Config file path | `./verfix.config.json` |

@@ -168,7 +168,7 @@ verfix run --output json
 # Override mode for a single run
 verfix run --flow <flow-id> --mode strict --output json
 
-# Override URL for a single run
+# Override URL for a single run (--base-url is accepted as an alias for --url)
 verfix run --flow <flow-id> --url http://localhost:5173 --output json
 
 # Open the recorded Playwright trace of a run (for the human to inspect)
