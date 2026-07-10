@@ -1,7 +1,7 @@
 import { Page } from 'playwright';
 import { ASSERTION_TYPES, AssertionDefinition, AssertionResult, ConsoleLine, NetworkRequest } from './types';
 import { inferFailureType, renderFixHint } from './failure-hints';
-import { appendTopFinding, Finding, runAnalyzers } from './analyzers';
+import { appendTopFinding, Finding, isThirdPartySource, runAnalyzers } from './analyzers';
 import { resolveWithHealing } from '../ai/self-healing';
 import { EventTracker } from '../artifacts/event-tracker';
 
@@ -10,10 +10,6 @@ async function timed(fn: () => Promise<{ passed: boolean; details?: Record<strin
   const start = Date.now();
   const result = await fn();
   return { ...result, duration_ms: Date.now() - start };
-}
-
-function safeOrigin(url: string): string | null {
-  try { return new URL(url).origin; } catch { return null; }
 }
 
 // Turns a console error's text into a literal regex ready to paste into the
@@ -152,9 +148,10 @@ export async function runAssertions(
             return { passed, details: { error_count: 0, errors: [], excluded_count } };
           }
           const first = errors[0];
-          const pageOrigin = safeOrigin(page.url());
-          const errorOrigin = first.source_url ? safeOrigin(first.source_url) : null;
-          const third_party = !!errorOrigin && !!pageOrigin && errorOrigin !== pageOrigin;
+          // Hostname-based (ports ignored, loopback = one local stack, sibling
+          // subdomains = first-party): an app's own API on another port must
+          // never be labeled a third-party script.
+          const third_party = isThirdPartySource(page.url(), first.source_url);
           const suggested_exclude = escapeRegex(first.text.slice(0, 80));
           const location = first.source_url ? ` (at ${first.source_url}${first.line ? ':' + first.line : ''})` : '';
           return {
@@ -252,6 +249,7 @@ export async function runAssertions(
         error: result.error,
         details: result.details,
         state_restored: stateRestored,
+        page_url: page.url(),
         console_exclude_patterns: consoleExcludePatterns,
         console_logs: consoleLogs,
         network_requests: networkRequests,

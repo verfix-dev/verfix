@@ -15,7 +15,7 @@
  */
 
 import assert from 'assert';
-import { appendTopFinding, EvidenceBundle, runAnalyzers } from '../../src/assertions/analyzers';
+import { appendTopFinding, EvidenceBundle, isThirdPartySource, runAnalyzers } from '../../src/assertions/analyzers';
 import { FailureType, NetworkRequest } from '../../src/assertions/types';
 
 function req(overrides: Partial<NetworkRequest>): NetworkRequest {
@@ -187,6 +187,79 @@ function line(overrides: Partial<ConsoleLine>): ConsoleLine {
   }));
   assert.strictEqual(findings.length, 0, 'no error-level lines -> no finding');
   console.log('PASS: no console errors yields no finding');
+}
+
+// ─── prior_console_errors: gated to UI-shaped failure types ─────────────────
+{
+  const findings = runAnalyzers(bundle({
+    failure_type: 'network_failure',
+    console_logs: [line({ text: 'boom' })],
+  }));
+  assert.strictEqual(findings.length, 0, 'network_failure already names its cause — no correlation noise');
+  console.log('PASS: non-UI failure types (network_failure) skip prior_console_errors');
+}
+
+// ─── isThirdPartySource: multi-service apps are first-party ─────────────────
+{
+  // Own API on a different port — the multi-repo/scaled-project case.
+  assert.strictEqual(isThirdPartySource('http://localhost:3000/app', 'http://localhost:3611/api/session'), false);
+  assert.strictEqual(isThirdPartySource('http://127.0.0.1:3000/', 'http://localhost:8080/api.js'), false);
+  // Sibling subdomains of one registrable domain.
+  assert.strictEqual(isThirdPartySource('https://app.example.com/', 'https://api.example.com/v1/auth.js'), false);
+  // Genuinely different sites.
+  assert.strictEqual(isThirdPartySource('https://app.example.com/', 'https://cdn.vendor.com/widget.js'), true);
+  assert.strictEqual(isThirdPartySource('http://localhost:3000/', 'https://www.google-analytics.com/ga.js'), true);
+  // Unknown inputs are never claimed third-party.
+  assert.strictEqual(isThirdPartySource(undefined, 'https://cdn.vendor.com/x.js'), false);
+  assert.strictEqual(isThirdPartySource('http://localhost:3000/', undefined), false);
+  console.log('PASS: isThirdPartySource — ports/loopback/subdomains first-party, real vendors third-party');
+}
+
+// ─── prior_console_errors: own API on another port stays "may be related" ───
+{
+  const findings = runAnalyzers(bundle({
+    failure_type: 'selector_not_found',
+    page_url: 'http://localhost:3000/dashboard',
+    console_logs: [line({ text: 'Failed to fetch', source_url: 'http://localhost:3611/api/client.js' })],
+  }));
+  assert.strictEqual(findings.length, 1);
+  assert.ok(findings[0].summary.includes('may be related'), 'different port on localhost must not be de-ranked');
+  assert.strictEqual((findings[0].evidence as any).third_party_count, 0);
+  console.log('PASS: own API on a different port is first-party (not de-ranked)');
+}
+
+// ─── prior_console_errors: all-third-party errors get de-ranked language ────
+{
+  const findings = runAnalyzers(bundle({
+    failure_type: 'selector_not_found',
+    page_url: 'https://app.example.com/dashboard',
+    console_logs: [
+      line({ text: 'vendor widget exploded', source_url: 'https://cdn.vendor.com/widget.js' }),
+      line({ text: 'analytics blocked', source_url: 'https://www.google-analytics.com/ga.js' }),
+    ],
+  }));
+  assert.strictEqual(findings.length, 1);
+  assert.ok(findings[0].summary.includes('third-party scripts'), `expected de-ranked language, got: ${findings[0].summary}`);
+  assert.ok(findings[0].summary.includes('likely unrelated to your app code'), 'hypothesis stays honest');
+  assert.strictEqual((findings[0].evidence as any).third_party_count, 2);
+  console.log('PASS: all-third-party errors use de-ranked language');
+}
+
+// ─── prior_console_errors: mixed — first-party error is the one inlined ─────
+{
+  const findings = runAnalyzers(bundle({
+    failure_type: 'text_mismatch',
+    page_url: 'https://app.example.com/',
+    console_logs: [
+      line({ text: 'vendor noise', source_url: 'https://cdn.vendor.com/widget.js' }),
+      line({ text: 'Session validation failed', source_url: 'https://api.example.com/session.js' }),
+    ],
+  }));
+  assert.strictEqual(findings.length, 1);
+  assert.ok(findings[0].summary.includes('Session validation failed'), 'first-party error outranks earlier vendor noise');
+  assert.ok(findings[0].summary.includes('may be related'));
+  assert.strictEqual((findings[0].evidence as any).third_party_count, 1);
+  console.log('PASS: mixed sources inline the first first-party error');
 }
 
 // ─── Ordering: stale_session outranks prior_console_errors in fix_hint ──────
