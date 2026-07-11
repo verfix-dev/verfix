@@ -842,6 +842,30 @@ evidence, the \`evidence\` itself, and often a \`suggestion\`. **Check
 cause** — it's already looked at the evidence you'd otherwise have to pull
 via \`verfix show --console\`/\`--network\`.
 
+#### Diagnosing a failure
+
+A reliable escalation ladder for any failure cause — climb only as far as you need:
+
+1. **Read what's already in the JSON output** — \`failures[].fix_hint\`,
+   \`failures[].findings\`, and \`failures[].page_state\` (cause-agnostic facts
+   from the live page at failure time: \`url\`, \`title\`, \`open_dialogs\` — open
+   dialogs/overlays with their accessible \`name\` and \`viewport_coverage\`, so an
+   overlay covering the page often explains a \`selector_not_found\` — and
+   \`prior_console_errors\`/\`prior_failed_requests\` counts from earlier in the
+   run). Fuller facts, including an inventory of the visible interactive
+   elements at failure time, are in the run's \`_page_state.json\` artifact
+   next to the console/network logs. The answer is often already here.
+2. **Still unclear?** \`verfix show <execution_id> --timeline --last 30 --output json\`
+   — steps, console, and network interleaved around the failure, without
+   cross-referencing three artifacts by hand.
+3. **Selector-related?** \`verfix show <execution_id> --dom '<selector>'\` against
+   the run's saved DOM snapshot, and check \`page_state.open_dialogs\` for an
+   overlay occluding the target element.
+4. **Suspected app error?** \`verfix show <execution_id> --console\` /
+   \`--network\` for the full untruncated logs.
+5. **Only once the evidence points at app code** should you read or change
+   project source — the source-guard rules above still apply.
+
 #### Mode selection guide
 
 | Situation | Mode | Why |
