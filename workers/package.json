@@ -1,6 +1,6 @@
 {
   "name": "@verfix/engine",
-  "version": "0.1.8",
+  "version": "0.2.0",
   "description": "Verfix verification engine — Playwright flows, typed assertions, AI healing. Transport-agnostic: used in-process by the verfix CLI and by the server-mode BullMQ worker.",
   "keywords": [
     "verfix",

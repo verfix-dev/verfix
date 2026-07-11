@@ -1,6 +1,6 @@
 {
   "name": "verfix",
-  "version": "0.3.12",
+  "version": "0.4.0",
   "description": "Browser verification CLI for AI coding agents — run deterministic browser flows, assert UI state, and get structured failure reports. Local-first: needs only Node 20+, no Docker.",
   "main": "dist/index.js",
   "scripts": {
@@ -50,7 +50,7 @@
   "type": "commonjs",
   "dependencies": {
     "@inquirer/prompts": "^8.4.3",
-    "@verfix/engine": "^0.1.8",
+    "@verfix/engine": "^0.2.0",
     "ajv": "^8.17.1",
     "axios": "^1.16.1",
     "chalk": "^5.6.2",

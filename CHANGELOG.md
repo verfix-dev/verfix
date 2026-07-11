@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-07-11
+
+The failure-synthesis release: a field review concluded Verfix "did the capture work correctly — the gap is entirely in synthesis" (raw artifacts, generic hints, nothing connecting them). This release closes that gap with two layers: cause-agnostic facts + queries that work for any failure, and deterministic analyzers for the causes that recur constantly. Everything is additive to the JSON contract; no LLM anywhere in the pipeline.
+
+### Changed
+- **`@verfix/engine` bumped to `0.2.0`.** CLI dependency bumped to `^0.2.0`.
+
+### Added
+- **`findings[]` — deterministic post-failure analysis.** A registry of pure functions over the evidence a run already captured; each emits a typed finding (`code`, hypothesis-language `summary`, the triggering `evidence`, a concrete `suggestion`) only when the evidence clearly supports one — silent when unsure, capped at 3, top finding rendered into `fix_hint`. Finding codes are a governed vocabulary like the failure taxonomy. Shipped analyzers, in priority order:
+  - `stale_session` — a restored `useState` session met a 401/403 on an auth-ish endpoint (the previous stale-state hint, refactored in as analyzer #1).
+  - `blocking_overlay` — the selector was probably fine: an open dialog/overlay was covering the page at failure time, named by its accessible name. Full-viewport overlays always qualify; ARIA dialogs need ≥20% viewport coverage so toasts stay silent. Runs on the step-crash path too — a click blocked by a dialog now says so instead of "fix the selector".
+  - `prior_console_errors` — non-excluded console errors from earlier in the run correlated with a later UI-shaped failure, first error inlined. Hostname-based first/third-party detection: an app's own API on another port or a sibling subdomain is never labeled third-party; all-vendor errors get de-ranked language.
+- **`page_state` — failure-time facts.** Every failure now reports what was observably true on the live page when it happened: URL, title, open dialogs/overlays (ARIA query + a geometric full-viewport probe; computed styles aren't recoverable from the saved HTML), and counts of prior non-excluded console errors / failed requests. Facts only, no interpretation; collected on both the assertion and step-crash failure paths, bounded (3s) and best-effort. The JSON carries the high-signal subset; full facts (including a visible-interactive-elements inventory) persist in the run result and a `<id>_page_state.json` artifact. Passing runs pay zero cost.
+- **`verfix show --timeline [--last N] [--filter type]`** — steps, console lines, and network requests interleaved chronologically around the failure, replacing the throwaway cross-referencing scripts users wrote over three artifact files.
+- **`verfix show --dom '<selector>'`** — query the run's saved DOM snapshot (also plain-text search), so "does this selector match the failure-time DOM?" is one command instead of a script over the raw `.html`.
+- **`selector_count` assertion** — assert an exact number of matches (`{ "type": "selector_count", "selector": ".todo-item", "count": 3 }`), with a clear config error when `count` is missing.
+- **`verfix run --base-url <url>`** — per-invocation base-URL override (preview deploys, per-PR environments) without editing `verfix.config.json`.
+- **Diagnosis playbook in generated instructions.** `.verfix/INSTRUCTIONS.md` now teaches the escalation ladder — JSON facts/findings first, then `--timeline`, then `--dom` + `open_dialogs`, then full logs, and only then project source — plus the per-step screenshot surface, scoped `text_visible`, `selector_count`, and Playwright selector syntax.
+
+### Fixed
+- **Intermittent second JSON document on stdout (#80).** When the bounded AI failure-summary raced its timeout and lost, the abandoned call could log after stdout was restored, corrupting `--output json` on first runs. The engine now drops the late result; `json-purity.sh` gained a regression test that reproduces the race from a pristine `HOME`.
+- **`third_party` console-error labeling.** Previously origin-based, so an app's own API on a different localhost port was mislabeled third-party; now hostname-based with loopback and sibling-subdomain awareness (shared with `prior_console_errors`).
+
 ## [0.3.12] - 2026-07-09
 
 ### Changed
