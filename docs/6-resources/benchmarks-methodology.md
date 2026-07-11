@@ -4,6 +4,10 @@ Verfix's product metric is **loop-closure rate** — not selector accuracy,
 not raw execution speed, not a healing percentage. Everything else is a
 means to this end.
 
+> Narrative walkthrough with a worked example — how a benchmark run unfolds,
+> taking a release measurement, and reading results honestly:
+> [the loop-closure benchmark guide](../4-guides/loop-closure-benchmark.md).
+
 ## What it measures
 
 Take a coding agent, a tiny app with one deliberate defect, and Verfix's
