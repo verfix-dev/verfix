@@ -107,6 +107,13 @@ function probePage(caps: { maxDialogs: number; maxElements: number }): ProbeResu
   // Full-viewport positioned elements stacked over the page center (modal
   // backdrops, cookie walls). elementsFromPoint already skips
   // pointer-events:none elements — which aren't blocking anyway.
+  // ponytail: samples only the viewport CENTER — sufficient while the
+  // qualifying threshold is >=80% coverage (anything that big covers the
+  // center). Side drawers/panels below that threshold are deliberately not
+  // detected: lowering the bar would false-positive on legitimate fixed
+  // sidebars/headers, and ARIA-labeled dialogs are caught by the selector
+  // query above regardless of position. Upgrade path: multi-point sampling
+  // plus a smarter legit-chrome filter if that ceiling is ever hit.
   for (const el of document.elementsFromPoint(vw / 2, vh / 2)) {
     if (el === document.documentElement || el === document.body) continue;
     const s = getComputedStyle(el);

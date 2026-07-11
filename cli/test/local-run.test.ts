@@ -70,12 +70,26 @@ const BLOCKED_HTML = `<!doctype html>
   </body>
 </html>`;
 
+// Same scenario without any ARIA role — must be caught by the geometric
+// full-viewport-overlay probe (elementsFromPoint path), not the dialog query.
+const BLOCKED_PLAIN_HTML = `<!doctype html>
+<html>
+  <head><title>Blocked Plain</title></head>
+  <body>
+    <button data-testid="buy">Buy now</button>
+    <div id="cookie-wall" style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:1000;">
+      <p>We use cookies.</p>
+    </div>
+  </body>
+</html>`;
+
 async function main() {
   // ── Arrange: throwaway app + temp project dir ──
   const server = http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/html' });
     if (req.url?.startsWith('/login')) return res.end(LOGIN_HTML);
     if (req.url?.startsWith('/private')) return res.end(PRIVATE_HTML);
+    if (req.url?.startsWith('/blocked-plain')) return res.end(BLOCKED_PLAIN_HTML);
     if (req.url?.startsWith('/blocked')) return res.end(BLOCKED_HTML);
     res.end(PAGE_HTML);
   });
@@ -160,6 +174,19 @@ async function main() {
           { type: 'text_visible', value: 'irrelevant — the step above fails first' },
         ],
       },
+      {
+        // Same, but the overlay has no ARIA role — exercises the geometric
+        // detection path.
+        id: 'blocked-by-plain-overlay',
+        clearState: true,
+        steps: [
+          { action: 'navigate', url: '/blocked-plain' },
+          { action: 'click', selector: '[data-testid="buy"]', timeout: 1500 },
+        ],
+        assertions: [
+          { type: 'text_visible', value: 'irrelevant — the step above fails first' },
+        ],
+      },
     ],
   };
   fs.writeFileSync(path.join(projectDir, 'verfix.config.json'), JSON.stringify(config, null, 2));
@@ -194,6 +221,7 @@ async function main() {
   // expects the /private page.
   const resDrifted = await runCli('drifted-selector');
   const resBlocked = await runCli('blocked-by-dialog');
+  const resBlockedPlain = await runCli('blocked-by-plain-overlay');
   const resPrivate = await runCli('private');
   server.close();
 
@@ -310,13 +338,28 @@ async function main() {
     assert.ok(blockedState.url.includes('/blocked'), 'page_state carries the failure-time URL');
     assert.strictEqual(typeof blockedState.prior_console_errors, 'number');
     assert.strictEqual(typeof blockedState.prior_failed_requests, 'number');
+    // The JSON contract carries only the high-signal facts; the full
+    // visible-elements inventory stays in the persisted run + artifact.
+    assert.strictEqual(blockedState.visible_elements, undefined,
+      'visible_elements must not appear in the JSON contract');
     const persistedBlocked = JSON.parse(
       fs.readFileSync(path.join(projectDir, '.verfix', 'runs', `${blockedJson.execution_id}.json`), 'utf-8'));
+    assert.ok(Array.isArray(persistedBlocked.page_state?.visible_elements),
+      'full facts (incl. visible_elements) persist in the run result');
     assert.ok(persistedBlocked.artifacts?.page_state, 'page_state artifact path recorded');
     assert.ok(fs.existsSync(persistedBlocked.artifacts.page_state), 'page_state facts persisted as a JSON artifact');
     console.log('✓ dialog-blocked click carries page_state facts naming the dialog; facts persisted as artifact');
 
-    console.log('\n12 passed, 0 failed\n');
+    assert.strictEqual(resBlockedPlain.status, 1, `blocked-plain run should exit 1.\nstdout: ${resBlockedPlain.stdout}\nstderr: ${resBlockedPlain.stderr}`);
+    const plainState = JSON.parse(resBlockedPlain.stdout).failures[0]?.page_state;
+    assert.ok(plainState, 'plain-overlay step failure must carry page_state facts');
+    assert.ok(
+      plainState.open_dialogs.some((d: any) => d.kind === 'overlay' && d.selector.includes('cookie-wall')),
+      `geometric probe must detect the role-less full-viewport overlay, got: ${JSON.stringify(plainState.open_dialogs)}`,
+    );
+    console.log('✓ role-less full-viewport overlay detected via the geometric probe path');
+
+    console.log('\n13 passed, 0 failed\n');
   } finally {
     fs.rmSync(projectDir, { recursive: true, force: true });
   }

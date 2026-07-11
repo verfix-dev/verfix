@@ -2302,6 +2302,16 @@ type FailureFinding = { code: string; summary: string; evidence?: Record<string,
 // Passed through opaquely — the engine owns the shape.
 type FailurePageState = Record<string, unknown>;
 
+// The JSON contract carries only the high-signal facts (URL/title, open
+// dialogs, prior-anomaly counts). The visible-elements inventory is token
+// noise repeated per failure — it stays in the persisted run
+// (.verfix/runs/<id>.json) and the <id>_page_state.json artifact.
+function slimPageState(ps: any): FailurePageState | undefined {
+  if (!ps) return undefined;
+  const { visible_elements, visible_elements_truncated, ...slim } = ps;
+  return slim;
+}
+
 function buildFailures(result: any): Array<{ type: string; flow?: string; assertion?: string; selector?: string; source_url?: string; detail?: string; fix_hint?: string; findings?: FailureFinding[]; page_state?: FailurePageState }> {
   const failures = (result.assertions || [])
     .filter((a: any) => !a.passed)
@@ -2318,9 +2328,9 @@ function buildFailures(result: any): Array<{ type: string; flow?: string; assert
       // Deterministic post-failure analysis from the engine; absent when no
       // analyzer matched. Additive contract field.
       findings: a.findings,
-      // What was true on the live page at failure time (open dialogs, visible
-      // elements, prior anomaly counts). Additive contract field.
-      page_state: a.page_state,
+      // What was true on the live page at failure time (open dialogs, prior
+      // anomaly counts). Additive contract field.
+      page_state: slimPageState(a.page_state),
     }));
 
   if (failures.length === 0 && result.error) {
@@ -2333,7 +2343,7 @@ function buildFailures(result: any): Array<{ type: string; flow?: string; assert
       fix_hint: renderFixHint(type),
       // Step failures carry facts at the result's top level (no failed
       // assertion exists to attach them to).
-      page_state: result.page_state,
+      page_state: slimPageState(result.page_state),
     });
   }
 
