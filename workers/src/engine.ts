@@ -11,6 +11,7 @@ import * as path from 'path';
 import { JobPayload, ExecutionResult, ConsoleLine, NetworkRequest, AssertionDefinition } from './assertions/types';
 import { runAssertions } from './assertions/engine';
 import { collectArtifacts } from './artifacts/collector';
+import { collectPageState } from './artifacts/page-state';
 import { EventTracker } from './artifacts/event-tracker';
 import { executeFlow } from './browser/flow-executor';
 import { waitForStableDOM } from './reliability/retry';
@@ -21,6 +22,16 @@ import { runExploration } from './ai/exploration';
 import { storageStatePath, sessionStatePath, restoreStateInPage, captureState, seedWebStorage } from './browser/storage-state';
 
 export * from './assertions/types';
+
+// Job-wide console excludes: errors the user excluded anywhere in the config
+// must not resurface via the prior_console_errors analyzer or the page-state
+// facts, regardless of which assertion list (or step-crash path) is running.
+function jobConsoleExcludes(data: JobPayload): string[] {
+  return [
+    ...(data.assertions ?? []),
+    ...(data.flows ?? []).flatMap(f => f.assertions ?? []),
+  ].filter(a => a.type === 'no_console_errors').flatMap(a => a.exclude ?? []);
+}
 
 // ─── Host URL resolution ──────────────────────────────────────────────────────
 //
@@ -336,13 +347,7 @@ async function execute(
         { type: 'page_loaded' },
         { type: 'no_console_errors' },
       ];
-      // Job-wide console excludes: errors the user excluded anywhere in the
-      // config must not resurface via the prior_console_errors analyzer,
-      // regardless of which assertion list is currently running.
-      const consoleExcludes = [
-        ...(data.assertions ?? []),
-        ...(data.flows ?? []).flatMap(f => f.assertions ?? []),
-      ].filter(a => a.type === 'no_console_errors').flatMap(a => a.exclude ?? []);
+      const consoleExcludes = jobConsoleExcludes(data);
       let ranFlowAssertions = false;
 
       if (data.flows && data.flows.length > 0) {
@@ -440,6 +445,9 @@ async function execute(
     console.log('\n📦 Collecting artifacts...');
     const artifacts = await collectArtifacts(
       page, context, artifactsDir, data.id, consoleLogs, networkRequests, !passed,
+      // Failure-time facts were collected by runAssertions on the first failed
+      // assertion; persist them as a run artifact alongside the other logs.
+      assertionResults.find(r => r.page_state)?.page_state,
     );
 
     const duration = Date.now() - startTime;
@@ -497,10 +505,15 @@ async function execute(
     // Crashes need artifacts most of all — best-effort trace/screenshot/DOM
     // so `verfix show` works on a crashed run, not just completed ones.
     let crashArtifacts: ExecutionResult['artifacts'] = {};
+    let crashPageState: ExecutionResult['page_state'];
     if (page && context && !cancel.timedOut) {
       try {
+        // A step failure (click blocked, selector missing) lands here with no
+        // failed AssertionResult to carry facts — probe the still-live page
+        // now, before artifact collection stops the trace.
+        crashPageState = await collectPageState(page, consoleLogs, networkRequests, jobConsoleExcludes(data)) ?? undefined;
         crashArtifacts = await collectArtifacts(
-          page, context, artifactsDir, data.id, consoleLogs, networkRequests, true,
+          page, context, artifactsDir, data.id, consoleLogs, networkRequests, true, crashPageState,
         );
         await tracker.captureStateSync(page, undefined, 'failure');
       } catch { /* collection is best-effort on a crashed run */ }
@@ -529,6 +542,7 @@ async function execute(
       console_logs: consoleLogs,
       network_requests: networkRequests,
       error: message,
+      page_state: crashPageState,
       created_at: new Date(startTime).toISOString(),
       completed_at: new Date().toISOString(),
     };

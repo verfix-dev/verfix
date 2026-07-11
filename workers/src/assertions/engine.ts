@@ -4,6 +4,7 @@ import { inferFailureType, renderFixHint } from './failure-hints';
 import { appendTopFinding, Finding, isThirdPartySource, runAnalyzers } from './analyzers';
 import { resolveWithHealing } from '../ai/self-healing';
 import { EventTracker } from '../artifacts/event-tracker';
+import { collectPageState, PageState } from '../artifacts/page-state';
 
 // Utility to time an async assertion
 async function timed(fn: () => Promise<{ passed: boolean; details?: Record<string, unknown>; error?: string }>): Promise<{ passed: boolean; duration_ms: number; details?: Record<string, unknown>; error?: string }> {
@@ -34,6 +35,10 @@ export async function runAssertions(
   consoleExcludePatterns?: string[],
 ): Promise<AssertionResult[]> {
   const results: AssertionResult[] = [];
+  // Failure-time page facts (#55): collected lazily on the first failed
+  // assertion and reused for the rest of this list — assertions are read-only,
+  // so the page doesn't change between them. null = collection failed, don't retry.
+  let pageState: PageState | null | undefined;
 
   for (const assertion of assertions) {
     let result: Omit<AssertionResult, 'type'>;
@@ -233,6 +238,9 @@ export async function runAssertions(
     let fix_hint: string | undefined;
     let findings: Finding[] | undefined;
     if (!result.passed) {
+      if (pageState === undefined) {
+        pageState = await collectPageState(page, consoleLogs, networkRequests, consoleExcludePatterns);
+      }
       failure_type = inferFailureType(assertion, result);
       fix_hint = renderFixHint(failure_type, {
         assertion_type: assertion.type,
@@ -250,6 +258,7 @@ export async function runAssertions(
         details: result.details,
         state_restored: stateRestored,
         page_url: page.url(),
+        page_state: pageState ?? undefined,
         console_exclude_patterns: consoleExcludePatterns,
         console_logs: consoleLogs,
         network_requests: networkRequests,
@@ -292,7 +301,11 @@ export async function runAssertions(
       }
     }
 
-    const assertionResult = { type: assertion.type, ...result, screenshot_on_failure, failure_type, fix_hint, findings, flow_name: flowName };
+    const assertionResult = {
+      type: assertion.type, ...result, screenshot_on_failure, failure_type, fix_hint, findings,
+      page_state: result.passed ? undefined : pageState ?? undefined,
+      flow_name: flowName,
+    };
     results.push(assertionResult);
 
     // Enhanced logging

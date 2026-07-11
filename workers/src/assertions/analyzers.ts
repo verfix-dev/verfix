@@ -1,4 +1,5 @@
 import { AssertionDefinition, ConsoleLine, FailureType, NetworkRequest } from './types';
+import { PageState } from '../artifacts/page-state';
 
 // ─── Failure-analyzer pipeline ────────────────────────────────────────────────
 // Deterministic post-failure synthesis: each analyzer is a pure function over
@@ -36,6 +37,8 @@ export interface EvidenceBundle {
    * errors the user explicitly excluded must not resurface as findings.
    */
   console_exclude_patterns?: string[];
+  /** Failure-time facts from the live page (open dialogs, visible elements). */
+  page_state?: PageState;
   console_logs: ConsoleLine[];
   network_requests: NetworkRequest[];
 }
