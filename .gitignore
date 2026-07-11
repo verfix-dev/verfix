@@ -24,6 +24,8 @@ workers/artifacts/
 .DS_Store
 
 /ignore
+# Marketing drafts and launch plans — local only, repo is public
+/marketing
 **/.kilo
 **/.verfix
 # Exception: committed benchmark case fixtures (pre-baked storage state) live
