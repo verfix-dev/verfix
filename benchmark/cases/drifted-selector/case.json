@@ -1,0 +1,14 @@
+{
+  "id": "drifted-selector",
+  "description": "A refactor renamed the checkout button's data-testid from submit-btn to submit-order, but the flow config still clicks the old selector.",
+  "category": "selector_drift",
+  "expected_failure_type": "selector_not_found",
+  "expected_finding": null,
+  "fix_scope": "config",
+  "max_iterations": 5,
+  "invariants": [
+    { "file": "app/server.js", "must_not_change": true },
+    { "file": "verfix.config.json", "must_contain": "\"action\": \"click\"" },
+    { "file": "verfix.config.json", "must_contain": "\"type\": \"text_visible\"" }
+  ]
+}

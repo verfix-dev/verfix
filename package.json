@@ -8,6 +8,9 @@
     "workers",
     "sdk"
   ],
+  "scripts": {
+    "bench": "node benchmark/run.js"
+  },
   "engines": {
     "node": ">=20.20.0"
   }

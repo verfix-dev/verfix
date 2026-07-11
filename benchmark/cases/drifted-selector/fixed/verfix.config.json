@@ -1,0 +1,17 @@
+{
+  "baseUrl": "http://127.0.0.1:3948",
+  "mode": "strict",
+  "flows": [
+    {
+      "id": "checkout",
+      "name": "Submitting the order shows a confirmation",
+      "steps": [
+        { "action": "navigate", "url": "/" },
+        { "action": "click", "selector": "[data-testid=\"submit-order\"]", "timeout": 1500 }
+      ],
+      "assertions": [
+        { "type": "text_visible", "value": "Order submitted" }
+      ]
+    }
+  ]
+}
