@@ -12,6 +12,7 @@
  *
  * Usage:
  *   node benchmark/run.js --agent <null|oracle|CMD> [--case <id>] [--out results.json] [--keep]
+ *   node benchmark/run.js --report   # no browser runs — trend table from benchmark/results/
  */
 
 const fs = require('fs');
@@ -24,6 +25,7 @@ const { spawn } = require('child_process');
 const REPO_ROOT = path.join(__dirname, '..');
 const CLI_DIR = path.join(REPO_ROOT, 'cli');
 const CASES_DIR = path.join(__dirname, 'cases');
+const RESULTS_DIR = path.join(__dirname, 'results');
 
 // ponytail: ts-node isn't hoisted to the repo root by npm workspaces, so
 // resolve it the same way cli/test/local-run.test.ts does — relative to the
@@ -31,17 +33,60 @@ const CASES_DIR = path.join(__dirname, 'cases');
 const TS_NODE_BIN = require.resolve('ts-node/dist/bin', { paths: [CLI_DIR] });
 
 function parseArgs(argv) {
-  const args = { agent: null, case: null, out: null, keep: false };
+  const args = { agent: null, case: null, out: null, keep: false, report: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--agent') args.agent = argv[++i];
     else if (a === '--case') args.case = argv[++i];
     else if (a === '--out') args.out = argv[++i];
     else if (a === '--keep') args.keep = true;
+    else if (a === '--report') args.report = true;
     else throw new Error(`Unknown argument: ${a}`);
   }
-  if (!args.agent) throw new Error('--agent <null|oracle|CMD> is required');
+  if (!args.report && !args.agent) throw new Error('--agent <null|oracle|CMD> is required');
   return args;
+}
+
+function verfixVersion() {
+  const pkg = JSON.parse(fs.readFileSync(path.join(CLI_DIR, 'package.json'), 'utf-8'));
+  return pkg.version;
+}
+
+/** --report: no browser runs — reads every results file and prints a markdown trend table. */
+function printReport() {
+  if (!fs.existsSync(RESULTS_DIR)) {
+    process.stdout.write('No results found in benchmark/results/.\n');
+    return;
+  }
+  const files = fs.readdirSync(RESULTS_DIR).filter(f => f.endsWith('.json'));
+  const measurements = files.map(f => JSON.parse(fs.readFileSync(path.join(RESULTS_DIR, f), 'utf-8')));
+  measurements.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+
+  if (measurements.length === 0) {
+    process.stdout.write('No results found in benchmark/results/.\n');
+    return;
+  }
+
+  const caseIds = measurements[0].cases.map(c => c.id);
+
+  const header = ['version', 'date', 'agent', 'closure_rate', 'mean_iterations', ...caseIds];
+  const rows = measurements.map(m => {
+    const closureRate = `${((m.closure_rate || 0) * 100).toFixed(0)}%`;
+    const meanIterations = (m.mean_iterations || 0).toFixed(1);
+    const glyphs = caseIds.map(id => {
+      const c = m.cases.find(x => x.id === id);
+      return c ? (c.closed ? '✅' : '❌') : '—';
+    });
+    const date = (m.date || '?').slice(0, 10);
+    return [m.verfix_version || '?', date, m.agent || '?', closureRate, meanIterations, ...glyphs];
+  });
+
+  const lines = [];
+  lines.push(`| ${header.join(' | ')} |`);
+  lines.push(`| ${header.map(() => '---').join(' | ')} |`);
+  for (const row of rows) lines.push(`| ${row.join(' | ')} |`);
+
+  process.stdout.write(lines.join('\n') + '\n');
 }
 
 function listCaseIds() {
@@ -260,6 +305,13 @@ async function runCase(caseId, agent, keep) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
+
+  if (args.report) {
+    printReport();
+    process.exit(0);
+    return;
+  }
+
   const caseIds = args.case ? [args.case] : listCaseIds();
 
   const results = [];
@@ -280,6 +332,8 @@ async function main() {
     cases: results,
     closure_rate: closureRate,
     mean_iterations: meanIterations,
+    verfix_version: verfixVersion(),
+    date: new Date().toISOString(),
   };
 
   // Human-readable table to stderr.

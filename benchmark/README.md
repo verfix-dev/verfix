@@ -47,10 +47,23 @@ to judge an agent.
 Output: a human-readable table goes to stderr; machine-readable JSON (per
 case: `id`, `closed`, `iterations`, `first_failure_type_ok`,
 `expected_finding_ok`, `invariants_ok`; aggregate: `closure_rate`,
-`mean_iterations`) goes to `--out <file>` or stdout.
+`mean_iterations`, `verfix_version`, `date`) goes to `--out <file>` or
+stdout.
 
 Exit code is 0 for a completed run, except the `null`/`oracle` self-test
 pair described above.
+
+## Tracking the trend release over release
+
+```bash
+node benchmark/run.js --report
+```
+
+No browser runs — reads every JSON file in `benchmark/results/` and prints a
+markdown table (version, date, agent, closure rate, mean iterations,
+per-case pass/fail) sorted oldest to newest. See `benchmark/results/README.md`
+for the file-naming convention for a real measurement, and
+`docs/6-resources/benchmarks-methodology.md` for what the numbers mean.
 
 ## Case format
 

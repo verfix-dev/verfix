@@ -77,6 +77,46 @@ jobs:
           path: .verfix/runs/
           if-no-files-found: ignore
 
+  benchmark:
+    name: Benchmark self-test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install (workspaces link cli <-> workers <-> sdk)
+        run: npm install
+
+      # The engine builds first: @verfix/engine's types live in workers/dist,
+      # so the benchmark harness (which drives the CLI via ts-node) needs it.
+      - name: Build engine
+        run: cd workers && npm run build
+
+      - name: Cache Playwright Chromium
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      # Installed from workers/ so the browser version is resolved through the
+      # engine's own Playwright dependency — same rule as cli/src/local-runner.ts.
+      - name: Install Chromium
+        run: cd workers && npx playwright install --with-deps chromium
+
+      # null must stay at 0% closure (a case that closes without a fix isn't
+      # actually broken) and oracle must stay at 100% (a case's own intended
+      # fix must work) — run.js exits nonzero otherwise. This is a rot check
+      # on the 8 benchmark cases, not a measurement of any real agent.
+      - name: Benchmark self-test — null (floor, must be 0%)
+        run: node benchmark/run.js --agent null
+
+      - name: Benchmark self-test — oracle (ceiling, must be 100%)
+        run: node benchmark/run.js --agent oracle
+
   api:
     name: Go API
     runs-on: ubuntu-latest
