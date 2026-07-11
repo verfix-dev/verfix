@@ -350,6 +350,20 @@ async function main() {
     assert.ok(fs.existsSync(persistedBlocked.artifacts.page_state), 'page_state facts persisted as a JSON artifact');
     console.log('✓ dialog-blocked click carries page_state facts naming the dialog; facts persisted as artifact');
 
+    // #59: a step (crash-path) failure now also runs the analyzer pipeline —
+    // the open dialog must surface as a blocking_overlay finding, and its
+    // summary rendered into fix_hint (the crash path renders fix_hint in the
+    // CLI, not the engine, so this exercises the CLI's own rendering too).
+    const blockedFindings = blockedJson.failures[0]?.findings;
+    assert.ok(Array.isArray(blockedFindings) && blockedFindings.length >= 1,
+      `step failure must carry a findings array, got: ${JSON.stringify(blockedJson.failures)}`);
+    const blockingOverlay = blockedFindings.find((f: any) => f.code === 'blocking_overlay');
+    assert.ok(blockingOverlay, `expected a blocking_overlay finding, got: ${JSON.stringify(blockedFindings)}`);
+    assert.ok(blockingOverlay.summary.includes('Welcome to Cleara'), `finding summary should name the dialog, got: ${blockingOverlay.summary}`);
+    assert.ok(blockedJson.failures[0].fix_hint.includes('Welcome to Cleara'),
+      `fix_hint must mention the dialog, got: ${blockedJson.failures[0].fix_hint}`);
+    console.log('✓ dialog-blocked click failure carries a blocking_overlay finding, rendered into fix_hint');
+
     assert.strictEqual(resBlockedPlain.status, 1, `blocked-plain run should exit 1.\nstdout: ${resBlockedPlain.stdout}\nstderr: ${resBlockedPlain.stderr}`);
     const plainState = JSON.parse(resBlockedPlain.stdout).failures[0]?.page_state;
     assert.ok(plainState, 'plain-overlay step failure must carry page_state facts');
@@ -359,7 +373,7 @@ async function main() {
     );
     console.log('✓ role-less full-viewport overlay detected via the geometric probe path');
 
-    console.log('\n13 passed, 0 failed\n');
+    console.log('\n14 passed, 0 failed\n');
   } finally {
     fs.rmSync(projectDir, { recursive: true, force: true });
   }

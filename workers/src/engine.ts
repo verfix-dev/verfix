@@ -10,6 +10,7 @@ import * as path from 'path';
 
 import { JobPayload, ExecutionResult, ConsoleLine, NetworkRequest, AssertionDefinition } from './assertions/types';
 import { runAssertions } from './assertions/engine';
+import { EvidenceBundle, inferFailureTypeFromCrash, runAnalyzers } from './assertions/analyzers';
 import { collectArtifacts } from './artifacts/collector';
 import { collectPageState } from './artifacts/page-state';
 import { EventTracker } from './artifacts/event-tracker';
@@ -522,6 +523,24 @@ async function execute(
       crashArtifacts.trace = teardownTrace;
     }
 
+    // Best-effort analyzer pass over the crash: a step failure (click blocked,
+    // selector missing) never reaches runAssertions, so this is the only place
+    // findings get computed for it. Must never change the crash result's own
+    // error/status — an analyzer bug here is swallowed, not surfaced.
+    let crashFindings: ExecutionResult['findings'];
+    try {
+      const bundle: EvidenceBundle = {
+        failure_type: inferFailureTypeFromCrash(message),
+        error: message,
+        page_state: crashPageState,
+        console_exclude_patterns: jobConsoleExcludes(data),
+        console_logs: consoleLogs,
+        network_requests: networkRequests,
+      };
+      const found = runAnalyzers(bundle);
+      if (found.length > 0) crashFindings = found;
+    } catch { /* findings are best-effort — never let this fail the run */ }
+
     // Close page/context (aborts anything still in flight; flushes the HAR).
     try { await page?.close(); } catch { /* already closed */ }
     try { await context?.close(); } catch { /* already closed */ }
@@ -543,6 +562,7 @@ async function execute(
       network_requests: networkRequests,
       error: message,
       page_state: crashPageState,
+      findings: crashFindings,
       created_at: new Date(startTime).toISOString(),
       completed_at: new Date().toISOString(),
     };

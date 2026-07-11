@@ -2298,6 +2298,18 @@ function stripAnsi(text: string): string {
 
 type FailureFinding = { code: string; summary: string; evidence?: Record<string, unknown>; suggestion?: string };
 
+// Mirrors appendTopFinding in @verfix/engine's assertions/analyzers.ts. The
+// engine renders findings into fix_hint for assertion failures; step (crash)
+// failures classify their type and render their base fix_hint here in the
+// CLI, so the same rendering has to happen here too — inlined rather than
+// imported to keep this synchronous helper free of the engine's dynamic
+// import gating (@verfix/engine may not be installed at all in some flows).
+function appendTopFinding(hint: string, findings: FailureFinding[]): string {
+  if (findings.length === 0) return hint;
+  const top = findings[0];
+  return `${hint} Note: ${top.summary}${top.suggestion ? ` ${top.suggestion}` : ''}`;
+}
+
 // Cause-agnostic facts from the live page at failure time (engine's PageState).
 // Passed through opaquely — the engine owns the shape.
 type FailurePageState = Record<string, unknown>;
@@ -2336,13 +2348,18 @@ function buildFailures(result: any): Array<{ type: string; flow?: string; assert
   if (failures.length === 0 && result.error) {
     const detail = stripAnsi(result.error);
     const type = inferFailureTypeFromError(detail);
+    let fix_hint = renderFixHint(type);
+    // Step failures (crash path) compute findings in the engine, not here —
+    // render the top one into fix_hint the same way runAssertions does.
+    if (result.findings?.length) fix_hint = appendTopFinding(fix_hint, result.findings);
     failures.push({
       type,
       selector: extractSelector(detail),
       detail,
-      fix_hint: renderFixHint(type),
+      fix_hint,
       // Step failures carry facts at the result's top level (no failed
       // assertion exists to attach them to).
+      findings: result.findings,
       page_state: slimPageState(result.page_state),
     });
   }
