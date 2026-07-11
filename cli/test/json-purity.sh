@@ -84,6 +84,135 @@ else
   echo "✅ PASS: flows --config nonexistent exit code is 2"
 fi
 
+# Test 6: abandoned AI failure-summary call must never leak onto stdout (#80).
+#
+# engine.ts races generateFailureSummary() against a bounded timeout so a slow
+# AI provider can't stall the run. Promise.race doesn't cancel the loser: when
+# the AI response arrives just after the bound (still in flight), the CLI has
+# already restored real stdout/stderr and printed its JSON result — a stray
+# console.log from that abandoned call used to land straight after it,
+# corrupting `--output json`. Reproduced with a fake provider that responds
+# ~300ms past the engine's 10s bound, so the abandoned call is still pending
+# when the CLI moves on. Uses ephemeral ports for both the target app and the
+# fake AI backend — self-contained, no fixed ports, no external network.
+#
+# The CLI child runs under a PRISTINE throwaway HOME (no ~/.verfix/ — no
+# machine-id, no telemetry-notice marker, no update-check cache) so this also
+# verifies issue #80's other hypothesized mechanisms — the first-run
+# notification / version-check epilogue and the background-check scheduler —
+# don't leak onto stdout either. PLAYWRIGHT_BROWSERS_PATH is pinned to the real
+# cache so Chromium isn't re-downloaded under the temp HOME.
+harness=$(mktemp --suffix=.js)
+cat > "$harness" <<'JS'
+const http = require('http');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const { spawn } = require('child_process');
+
+async function listen(handler) {
+  const server = http.createServer(handler);
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  return { server, port: server.address().port };
+}
+
+async function main() {
+  const app = await listen((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/html' });
+    res.end('<html><body><h1>ok</h1></body></html>');
+  });
+
+  // Fake OpenAI-compatible backend: responds ~300ms past the engine's 10s
+  // summary bound, so the request is still abandoned-but-in-flight when the
+  // CLI's race times out and moves on.
+  const ai = await listen((req, res) => {
+    let body = '';
+    req.on('data', (c) => { body += c; });
+    req.on('end', () => {
+      setTimeout(() => {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          choices: [{ message: { content: JSON.stringify({
+            likely_root_cause: 'test', evidence: [], suggested_fix: null, confidence: 0.5,
+          }) } }],
+        }));
+      }, 10300);
+    });
+  });
+
+  const projDir = fs.mkdtempSync(path.join(os.tmpdir(), 'verfix-json-purity-'));
+  const configPath = path.join(projDir, 'verfix.config.json');
+  fs.writeFileSync(configPath, JSON.stringify({
+    baseUrl: `http://127.0.0.1:${app.port}`,
+    mode: 'assisted',
+    flows: [{
+      id: 'deliberate-fail',
+      name: 'Deliberately failing assertion',
+      steps: [{ action: 'navigate', url: '/' }],
+      assertions: [{ type: 'text_visible', value: 'text that will never appear on this page' }],
+    }],
+  }));
+
+  // Pristine throwaway HOME: no ~/.verfix/ (no machine-id, no telemetry-notice
+  // marker, no update-check cache) → the CLI child is a true first run, so the
+  // notification/version-check/telemetry epilogue paths execute too. Pin the
+  // browser cache to the real location so Chromium isn't re-downloaded.
+  const pristineHome = fs.mkdtempSync(path.join(os.tmpdir(), 'verfix-pristine-home-'));
+  const realBrowsersPath = path.join(os.homedir(), '.cache', 'ms-playwright');
+
+  const cliBin = process.argv[2];
+  // Async spawn, not spawnSync: this script's own event loop must keep
+  // servicing the app/AI HTTP servers above (they live in THIS process) while
+  // the CLI child is running. spawnSync would freeze the event loop for the
+  // whole child lifetime, starving both servers and hanging the CLI's own
+  // page navigation — a real footgun, not just theoretical (this is exactly
+  // what broke the first draft of this test).
+  const child = spawn(process.execPath, [cliBin, 'run', '--config', configPath, '--flow', 'deliberate-fail', '--output', 'json'], {
+    cwd: projDir,
+    env: {
+      ...process.env,
+      HOME: pristineHome,
+      PLAYWRIGHT_BROWSERS_PATH: realBrowsersPath,
+      AI_PROVIDER: 'openai',
+      AI_API_KEY: 'sk-test-fake-key',
+      AI_BASE_URL: `http://127.0.0.1:${ai.port}`,
+    },
+  });
+  let stdout = '';
+  child.stdout.on('data', (c) => { stdout += c; });
+  child.stderr.on('data', () => {});
+  await new Promise((resolve) => {
+    const killTimer = setTimeout(() => child.kill('SIGKILL'), 20000);
+    child.on('close', () => { clearTimeout(killTimer); resolve(); });
+  });
+
+  app.server.close();
+  ai.server.close();
+  fs.rmSync(projDir, { recursive: true, force: true });
+  fs.rmSync(pristineHome, { recursive: true, force: true });
+
+  try {
+    JSON.parse(stdout);
+    process.stdout.write('PURE\n');
+  } catch {
+    process.stdout.write('IMPURE\n');
+    process.stderr.write('--- stdout ---\n' + stdout + '\n--- end stdout ---\n');
+  }
+}
+
+main();
+JS
+harness_result=$(node "$harness" "$(pwd)/cli/dist/index.js" 2>/tmp/verfix-json-purity-test6.log)
+rm -f "$harness"
+if [ "$harness_result" != "PURE" ]; then
+  echo "❌ FAIL: run --output json leaks extra stdout content from an abandoned AI summary call or first-run epilogue (#80)"
+  cat /tmp/verfix-json-purity-test6.log
+  failed=1
+else
+  echo "✅ PASS: run --output json stays pure on a pristine first run even when the AI failure-summary call outlives its bound (#80)"
+fi
+rm -f /tmp/verfix-json-purity-test6.log
+
 if [ $failed -eq 0 ]; then
   echo "🎉 All JSON purity tests passed!"
   exit 0

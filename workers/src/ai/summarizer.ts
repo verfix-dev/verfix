@@ -17,7 +17,21 @@ export async function generateFailureSummary(
   consoleLogs: ConsoleLine[],
   networkRequests: NetworkRequest[],
   domSnippet?: string,
+  /**
+   * Checked right after the AI call returns. The caller (engine.ts) sets this
+   * once its bounded wait for this summary has already timed out — at that
+   * point the local CLI has moved on (restored stdout/stderr and printed its
+   * result), so any console output from here would leak stray text onto
+   * stdout after the fact. Returning early keeps an abandoned call silent.
+   */
+  isAbandoned?: () => boolean,
 ): Promise<AISummary | null> {
+  // No isAbandoned guard here: when AI is disabled this returns null
+  // synchronously — before any await — so Promise.race resolves immediately and
+  // the timeout branch never fires (the flag can't be set yet). This log also
+  // runs while the CLI's console→stderr swap is still active (we're inside
+  // runVerification, before runLocal's finally restores stdout), so it can't
+  // reach stdout even in isolation.
   if (!isAIEnabled()) {
     console.log('  ℹ AI summarization skipped (no API key configured)');
     return null;
@@ -58,6 +72,7 @@ JSON format:
     { role: 'user', content: prompt },
   ], { json: true, temperature: 0.2, maxTokens: 800 });
 
+  if (isAbandoned?.()) return null;
   if (!response) return null;
 
   try {
