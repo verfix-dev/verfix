@@ -26,3 +26,7 @@ workers/artifacts/
 /ignore
 **/.kilo
 **/.verfix
+# Exception: committed benchmark case fixtures (pre-baked storage state) live
+# under a case's own .verfix/ — these are test data, not runtime output.
+!benchmark/cases/**/.verfix
+!benchmark/cases/**/.verfix/**

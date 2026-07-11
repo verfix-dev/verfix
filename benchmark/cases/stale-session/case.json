@@ -1,0 +1,14 @@
+{
+  "id": "stale-session",
+  "description": "A saved login session was captured before the server rotated its token; the private area's session check now 401s and the page renders 'Session expired' instead of the real content.",
+  "category": "stale_session",
+  "expected_failure_type": "selector_not_visible",
+  "expected_finding": "stale_session",
+  "fix_scope": "config",
+  "max_iterations": 5,
+  "invariants": [
+    { "file": "app/server.js", "must_not_change": true },
+    { "file": "verfix.config.json", "must_contain": "\"useState\": \"auth\"" },
+    { "file": "verfix.config.json", "must_contain": "\"type\": \"selector_visible\"" }
+  ]
+}

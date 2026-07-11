@@ -1,0 +1,13 @@
+{
+  "id": "changed-route",
+  "description": "A navigation refactor renamed the dashboard route from /dashboard to /overview; the old path now redirects, so the flow's url_contains assertion (written against the old path) no longer matches.",
+  "category": "route_change",
+  "expected_failure_type": "url_mismatch",
+  "expected_finding": null,
+  "fix_scope": "config",
+  "max_iterations": 5,
+  "invariants": [
+    { "file": "app/server.js", "must_not_change": true },
+    { "file": "verfix.config.json", "must_contain": "\"type\": \"url_contains\"" }
+  ]
+}

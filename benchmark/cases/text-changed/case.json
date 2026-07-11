@@ -1,0 +1,13 @@
+{
+  "id": "text-changed",
+  "description": "The copy team changed the homepage greeting from 'Welcome back' to 'Good to see you'; the flow's text_visible assertion still checks for the old copy.",
+  "category": "copy_change",
+  "expected_failure_type": "text_mismatch",
+  "expected_finding": null,
+  "fix_scope": "config",
+  "max_iterations": 5,
+  "invariants": [
+    { "file": "app/server.js", "must_not_change": true },
+    { "file": "verfix.config.json", "must_contain": "\"type\": \"text_visible\"" }
+  ]
+}

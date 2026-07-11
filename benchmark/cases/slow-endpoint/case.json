@@ -1,0 +1,13 @@
+{
+  "id": "slow-endpoint",
+  "description": "The report endpoint got slower under load; the flow's network-idle wait still uses the old 5s timeout, so it times out before the ~7s report response ever arrives.",
+  "category": "slow_endpoint",
+  "expected_failure_type": "timeout",
+  "expected_finding": null,
+  "fix_scope": "config",
+  "max_iterations": 5,
+  "invariants": [
+    { "file": "app/server.js", "must_not_change": true },
+    { "file": "verfix.config.json", "must_contain": "\"type\": \"text_visible\"" }
+  ]
+}

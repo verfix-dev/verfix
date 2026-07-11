@@ -1,0 +1,16 @@
+{
+  "baseUrl": "http://127.0.0.1:3955",
+  "mode": "strict",
+  "flows": [
+    {
+      "id": "homepage",
+      "name": "Homepage greets a returning visitor",
+      "steps": [
+        { "action": "navigate", "url": "/" }
+      ],
+      "assertions": [
+        { "type": "text_visible", "value": "Good to see you" }
+      ]
+    }
+  ]
+}

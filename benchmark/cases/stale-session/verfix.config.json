@@ -1,0 +1,17 @@
+{
+  "baseUrl": "http://127.0.0.1:3950",
+  "mode": "strict",
+  "flows": [
+    {
+      "id": "private",
+      "name": "Private area renders for a logged-in session",
+      "useState": "auth",
+      "steps": [
+        { "action": "navigate", "url": "/private" }
+      ],
+      "assertions": [
+        { "type": "selector_visible", "selector": "[data-testid=\"private-ok\"]" }
+      ]
+    }
+  ]
+}

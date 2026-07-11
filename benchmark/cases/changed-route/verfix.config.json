@@ -1,0 +1,16 @@
+{
+  "baseUrl": "http://127.0.0.1:3952",
+  "mode": "strict",
+  "flows": [
+    {
+      "id": "dashboard",
+      "name": "Navigating to the dashboard lands on the dashboard",
+      "steps": [
+        { "action": "navigate", "url": "/dashboard" }
+      ],
+      "assertions": [
+        { "type": "url_contains", "value": "dashboard" }
+      ]
+    }
+  ]
+}
