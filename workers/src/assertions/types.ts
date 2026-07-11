@@ -190,6 +190,11 @@ export interface ExecutionResult {
   // threw): there is no failed AssertionResult to carry them, so they ride
   // at the top level. Assertion failures carry their own page_state instead.
   page_state?: import('../artifacts/page-state').PageState;
+  // Deterministic post-failure analysis for runs that fail OUTSIDE assertions
+  // (a step threw): there is no failed AssertionResult to carry findings, so
+  // they ride at the top level, mirroring page_state above. Additive: present
+  // only when at least one analyzer matched.
+  findings?: import('./analyzers').Finding[];
   created_at: string;
   completed_at?: string;
   ai_summary?: AISummary;

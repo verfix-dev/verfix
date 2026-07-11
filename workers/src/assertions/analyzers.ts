@@ -133,6 +133,52 @@ const staleSessionAnalyzer: Analyzer = {
   },
 };
 
+// The single most common misleading fix_hint: the selector is correct but an
+// open dialog/overlay is covering or intercepting the target element at
+// failure time. Only these failure shapes are plausibly caused by an overlay —
+// a text/url/console/network mismatch has its own, unrelated cause.
+const BLOCKING_OVERLAY_FAILURE_TYPES: ReadonlySet<FailureType> = new Set([
+  'selector_not_found',
+  'selector_not_visible',
+  'timeout',
+]);
+
+// `kind: 'overlay'` facts are full-viewport by construction (see page-state.ts)
+// and always qualify. `kind: 'dialog'` facts are any visible ARIA dialog
+// regardless of size — a tiny role=dialog toast must stay silent, so it only
+// qualifies once it covers a meaningful share of the viewport.
+const MIN_DIALOG_COVERAGE = 0.2;
+
+function isBlocking(fact: { kind: 'dialog' | 'overlay'; viewport_coverage: number }): boolean {
+  return fact.kind === 'overlay' || fact.viewport_coverage >= MIN_DIALOG_COVERAGE;
+}
+
+// Open dialogs/overlays present at failure time are the strongest proximate
+// cause of a selector miss — stronger than a merely-correlated console error,
+// since the overlay is (by construction) sitting over the page at that exact
+// moment. Hypothesis language only: an open dialog is strong evidence, not
+// proof the click was actually intercepted.
+const blockingOverlayAnalyzer: Analyzer = {
+  code: 'blocking_overlay',
+  analyze(bundle) {
+    if (!BLOCKING_OVERLAY_FAILURE_TYPES.has(bundle.failure_type)) return null;
+    const dialogs = bundle.page_state?.open_dialogs ?? [];
+    const qualifying = dialogs.filter(isBlocking);
+    if (qualifying.length === 0) return null;
+
+    const first = qualifying[0];
+    const name = first.name || first.selector;
+    const pct = Math.round(first.viewport_coverage * 100);
+    const countNote = qualifying.length > 1 ? ` (${qualifying.length} such elements were present)` : '';
+    return {
+      code: 'blocking_overlay',
+      summary: `an open dialog "${name}" (covering ${pct}% of the viewport) was present at failure time and may be blocking or covering the target element${countNote}.`,
+      evidence: { open_dialogs: qualifying },
+      suggestion: 'Add a step that dismisses it (click its close/accept button) before this one — mark the step optional if the dialog only sometimes appears. Inspect it with: verfix show --dom.',
+    };
+  },
+};
+
 // Console errors plausibly explain missing/broken UI; for other failure
 // classes the correlation is noise, not signal (a network_failure already
 // names its own cause).
@@ -195,9 +241,10 @@ const priorConsoleErrorsAnalyzer: Analyzer = {
 };
 
 // Priority order: the first finding is also rendered into fix_hint.
-// stale_session first — it names a root cause; prior_console_errors is a
-// broader correlation.
-const ANALYZERS: Analyzer[] = [staleSessionAnalyzer, priorConsoleErrorsAnalyzer];
+// stale_session first — it names a root cause; blocking_overlay is the
+// strongest proximate cause (something concrete was covering the page at the
+// exact moment of failure); prior_console_errors is the broadest correlation.
+const ANALYZERS: Analyzer[] = [staleSessionAnalyzer, blockingOverlayAnalyzer, priorConsoleErrorsAnalyzer];
 
 const MAX_FINDINGS = 3;
 
@@ -221,4 +268,19 @@ export function appendTopFinding(hint: string, findings: Finding[]): string {
   if (findings.length === 0) return hint;
   const top = findings[0];
   return `${hint} Note: ${top.summary}${top.suggestion ? ` ${top.suggestion}` : ''}`;
+}
+
+// A step failure (click blocked, selector missing) has no failed
+// AssertionResult to carry a `failure_type` — infer one from the crash
+// message so the analyzer pipeline can still run on it. Mirrors
+// inferFailureTypeFromError in cli/src/index.ts: selector-miss prefixes come
+// from waitForTarget in browser/flow-executor.ts; anything else that smells
+// like a wait/timeout is `timeout`; everything else falls back to the
+// generic `assertion_failed`.
+export function inferFailureTypeFromCrash(error: string): FailureType {
+  if (error.startsWith('selector_not_found:')) return 'selector_not_found';
+  if (error.startsWith('selector_not_visible:')) return 'selector_not_visible';
+  if (/waiting for locator\(/i.test(error)) return 'selector_not_found';
+  if (/timeout|timed out|waiting for/i.test(error)) return 'timeout';
+  return 'assertion_failed';
 }
