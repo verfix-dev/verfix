@@ -1,0 +1,14 @@
+{
+  "id": "console-error-breaks-render",
+  "description": "A typo in the cart's fetch URL (/api/itmes) 404s, the item list never renders, and the Checkout button inside it never appears.",
+  "category": "console_error_cascade",
+  "expected_failure_type": "selector_not_found",
+  "expected_finding": "prior_console_errors",
+  "fix_scope": "source",
+  "max_iterations": 5,
+  "invariants": [
+    { "file": "verfix.config.json", "must_not_change": true },
+    { "file": "app/server.js", "must_contain": "/api/items" },
+    { "file": "app/server.js", "must_not_contain": "/api/itmes" }
+  ]
+}

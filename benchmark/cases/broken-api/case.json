@@ -1,0 +1,13 @@
+{
+  "id": "broken-api",
+  "description": "The order handler was refactored to read a field the client never sends, so every order 500s and the flow's network_request_success assertion on /api/order fails.",
+  "category": "api_regression",
+  "expected_failure_type": "network_failure",
+  "expected_finding": null,
+  "fix_scope": "source",
+  "max_iterations": 5,
+  "invariants": [
+    { "file": "verfix.config.json", "must_not_change": true },
+    { "file": "app/server.js", "must_not_contain": "body\\.item" }
+  ]
+}

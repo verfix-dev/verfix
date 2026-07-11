@@ -10,6 +10,19 @@ in how many verify iterations.
 **Loop-closure rate** = closed cases / total cases. Every `fix_hint`/
 `findings` change (see #63) is judged by whether it moves this number.
 
+## Cases
+
+| id | category | expected failure type | expected finding | fix scope |
+|---|---|---|---|---|
+| `drifted-selector` | `selector_drift` | `selector_not_found` | — | config |
+| `occluding-modal` | `occluding_overlay` | `selector_not_found` | `blocking_overlay` | config |
+| `stale-session` | `stale_session` | `selector_not_visible` | `stale_session` | config |
+| `console-error-breaks-render` | `console_error_cascade` | `selector_not_found` | `prior_console_errors` | source |
+| `changed-route` | `route_change` | `url_mismatch` | — | config |
+| `slow-endpoint` | `slow_endpoint` | `timeout` | — | config |
+| `broken-api` | `api_regression` | `network_failure` | — | source |
+| `text-changed` | `copy_change` | `text_mismatch` | — | config |
+
 ## Running it
 
 ```bash

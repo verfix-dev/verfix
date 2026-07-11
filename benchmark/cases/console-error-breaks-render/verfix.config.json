@@ -1,0 +1,17 @@
+{
+  "baseUrl": "http://127.0.0.1:3951",
+  "mode": "strict",
+  "flows": [
+    {
+      "id": "checkout",
+      "name": "Cart items render with a checkout button",
+      "steps": [
+        { "action": "navigate", "url": "/" },
+        { "action": "wait_for_selector", "selector": "[data-testid=\"checkout\"]", "timeout": 2000 }
+      ],
+      "assertions": [
+        { "type": "selector_visible", "selector": "[data-testid=\"checkout\"]" }
+      ]
+    }
+  ]
+}

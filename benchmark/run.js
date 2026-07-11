@@ -197,9 +197,7 @@ async function runCase(caseId, agent, keep) {
 
   const port = await getFreePort();
   const appServerPath = path.join(workspaceDir, 'app', 'server.js');
-  const appProcess = startApp(appServerPath, port);
-  let appStderr = '';
-  appProcess.stderr.on('data', d => { appStderr += d; });
+  let appProcess = startApp(appServerPath, port);
 
   const record = {
     id: caseId,
@@ -237,6 +235,16 @@ async function runCase(caseId, agent, keep) {
 
       if (agent === 'null') break; // no point re-running an unchanged workspace
       await runAdapter(agent, workspaceDir, caseId, iteration, lastResult);
+
+      // A source-scope fix edits app/server.js on disk, but the running app
+      // process is a separate Node process that already loaded the old code
+      // into memory — it never picks up the edit without a restart. Restart
+      // unconditionally (cheap, and config-scope fixes don't touch app/ so
+      // this is a no-op for them behaviorally) so any adapter that patches
+      // the app is actually exercised on the next iteration.
+      appProcess.kill('SIGKILL');
+      appProcess = startApp(appServerPath, port);
+      await waitForPort(port, 10000);
     }
   } finally {
     appProcess.kill('SIGKILL');

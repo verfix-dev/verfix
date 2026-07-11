@@ -1,0 +1,17 @@
+{
+  "baseUrl": "http://127.0.0.1:3953",
+  "mode": "strict",
+  "flows": [
+    {
+      "id": "report",
+      "name": "Report loads and renders",
+      "steps": [
+        { "action": "navigate", "url": "/" },
+        { "action": "wait_for_network_idle", "timeout": 15000 }
+      ],
+      "assertions": [
+        { "type": "text_visible", "value": "Report ready" }
+      ]
+    }
+  ]
+}

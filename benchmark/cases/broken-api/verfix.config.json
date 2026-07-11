@@ -1,0 +1,17 @@
+{
+  "baseUrl": "http://127.0.0.1:3954",
+  "mode": "strict",
+  "flows": [
+    {
+      "id": "place-order",
+      "name": "Placing an order succeeds",
+      "steps": [
+        { "action": "navigate", "url": "/" },
+        { "action": "click", "selector": "[data-testid=\"place-order\"]" }
+      ],
+      "assertions": [
+        { "type": "network_request_success", "value": "/api/order" }
+      ]
+    }
+  ]
+}
