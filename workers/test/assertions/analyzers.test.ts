@@ -17,6 +17,7 @@
 import assert from 'assert';
 import { appendTopFinding, EvidenceBundle, isThirdPartySource, runAnalyzers } from '../../src/assertions/analyzers';
 import { FailureType, NetworkRequest } from '../../src/assertions/types';
+import { OverlayFact, PageState } from '../../src/artifacts/page-state';
 
 function req(overrides: Partial<NetworkRequest>): NetworkRequest {
   return {
@@ -260,6 +261,117 @@ function line(overrides: Partial<ConsoleLine>): ConsoleLine {
   assert.ok(findings[0].summary.includes('may be related'));
   assert.strictEqual((findings[0].evidence as any).third_party_count, 1);
   console.log('PASS: mixed sources inline the first first-party error');
+}
+
+// ─── blocking_overlay: an open dialog/overlay at failure time ───────────────
+
+function dialog(overrides: Partial<OverlayFact>): OverlayFact {
+  return { kind: 'dialog', selector: 'div#modal', name: 'Welcome to Cleara', viewport_coverage: 1, ...overrides };
+}
+
+function pageState(open_dialogs: OverlayFact[]): PageState {
+  return {
+    url: 'http://localhost:3000/checkout',
+    title: 'Checkout',
+    open_dialogs,
+    visible_elements: [],
+    visible_elements_truncated: false,
+    prior_console_errors: 0,
+    prior_failed_requests: 0,
+  };
+}
+
+// Positive case, once per trigger failure type.
+for (const failure_type of ['selector_not_found', 'selector_not_visible', 'timeout'] as FailureType[]) {
+  const findings = runAnalyzers(bundle({
+    failure_type,
+    page_state: pageState([dialog({})]),
+  }));
+  assert.strictEqual(findings.length, 1, `expected a blocking_overlay finding for ${failure_type}`);
+  assert.strictEqual(findings[0].code, 'blocking_overlay');
+  assert.ok(findings[0].summary.includes('Welcome to Cleara'), `overlay name should land in the summary, got: ${findings[0].summary}`);
+  assert.ok(findings[0].summary.includes('100%'), `coverage should be rendered as a percentage, got: ${findings[0].summary}`);
+  const hint = appendTopFinding(BASE_HINT, findings);
+  assert.ok(hint.includes('Welcome to Cleara'), 'fix_hint carries the overlay name');
+  assert.ok(hint.includes('verfix show --dom'), 'fix_hint points at the DOM inspection command');
+  console.log(`PASS: blocking_overlay finding emitted for ${failure_type} with overlay name in summary`);
+}
+
+// A full-viewport `kind: 'overlay'` fact always qualifies (no name — falls
+// back to the selector descriptor).
+{
+  const findings = runAnalyzers(bundle({
+    failure_type: 'selector_not_found',
+    page_state: pageState([{ kind: 'overlay', selector: 'div.cookie-wall', name: '', viewport_coverage: 0.95 }]),
+  }));
+  assert.strictEqual(findings.length, 1);
+  assert.ok(findings[0].summary.includes('div.cookie-wall'), `unnamed overlay should fall back to its selector, got: ${findings[0].summary}`);
+  assert.ok(findings[0].summary.includes('95%'));
+  console.log('PASS: unnamed kind:overlay fact falls back to its selector descriptor');
+}
+
+// Negative: page_state absent entirely.
+{
+  const findings = runAnalyzers(bundle({ failure_type: 'selector_not_found' }));
+  assert.strictEqual(findings.length, 0, 'no page_state -> no findings');
+  console.log('PASS: absent page_state yields no blocking_overlay finding');
+}
+
+// Negative: page_state present but no open dialogs.
+{
+  const findings = runAnalyzers(bundle({
+    failure_type: 'timeout',
+    page_state: pageState([]),
+  }));
+  assert.strictEqual(findings.length, 0, 'empty open_dialogs -> no findings');
+  console.log('PASS: empty open_dialogs yields no blocking_overlay finding');
+}
+
+// Negative: failure type not in the trigger set.
+for (const failure_type of ['console_error', 'network_failure'] as FailureType[]) {
+  const findings = runAnalyzers(bundle({
+    failure_type,
+    page_state: pageState([dialog({})]),
+  }));
+  assert.strictEqual(findings.length, 0, `${failure_type} is not a trigger type -> no findings`);
+  console.log(`PASS: ${failure_type} failure type skips blocking_overlay despite an open dialog`);
+}
+
+// Negative: precision over recall — a small role=dialog toast must stay silent.
+{
+  const findings = runAnalyzers(bundle({
+    failure_type: 'selector_not_found',
+    page_state: pageState([dialog({ name: 'Saved!', viewport_coverage: 0.05 })]),
+  }));
+  assert.strictEqual(findings.length, 0, 'a tiny dialog (5% coverage) must not qualify as blocking');
+  console.log('PASS: small kind:dialog fact below the coverage threshold stays silent');
+}
+
+// Ranking: stale_session still outranks blocking_overlay when both fire.
+{
+  const findings = runAnalyzers(bundle({
+    failure_type: 'selector_not_found',
+    state_restored: true,
+    network_requests: [req({ url: 'http://localhost:3000/api/auth/refresh', method: 'POST', status: 401 })],
+    page_state: pageState([dialog({})]),
+  }));
+  assert.strictEqual(findings.length, 2, 'both analyzers fire');
+  assert.strictEqual(findings[0].code, 'stale_session', 'root-cause analyzer still ranks first');
+  assert.strictEqual(findings[1].code, 'blocking_overlay');
+  console.log('PASS: stale_session outranks blocking_overlay when both fire');
+}
+
+// Ranking: blocking_overlay outranks prior_console_errors.
+{
+  const findings = runAnalyzers(bundle({
+    failure_type: 'selector_not_found',
+    page_state: pageState([dialog({})]),
+    console_logs: [line({ text: 'Failed to fetch' })],
+  }));
+  assert.strictEqual(findings.length, 2, 'both analyzers fire');
+  assert.strictEqual(findings[0].code, 'blocking_overlay', 'proximate cause outranks the broader correlation');
+  assert.strictEqual(findings[1].code, 'prior_console_errors');
+  console.log('PASS: blocking_overlay outranks prior_console_errors');
 }
 
 // ─── Ordering: stale_session outranks prior_console_errors in fix_hint ──────
