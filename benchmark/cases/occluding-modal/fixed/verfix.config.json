@@ -1,0 +1,18 @@
+{
+  "baseUrl": "http://127.0.0.1:3949",
+  "mode": "strict",
+  "flows": [
+    {
+      "id": "checkout",
+      "name": "Checkout button records the purchase",
+      "steps": [
+        { "action": "navigate", "url": "/" },
+        { "action": "click", "selector": "[data-testid=\"dismiss-whatsnew\"]", "optional": true },
+        { "action": "click", "selector": "[data-testid=\"checkout\"]", "timeout": 1500 }
+      ],
+      "assertions": [
+        { "type": "text_visible", "value": "Checked out" }
+      ]
+    }
+  ]
+}
