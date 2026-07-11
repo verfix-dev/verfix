@@ -2298,7 +2298,11 @@ function stripAnsi(text: string): string {
 
 type FailureFinding = { code: string; summary: string; evidence?: Record<string, unknown>; suggestion?: string };
 
-function buildFailures(result: any): Array<{ type: string; flow?: string; assertion?: string; selector?: string; source_url?: string; detail?: string; fix_hint?: string; findings?: FailureFinding[] }> {
+// Cause-agnostic facts from the live page at failure time (engine's PageState).
+// Passed through opaquely — the engine owns the shape.
+type FailurePageState = Record<string, unknown>;
+
+function buildFailures(result: any): Array<{ type: string; flow?: string; assertion?: string; selector?: string; source_url?: string; detail?: string; fix_hint?: string; findings?: FailureFinding[]; page_state?: FailurePageState }> {
   const failures = (result.assertions || [])
     .filter((a: any) => !a.passed)
     .map((a: any) => ({
@@ -2314,6 +2318,9 @@ function buildFailures(result: any): Array<{ type: string; flow?: string; assert
       // Deterministic post-failure analysis from the engine; absent when no
       // analyzer matched. Additive contract field.
       findings: a.findings,
+      // What was true on the live page at failure time (open dialogs, visible
+      // elements, prior anomaly counts). Additive contract field.
+      page_state: a.page_state,
     }));
 
   if (failures.length === 0 && result.error) {
@@ -2324,6 +2331,9 @@ function buildFailures(result: any): Array<{ type: string; flow?: string; assert
       selector: extractSelector(detail),
       detail,
       fix_hint: renderFixHint(type),
+      // Step failures carry facts at the result's top level (no failed
+      // assertion exists to attach them to).
+      page_state: result.page_state,
     });
   }
 

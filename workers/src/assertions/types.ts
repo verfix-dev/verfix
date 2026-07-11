@@ -49,6 +49,10 @@ export interface AssertionResult {
   // only when at least one analyzer matched; priority-ordered, first one is
   // also rendered into fix_hint.
   findings?: import('./analyzers').Finding[];
+  // Cause-agnostic facts about the live page at failure time (see
+  // artifacts/page-state.ts). Additive: present only on failed assertions,
+  // and only when collection succeeded.
+  page_state?: import('../artifacts/page-state').PageState;
   // Identifier of the flow these assertions belong to. Absent for top-level /
   // default (page_loaded / no_console_errors) assertions. Used by the dashboard
   // assertion tab to group results by flow.
@@ -177,10 +181,15 @@ export interface ExecutionResult {
     console_log?: string;
     network_log?: string;
     dom_snapshot?: string;
+    page_state?: string;
   };
   console_logs: ConsoleLine[];
   network_requests: NetworkRequest[];
   error?: string;
+  // Failure-time page facts for runs that fail OUTSIDE assertions (a step
+  // threw): there is no failed AssertionResult to carry them, so they ride
+  // at the top level. Assertion failures carry their own page_state instead.
+  page_state?: import('../artifacts/page-state').PageState;
   created_at: string;
   completed_at?: string;
   ai_summary?: AISummary;

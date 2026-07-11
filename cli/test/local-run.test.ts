@@ -55,12 +55,28 @@ const PRIVATE_HTML = `<!doctype html>
   </body>
 </html>`;
 
+// The field-review scenario behind #55/#59: the click target exists and the
+// selector is correct, but a viewport-covering dialog intercepts the click.
+// The failure JSON must carry page_state facts naming the open dialog.
+const BLOCKED_HTML = `<!doctype html>
+<html>
+  <head><title>Blocked</title></head>
+  <body>
+    <button data-testid="buy">Buy now</button>
+    <div role="dialog" aria-label="Welcome to Cleara" style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:1000;">
+      <h2>Welcome to Cleara</h2>
+      <button type="button">Get started</button>
+    </div>
+  </body>
+</html>`;
+
 async function main() {
   // ── Arrange: throwaway app + temp project dir ──
   const server = http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/html' });
     if (req.url?.startsWith('/login')) return res.end(LOGIN_HTML);
     if (req.url?.startsWith('/private')) return res.end(PRIVATE_HTML);
+    if (req.url?.startsWith('/blocked')) return res.end(BLOCKED_HTML);
     res.end(PAGE_HTML);
   });
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -131,6 +147,19 @@ async function main() {
           { type: 'text_visible', value: 'irrelevant — the step above fails first' },
         ],
       },
+      {
+        // The selector is CORRECT but a full-viewport dialog intercepts the
+        // click — the failure must carry page_state facts naming the dialog.
+        id: 'blocked-by-dialog',
+        clearState: true,
+        steps: [
+          { action: 'navigate', url: '/blocked' },
+          { action: 'click', selector: '[data-testid="buy"]', timeout: 1500 },
+        ],
+        assertions: [
+          { type: 'text_visible', value: 'irrelevant — the step above fails first' },
+        ],
+      },
     ],
   };
   fs.writeFileSync(path.join(projectDir, 'verfix.config.json'), JSON.stringify(config, null, 2));
@@ -164,6 +193,7 @@ async function main() {
   // Before 'private': the probe below reads the NEWEST run's DOM snapshot and
   // expects the /private page.
   const resDrifted = await runCli('drifted-selector');
+  const resBlocked = await runCli('blocked-by-dialog');
   const resPrivate = await runCli('private');
   server.close();
 
@@ -268,7 +298,25 @@ async function main() {
     assert.ok(!/\u001b/.test(resDrifted.stdout), 'no ANSI escape codes in JSON output');
     console.log('✓ drifted step selector reports selector_not_found with the selector, config-first hint, no ANSI');
 
-    console.log('\n11 passed, 0 failed\n');
+    assert.strictEqual(resBlocked.status, 1, `blocked run should exit 1.\nstdout: ${resBlocked.stdout}\nstderr: ${resBlocked.stderr}`);
+    const blockedJson = JSON.parse(resBlocked.stdout);
+    assert.strictEqual(blockedJson.passed, false);
+    const blockedState = blockedJson.failures[0]?.page_state;
+    assert.ok(blockedState, `step failure must carry page_state facts, got: ${JSON.stringify(blockedJson.failures)}`);
+    assert.ok(
+      blockedState.open_dialogs.some((d: any) => d.name.includes('Welcome to Cleara')),
+      `page_state must name the open dialog, got: ${JSON.stringify(blockedState.open_dialogs)}`,
+    );
+    assert.ok(blockedState.url.includes('/blocked'), 'page_state carries the failure-time URL');
+    assert.strictEqual(typeof blockedState.prior_console_errors, 'number');
+    assert.strictEqual(typeof blockedState.prior_failed_requests, 'number');
+    const persistedBlocked = JSON.parse(
+      fs.readFileSync(path.join(projectDir, '.verfix', 'runs', `${blockedJson.execution_id}.json`), 'utf-8'));
+    assert.ok(persistedBlocked.artifacts?.page_state, 'page_state artifact path recorded');
+    assert.ok(fs.existsSync(persistedBlocked.artifacts.page_state), 'page_state facts persisted as a JSON artifact');
+    console.log('✓ dialog-blocked click carries page_state facts naming the dialog; facts persisted as artifact');
+
+    console.log('\n12 passed, 0 failed\n');
   } finally {
     fs.rmSync(projectDir, { recursive: true, force: true });
   }

@@ -39,6 +39,16 @@ export type VerifyFailure = {
   fix_hint?: string;
   /** Deterministic post-failure analysis; present only when an analyzer matched. */
   findings?: Array<{ code: string; summary: string; evidence?: Record<string, unknown>; suggestion?: string }>;
+  /** Cause-agnostic facts from the live page at failure time. */
+  page_state?: {
+    url: string;
+    title: string;
+    open_dialogs: Array<{ kind: 'dialog' | 'overlay'; selector: string; name: string; viewport_coverage: number }>;
+    visible_elements: Array<{ role: string; name: string }>;
+    visible_elements_truncated: boolean;
+    prior_console_errors: number;
+    prior_failed_requests: number;
+  };
 };
 
 export type VerifyResult = {

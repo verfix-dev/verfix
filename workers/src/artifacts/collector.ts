@@ -2,6 +2,7 @@ import { Page, BrowserContext } from 'playwright';
 import * as path from 'path';
 import * as fs from 'fs';
 import { AssertionResult, ConsoleLine, NetworkRequest } from '../assertions/types';
+import { PageState } from './page-state';
 
 export interface CollectedArtifacts {
   screenshot?: string;
@@ -11,6 +12,7 @@ export interface CollectedArtifacts {
   console_log?: string;
   network_log?: string;
   dom_snapshot?: string;
+  page_state?: string;
 }
 
 export async function collectArtifacts(
@@ -21,8 +23,21 @@ export async function collectArtifacts(
   consoleLogs: ConsoleLine[],
   networkRequests: NetworkRequest[],
   failed: boolean,
+  pageState?: PageState | null,
 ): Promise<CollectedArtifacts> {
   const artifacts: CollectedArtifacts = {};
+
+  // Failure-time page facts (#55) — persisted next to the console/network
+  // logs so `verfix show` can display them after the run.
+  if (pageState) {
+    try {
+      const pageStatePath = path.join(artifactsDir, `${executionId}_page_state.json`);
+      fs.writeFileSync(pageStatePath, JSON.stringify(pageState, null, 2));
+      artifacts.page_state = pageStatePath;
+    } catch (e) {
+      console.warn('Could not write page-state facts:', e);
+    }
+  }
 
   // Screenshot
   try {
