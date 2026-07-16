@@ -122,9 +122,11 @@ When Redis rejected requests during connection handshake or transient disconnect
 
 ---
 
-## 4. Verification & Health Check Commands
+## 4. Verification & Health Check Commands (historical)
 
-To verify that Hybrid Mode is operating correctly on host machines:
+These commands are kept for historical reference only — Hybrid Mode has been
+removed, so they no longer apply to the current server-mode CLI. They were
+used to verify that Hybrid Mode was operating correctly on host machines:
 
 1. **Check Runtime Status**:
    ```bash

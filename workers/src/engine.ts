@@ -13,6 +13,7 @@ import { runAssertions } from './assertions/engine';
 import { EvidenceBundle, inferFailureTypeFromCrash, runAnalyzers } from './assertions/analyzers';
 import { collectArtifacts } from './artifacts/collector';
 import { collectPageState } from './artifacts/page-state';
+import { collectSelectorContext, extractSelectorFromCrash } from './assertions/selector-suggestions';
 import { EventTracker } from './artifacts/event-tracker';
 import { executeFlow } from './browser/flow-executor';
 import { waitForStableDOM } from './reliability/retry';
@@ -507,12 +508,22 @@ async function execute(
     // so `verfix show` works on a crashed run, not just completed ones.
     let crashArtifacts: ExecutionResult['artifacts'] = {};
     let crashPageState: ExecutionResult['page_state'];
+    let crashSelectorContext: ExecutionResult['selector_context'];
     if (page && context && !cancel.timedOut) {
       try {
         // A step failure (click blocked, selector missing) lands here with no
         // failed AssertionResult to carry facts — probe the still-live page
         // now, before artifact collection stops the trace.
         crashPageState = await collectPageState(page, consoleLogs, networkRequests, jobConsoleExcludes(data)) ?? undefined;
+        // Selector-step crashes additionally get deterministic enrichment
+        // (#65): DOM snippet + closest-matching selectors from the live page.
+        const crashType = inferFailureTypeFromCrash(message);
+        if (crashType === 'selector_not_found' || crashType === 'selector_not_visible') {
+          const failedSelector = extractSelectorFromCrash(message);
+          if (failedSelector) {
+            crashSelectorContext = await collectSelectorContext(page, failedSelector) ?? undefined;
+          }
+        }
         crashArtifacts = await collectArtifacts(
           page, context, artifactsDir, data.id, consoleLogs, networkRequests, true, crashPageState,
         );
@@ -563,6 +574,7 @@ async function execute(
       error: message,
       page_state: crashPageState,
       findings: crashFindings,
+      selector_context: crashSelectorContext,
       created_at: new Date(startTime).toISOString(),
       completed_at: new Date().toISOString(),
     };

@@ -9,7 +9,7 @@ You can instruct Cursor to use Verfix to verify its own changes.
 **Cursor Prompt:**
 > "I need you to implement a new login flow. Once you write the code, create a Verfix payload in `verify-login.json` and execute `npx verfix run verify-login.json`. If it fails, read the structured output, fix the code, and try again."
 
-## Claude Code / LangGraph
+## Claude Code / TypeScript SDK
 
 Agents can interact directly with the Verfix SDK.
 

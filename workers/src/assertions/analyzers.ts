@@ -280,6 +280,14 @@ export function appendTopFinding(hint: string, findings: Finding[]): string {
 export function inferFailureTypeFromCrash(error: string): FailureType {
   if (error.startsWith('selector_not_found:')) return 'selector_not_found';
   if (error.startsWith('selector_not_visible:')) return 'selector_not_visible';
+  // Actionability timeout: Playwright's click/fill call log starts with the
+  // same "waiting for locator(...)" line whether or not the locator resolved,
+  // so check for resolution/actionability text first. "locator resolved to"
+  // means the selector matched an element — the click was blocked (overlay
+  // intercepting pointer events, unstable, off-viewport), not unmatched.
+  if (/intercepts pointer events|locator resolved to|element is not stable|element is outside of the viewport/i.test(error)) {
+    return 'selector_not_visible';
+  }
   if (/waiting for locator\(/i.test(error)) return 'selector_not_found';
   if (/timeout|timed out|waiting for/i.test(error)) return 'timeout';
   return 'assertion_failed';

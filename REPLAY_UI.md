@@ -214,9 +214,12 @@ Playwright's `page.screenshot()` is not instant — it can take 100-400ms on com
 
 ## Future Roadmap
 
-- [ ] **Live streaming** — Push events via WebSocket as they happen, enabling a live replay view during execution
+Live streaming (WebSocket push) and a DOM diff viewer were considered here but
+are an explicit non-goal per `ROADMAP.md` ("Real-time streaming, WebSockets,
+execution diffing — observability polish for a dashboard nobody uses yet") —
+not currently planned.
+
 - [ ] **Event filtering** — Filter the timeline by event type (e.g., show only `ai_reasoning` events)
 - [ ] **Scrubbing** — A horizontal progress bar to scrub through the timeline by time percentage
-- [ ] **DOM Diff viewer** — Show a before/after diff of the DOM between two selected events
 - [ ] **User annotations** — Add thumbs up/down to AI reasoning events for fine-tuning feedback
 - [ ] **Strict mode captures** — Optional `CAPTURE_ALL=true` env flag to enable per-step screenshots even in strict mode

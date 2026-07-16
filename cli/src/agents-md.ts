@@ -842,6 +842,18 @@ evidence, the \`evidence\` itself, and often a \`suggestion\`. **Check
 cause** — it's already looked at the evidence you'd otherwise have to pull
 via \`verfix show --console\`/\`--network\`.
 
+#### \`suggested_selectors\` / \`dom_snippet\` — selector failures only
+
+A \`selector_not_found\`/\`selector_not_visible\` failure may additionally carry
+\`suggested_selectors\` — up to 3 ready-to-paste candidate selectors from the
+failure-time DOM, ranked by deterministic text/role/attribute similarity to
+the failed selector (no AI; e.g. \`#username\` when the flow said
+\`#user-name\`), each with a \`score\` and a \`reason\` — and \`dom_snippet\`,
+truncated HTML around where the selector was expected to match. When a
+high-confidence suggestion exists it is also named in \`fix_hint\`. Prefer
+fixing the flow's selector to one of these candidates over re-deriving it
+from the DOM snapshot; both fields are absent when nothing plausible matched.
+
 #### Diagnosing a failure
 
 A reliable escalation ladder for any failure cause — climb only as far as you need:

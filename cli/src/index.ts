@@ -2298,6 +2298,19 @@ function stripAnsi(text: string): string {
 
 type FailureFinding = { code: string; summary: string; evidence?: Record<string, unknown>; suggestion?: string };
 
+// Selector-failure enrichment from the engine (#65): deterministic
+// closest-matching selectors + a DOM snippet around the expected location.
+type FailureSuggestion = { selector: string; score: number; reason: string };
+
+// Mirrors appendTopSuggestion in @verfix/engine's selector-suggestions.ts
+// (inlined for the same reason as appendTopFinding below). The 0.8 confidence
+// gate must stay in sync with the engine's HIGH_CONFIDENCE.
+function appendTopSuggestion(hint: string, suggestions: FailureSuggestion[] | undefined): string {
+  const top = suggestions?.[0];
+  if (!top || top.score < 0.8) return hint;
+  return `${hint} Closest match in the failure-time DOM: ${top.selector} (${top.reason}).`;
+}
+
 // Mirrors appendTopFinding in @verfix/engine's assertions/analyzers.ts. The
 // engine renders findings into fix_hint for assertion failures; step (crash)
 // failures classify their type and render their base fix_hint here in the
@@ -2324,7 +2337,7 @@ function slimPageState(ps: any): FailurePageState | undefined {
   return slim;
 }
 
-function buildFailures(result: any): Array<{ type: string; flow?: string; assertion?: string; selector?: string; source_url?: string; detail?: string; fix_hint?: string; findings?: FailureFinding[]; page_state?: FailurePageState }> {
+function buildFailures(result: any): Array<{ type: string; flow?: string; assertion?: string; selector?: string; source_url?: string; detail?: string; fix_hint?: string; findings?: FailureFinding[]; page_state?: FailurePageState; suggested_selectors?: FailureSuggestion[]; dom_snippet?: string }> {
   const failures = (result.assertions || [])
     .filter((a: any) => !a.passed)
     .map((a: any) => ({
@@ -2343,14 +2356,21 @@ function buildFailures(result: any): Array<{ type: string; flow?: string; assert
       // What was true on the live page at failure time (open dialogs, prior
       // anomaly counts). Additive contract field.
       page_state: slimPageState(a.page_state),
+      // Selector failures only (#65): closest-matching selectors from the
+      // failure-time DOM + a snippet around the expected location, computed
+      // deterministically by the engine. Additive contract fields.
+      suggested_selectors: a.details?.suggested_selectors,
+      dom_snippet: a.details?.dom_snippet,
     }));
 
   if (failures.length === 0 && result.error) {
     const detail = stripAnsi(result.error);
     const type = inferFailureTypeFromError(detail);
     let fix_hint = renderFixHint(type);
-    // Step failures (crash path) compute findings in the engine, not here —
-    // render the top one into fix_hint the same way runAssertions does.
+    // Step failures (crash path) compute enrichment in the engine, not here —
+    // render the top suggestion/finding into fix_hint the same way
+    // runAssertions does (suggestion first, so the finding note stays last).
+    fix_hint = appendTopSuggestion(fix_hint, result.selector_context?.suggestions);
     if (result.findings?.length) fix_hint = appendTopFinding(fix_hint, result.findings);
     failures.push({
       type,
@@ -2361,6 +2381,10 @@ function buildFailures(result: any): Array<{ type: string; flow?: string; assert
       // assertion exists to attach them to).
       findings: result.findings,
       page_state: slimPageState(result.page_state),
+      suggested_selectors: result.selector_context?.suggestions?.length
+        ? result.selector_context.suggestions
+        : undefined,
+      dom_snippet: result.selector_context?.dom_snippet,
     });
   }
 
@@ -2373,6 +2397,14 @@ function buildFailures(result: any): Array<{ type: string; flow?: string; assert
 function inferFailureTypeFromError(error: string): string {
   if (error.startsWith('selector_not_found:')) return 'selector_not_found';
   if (error.startsWith('selector_not_visible:')) return 'selector_not_visible';
+  // Actionability timeout: Playwright's click/fill call log starts with the
+  // same "waiting for locator(...)" line whether or not the locator resolved,
+  // so check for resolution/actionability text first. "locator resolved to"
+  // means the selector matched an element — the click was blocked (overlay
+  // intercepting pointer events, unstable, off-viewport), not unmatched.
+  if (/intercepts pointer events|locator resolved to|element is not stable|element is outside of the viewport/i.test(error)) {
+    return 'selector_not_visible';
+  }
   // Older engine versions surface a step's locator wait as a raw Playwright
   // timeout — still a selector miss, not a timing problem.
   if (/waiting for locator\(/i.test(error)) return 'selector_not_found';
@@ -2399,7 +2431,7 @@ function renderFixHint(type: string): string {
     case 'selector_not_found':
       return 'Selector did not match any element. Fix the selector in verfix.config.json to match the app source (verfix probe -s "<css>" dry-runs a selector against the last run\'s DOM in ~1s) — do not edit app source to satisfy it.';
     case 'selector_not_visible':
-      return 'Selector matches an element that never became visible. Check conditional rendering/CSS state, or add a wait_for_selector step for the state that reveals it.';
+      return 'Selector matches an element that never became visible or clickable — hidden by CSS/conditional rendering, or covered by an overlay. The selector is correct; wait for or dismiss the blocking state instead of rewriting it.';
     case 'timeout':
       return 'Operation timed out. Increase timeout or wait for network/DOM to settle before retrying.';
     default:

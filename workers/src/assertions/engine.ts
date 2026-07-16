@@ -5,6 +5,7 @@ import { appendTopFinding, Finding, isThirdPartySource, runAnalyzers } from './a
 import { resolveWithHealing } from '../ai/self-healing';
 import { EventTracker } from '../artifacts/event-tracker';
 import { collectPageState, PageState } from '../artifacts/page-state';
+import { appendTopSuggestion, collectSelectorContext } from './selector-suggestions';
 
 // Utility to time an async assertion
 async function timed(fn: () => Promise<{ passed: boolean; details?: Record<string, unknown>; error?: string }>): Promise<{ passed: boolean; duration_ms: number; details?: Record<string, unknown>; error?: string }> {
@@ -84,7 +85,18 @@ export async function runAssertions(
           try {
             const locator = page.locator(selector);
             const visible = await locator.isVisible({ timeout: assertion.timeout || 5000 });
-            return { passed: visible, details: { selector } };
+            if (visible) return { passed: true, details: { selector } };
+            // isVisible() is false for both "matches nothing" and "matches but
+            // hidden" — distinguish them so the failure type tells the truth.
+            let matches = 0;
+            try { matches = await locator.count(); } catch { /* page gone — report not found */ }
+            return {
+              passed: false,
+              details: { selector, matches },
+              error: matches > 0
+                ? `Selector matches ${matches} element(s) but none is visible`
+                : 'Selector not found — did not match any element in the DOM',
+            };
           } catch (e: any) {
             return { passed: false, error: e.message, details: { selector } };
           }
@@ -251,6 +263,20 @@ export async function runAssertions(
         error: result.error,
         details: result.details,
       });
+      // Selector failures get deterministic enrichment (#65): a DOM snippet
+      // around the expected location plus closest-matching candidate
+      // selectors from the failure-time DOM. Additive details fields only.
+      if ((failure_type === 'selector_not_found' || failure_type === 'selector_not_visible') && assertion.selector) {
+        const ctx = await collectSelectorContext(page, assertion.selector);
+        if (ctx) {
+          result.details = {
+            ...result.details,
+            ...(ctx.suggestions.length > 0 ? { suggested_selectors: ctx.suggestions } : {}),
+            ...(ctx.dom_snippet ? { dom_snippet: ctx.dom_snippet } : {}),
+          };
+          fix_hint = appendTopSuggestion(fix_hint, ctx.suggestions);
+        }
+      }
       const found = runAnalyzers({
         failure_type,
         assertion,

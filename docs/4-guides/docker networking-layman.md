@@ -10,56 +10,39 @@ When someone in Apartment A (your machine) says "go to my kitchen" (`localhost`)
 
 ---
 
-## One Fix Wasn't Enough
+## The fix, by platform
 
-### Our first fix: container mode
+### Linux: share the network
 
 On Linux, we can make the container share the host's entire network with
 `--network=host`. Then `localhost` inside the container means the host's
 localhost.
 
+### macOS/Windows: an alias
+
 On Mac/Windows, `--network=host` doesn't work — containers run inside a VM.
-Our old fix there was a CLI-managed TCP proxy: the CLI starts a proxy on the
-host that forwards traffic from `host.docker.internal:<port>` to your app's
-`localhost:<port>`. This worked but added complexity.
-
-### Our current fix: host mode (hybrid)
-
-Starting in v0.2.8, on macOS and Windows Verfix uses a **hybrid approach**:
+Instead, the CLI starts the container in bridge mode with
+`--add-host=host.docker.internal:host-gateway`, and the worker (still running
+inside the container, same as on Linux) rewrites `localhost` URLs to
+`host.docker.internal` before navigating.
 
 ```
                     ┌─────────────────────────────────────┐
-                    │     Docker Container (slim image)   │
-  Your machine ──▶ │   API  │  Redis  │  SQLite + slim   │
-                    │   :3611  :6379   + server image      │
-                    └─────────────────────────────────────┘
-
-                    ┌─────────────────────────────────────┐
-                    │       Host Machine (you)            │
-  Your app  :3002 ──▶│  Playwright Workers + Chromium       │
-                    │  talks directly to localhost         │
+                    │           Docker Container           │
+  Your machine ──▶ │   API │ Redis │ Postgres │ Workers   │
+                    │   :3611  :6379            + Chromium  │
                     └─────────────────────────────────────┘
 ```
 
-The slim Docker image contains only the API server, Redis, and SQLite — no
-browser, no Playwright. The CLI extracts the compiled worker files from the
-image, installs Chromium locally, and runs the worker as a regular Node.js
-process on your machine.
-
-The benefits:
-
-- **Native localhost access** — workers reach your dev server directly, no
-  URL rewriting or proxy required.
-- **Faster iteration** — no Docker networking layer between the browser and
-  your app.
-- **Smaller image** — the slim image is significantly smaller than the full
-  image with Chromium bundled.
+There is no separate host-side worker process — the browser always runs
+inside the container, on every platform. Only the URL rewriting (and network
+mode) differs.
 
 ---
 
 ## How the pieces work together
 
-### Container mode (Linux)
+### Linux
 
 ```
 Linux + verfix CLI:
@@ -68,16 +51,13 @@ Linux + verfix CLI:
   → localhost = your localhost ✅
 ```
 
-### Host mode (macOS/Windows)
+### macOS/Windows
 
 ```
 macOS/Windows + verfix CLI:
-  CLI → docker run --network=bridge (slim image, SKIP_WORKERS=1)
-  → API + Redis + SQLite in container
-  → CLI extracts worker files from image to ~/.verfix/worker/
-  → CLI starts Playwright Chromium on host
-  → Local worker connects to container Redis on 127.0.0.1:6379
-  → Worker navigates to localhost:3002 natively ✅
+  CLI → docker run --network=bridge --add-host=host.docker.internal:host-gateway
+  → Worker in container rewrites localhost:PORT → host.docker.internal:PORT
+  → Worker navigates to host.docker.internal:3002, which resolves to your machine ✅
 ```
 
 ### Dashboard submissions
@@ -85,36 +65,16 @@ macOS/Windows + verfix CLI:
 The Dashboard talks directly to the API. When you type `localhost:3002` in the
 dashboard UI:
 
-- **Container mode (Linux):** Worker receives the URL, `--network=host` makes
-  localhost work without rewriting.
-- **Container mode (Mac/Win):** Worker sees it's on bridge mode, rewrites
-  `localhost` → `host.docker.internal`.
-- **Host mode (any OS):** No rewriting needed — workers run on the host and
-  localhost works natively.
+- **Linux:** Worker receives the URL, `--network=host` makes localhost work
+  without rewriting.
+- **macOS/Windows:** Worker rewrites `localhost` → `host.docker.internal`.
 
 ---
 
 ## Summary
 
-```
-                    ┌─────────────────────────────────────────────┐
-                    │              Docker Container (slim)        │
-                    │                                             │
-  You type:           │   API → Redis → SQLite                      │
-  localhost:3002  ──▶ │   (no browser, no workers)                  │
-                      └─────────────────────────────────────────────┘
-
-                    ┌─────────────────────────────────────────────┐
-                    │       Host Machine (native)                 │
-  Your app  :3002 ──▶│  Playwright Workers + Chromium               │
-                      │  direct localhost access                     │
-                      └─────────────────────────────────────────────┘
-
 Who fixes what:
 
-CLI          → Starts the container, extracts worker files, installs browser,
-               spawns local workers, manages their lifecycle
-
-Workers      → Run natively on the host, direct localhost access
-               (no URL rewriting needed)
-```
+CLI     → Starts the container with the correct network mode for your platform
+Worker  → Runs inside the container on every platform; rewrites `localhost`
+          URLs to `host.docker.internal` on macOS/Windows only

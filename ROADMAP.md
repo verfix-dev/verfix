@@ -14,7 +14,7 @@
 
 - [x] Publish the pending release (`verfix` CLI + `@verfix/engine`) to npm; README quickstart must work in a clean directory in under 5 minutes.
 - [x] Dogfood: `testbed/` (zero-dep app + `verfix.config.json` exercising the Phase 2 step surface) runs in this repo's CI (`.github/workflows/ci.yml`) alongside every package test suite and the JSON-purity guard; this also un-broke the smoke test CLAUDE.md/CONTRIBUTING document. Flows for the dashboard itself stay deferred with server mode. Every gap we hit becomes a Phase 2 item — this is how the backlog gets prioritized instead of guessed.
-- [ ] Delete/park drift: docs or code that describe the old hybrid worker mode, `@verifyruntime` scope, or aspirational features (LangGraph wrappers, WebSockets, cross-browser) that we are not building yet. → [#64](https://github.com/verfix-dev/verfix/issues/64)
+- [x] Delete/park drift: docs or code that describe the old hybrid worker mode, `@verifyruntime` scope, or aspirational features (LangGraph wrappers, WebSockets, cross-browser) that we are not building yet. → [#64](https://github.com/verfix-dev/verfix/issues/64)
 
 **Exit condition:** a stranger can `npx verfix init && verfix run` successfully from the README alone.
 

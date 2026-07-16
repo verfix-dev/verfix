@@ -29,6 +29,7 @@ export function inferFailureType(
   switch (assertion.type) {
     case 'selector_visible':
       if (/not found|no node|no element/i.test(errorText)) return 'selector_not_found';
+      if (/none is visible|not visible/i.test(errorText)) return 'selector_not_visible';
       if (!result.error) return 'selector_not_visible';
       return 'selector_not_found';
     case 'text_visible':
