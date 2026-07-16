@@ -345,8 +345,10 @@ After navigating to a URL, LLM analyzes the page and suggests what to verify.
 
 #### Agent SDKs
 - [ ] JavaScript SDK: `await verify({ url, assertions })`
-- [ ] Agent framework integrations (LangGraph, CrewAI, OpenAI Agents)
 - [ ] Cursor / Claude Code integration patterns
+
+(Agent-framework wrappers, e.g. LangGraph, are an explicit non-goal — see
+`ROADMAP.md`'s "Explicit non-goals" section.)
 
 #### Application Instrumentation (Future Moat)
 - [ ] `npm install @verify/runtime` for app developers
