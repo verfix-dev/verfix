@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] - 2026-07-16
+
+### Changed
+- **`@verfix/engine` bumped to `0.2.1`.** CLI dependency bumped to `^0.2.1`.
+
+### Added
+- **Deterministic closest-selector suggestions + DOM snippet on selector failures (#65).** `selector_not_found`/`selector_not_visible` failures now carry additive `details.suggested_selectors` (up to 3 candidates from the failure-time DOM, ranked by Dice bigram similarity over id/testid/name/placeholder/aria-label/text/class, preferring `data-testid` > `id` > `name` > `aria-label` > text) and `details.dom_snippet` (truncated HTML around the expected location). Fully deterministic — no LLM, works in strict mode with no AI key. `fix_hint` names the top candidate when its score clears the 0.8 confidence gate. Also fixes strict-mode `selector_visible` conflating "matched nothing" with "matched but hidden" — a `count()` disambiguation now reports `selector_not_found` vs `selector_not_visible` truthfully.
+- **Framework-aware `init` — detect Next.js/Vite, scaffold a passing starter flow (#73).** `detectFramework()` reads `package.json` dependencies (`next` → `:3000`, `vite` → `:5173`) to fill wizard defaults; an explicit `--base-url`/`VERFIX_BASE_URL` or a live detected port always wins, and unknown frameworks keep prior behavior byte-for-byte. Detected projects get a conservative home-loads flow (navigate `/` + `page_loaded` + `no_console_errors`) that passes on a fresh starter with no hand-editing.
+
+### Fixed
+- **Occluded-click actionability timeouts misclassified as `selector_not_found` (#88).** A click blocked by an overlay resolves the locator (the selector is correct) but times out on actionability; the crash classifier now checks for "locator resolved to"/actionability text first before falling back to a selector-not-found read, and the occluding-modal fix_hint no longer implies a selector fix.
+
+### Docs
+- Deleted hybrid-mode/slim-image drift from docs and corrected explicit ROADMAP non-goals (LangGraph wrappers, WebSocket streaming, DOM diffing) that were listed as planned (#64).
+
 ## [0.4.0] - 2026-07-11
 
 The failure-synthesis release: a field review concluded Verfix "did the capture work correctly — the gap is entirely in synthesis" (raw artifacts, generic hints, nothing connecting them). This release closes that gap with two layers: cause-agnostic facts + queries that work for any failure, and deterministic analyzers for the causes that recur constantly. Everything is additive to the JSON contract; no LLM anywhere in the pipeline.
