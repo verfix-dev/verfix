@@ -1,0 +1,73 @@
+{
+  "agent": "codex exec -s workspace-write --skip-git-repo-check \"Read the Verfix failure JSON on stdin and fix the flow. Do not run verfix, npm, or the app yourself -- a separate harness re-verifies after you exit; just edit the config/source and stop.\"",
+  "cases": [
+    {
+      "id": "broken-api",
+      "closed": true,
+      "iterations": 2,
+      "first_failure_type_ok": true,
+      "expected_finding_ok": null,
+      "invariants_ok": true
+    },
+    {
+      "id": "changed-route",
+      "closed": false,
+      "iterations": 2,
+      "first_failure_type_ok": true,
+      "expected_finding_ok": null,
+      "invariants_ok": false
+    },
+    {
+      "id": "console-error-breaks-render",
+      "closed": true,
+      "iterations": 2,
+      "first_failure_type_ok": true,
+      "expected_finding_ok": true,
+      "invariants_ok": true
+    },
+    {
+      "id": "drifted-selector",
+      "closed": true,
+      "iterations": 2,
+      "first_failure_type_ok": true,
+      "expected_finding_ok": null,
+      "invariants_ok": true
+    },
+    {
+      "id": "occluding-modal",
+      "closed": true,
+      "iterations": 2,
+      "first_failure_type_ok": true,
+      "expected_finding_ok": true,
+      "invariants_ok": true
+    },
+    {
+      "id": "slow-endpoint",
+      "closed": true,
+      "iterations": 2,
+      "first_failure_type_ok": true,
+      "expected_finding_ok": null,
+      "invariants_ok": true
+    },
+    {
+      "id": "stale-session",
+      "closed": true,
+      "iterations": 2,
+      "first_failure_type_ok": false,
+      "expected_finding_ok": true,
+      "invariants_ok": true
+    },
+    {
+      "id": "text-changed",
+      "closed": true,
+      "iterations": 2,
+      "first_failure_type_ok": true,
+      "expected_finding_ok": null,
+      "invariants_ok": true
+    }
+  ],
+  "closure_rate": 0.875,
+  "mean_iterations": 2,
+  "verfix_version": "0.4.1",
+  "date": "2026-07-16T16:34:05.532Z"
+}
