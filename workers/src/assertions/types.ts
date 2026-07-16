@@ -195,6 +195,11 @@ export interface ExecutionResult {
   // they ride at the top level, mirroring page_state above. Additive: present
   // only when at least one analyzer matched.
   findings?: import('./analyzers').Finding[];
+  // Selector-failure enrichment (#65) for runs that fail OUTSIDE assertions
+  // on a selector step: DOM snippet around the expected location + ranked
+  // closest-matching selectors, computed deterministically (no LLM). Rides at
+  // the top level for the same reason as page_state/findings above.
+  selector_context?: import('./selector-suggestions').SelectorContext;
   created_at: string;
   completed_at?: string;
   ai_summary?: AISummary;
