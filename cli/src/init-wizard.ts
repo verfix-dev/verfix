@@ -23,6 +23,7 @@ import { PROVIDER_REGISTRY, getAllProviders, getProviderChoices, detectProviderF
 import type { ProviderId } from './providers/types';
 import { detectLegacyConfig } from './config/migration';
 import { saveAIConfig, updateAIConfigInFile } from './config/loader';
+import { detectFramework } from './framework-detect';
 
 // ─── Port scanning ───────────────────────────────────────────────────────────
 
@@ -332,7 +333,11 @@ export async function runInitWizard(): Promise<void> {
 
 
   // ── Step 1: Detect or ask base URL ──
-  let baseUrl = 'http://localhost:3000';
+  // Framework detection (package.json lookup) only sets the *default* the
+  // user is asked to confirm — a live port beats a guessed convention, and
+  // the user can always type over either.
+  const detectedFramework = detectFramework(cwd);
+  let baseUrl = detectedFramework?.defaultUrl ?? 'http://localhost:3000';
   const detectedPort = await detectAppPort();
   if (detectedPort) {
     const useDetected = await confirm({
@@ -345,6 +350,9 @@ export async function runInitWizard(): Promise<void> {
       baseUrl = await input({ message: 'What URL is your app running on?', default: baseUrl });
     }
   } else {
+    if (detectedFramework) {
+      console.log(chalk.gray(`  ℹ Detected ${detectedFramework.name} — defaulting to ${detectedFramework.defaultUrl}`));
+    }
     baseUrl = await input({ message: 'What URL is your app running on?', default: baseUrl });
   }
 
@@ -448,8 +456,12 @@ export async function runInitWizard(): Promise<void> {
     });
   }
 
+  // Unknown framework ⇒ flows: [] (exactly today's behavior). Detected
+  // framework ⇒ scaffold a flow that passes against its default starter page.
+  const scaffoldedFlows = detectedFramework ? [detectedFramework.scaffoldFlow] : [];
+
   if (writeConfig) {
-    const config: Record<string, unknown> = { baseUrl, mode, flows: [] };
+    const config: Record<string, unknown> = { baseUrl, mode, flows: scaffoldedFlows };
     if (aiProvider && aiModel) {
       config.ai = { provider: aiProvider, model: aiModel };
     }
@@ -458,6 +470,9 @@ export async function runInitWizard(): Promise<void> {
     }
     fs.writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n', 'utf-8');
     console.log(chalk.green(`  ✓ verfix.config.json created`));
+    if (detectedFramework) {
+      console.log(chalk.green(`  ✓ Scaffolded starter flow: ${detectedFramework.scaffoldFlow.id}`));
+    }
   } else {
     // If config exists, update just the ai block without overwriting flows
     if (aiProvider && aiModel && fs.existsSync(configPath)) {
@@ -470,7 +485,7 @@ export async function runInitWizard(): Promise<void> {
 
   // ── Step 8: Write .verfix/INSTRUCTIONS.md (full reference) + AGENTS.md stub ──
   const agentsPath = path.join(cwd, 'AGENTS.md');
-  const flowSummaries: { id: string }[] = [];
+  const flowSummaries: { id: string }[] = writeConfig ? scaffoldedFlows.map((f) => ({ id: f.id })) : [];
   const verfixSection = generateAgentsSection(flowSummaries, mode, baseUrl);
   const verfixStub = generateAgentsStub();
 

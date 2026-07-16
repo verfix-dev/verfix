@@ -15,6 +15,7 @@ import { getRuntimePorts } from './runtime';
 import { PROVIDER_REGISTRY } from './providers/registry';
 import type { ProviderId } from './providers/types';
 import { saveAIConfig } from './config/loader';
+import { detectFramework, type DetectedFramework } from './framework-detect';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -38,6 +39,9 @@ interface ResolvedConfig {
   mode: string;
   skipRuntime: boolean;
   skipAgentFiles: boolean;
+  /** Detected framework (Next.js/Vite/…), or null when none matched. Drives
+   *  the scaffolded starter flow — null means today's behavior (flows: []). */
+  framework: DetectedFramework | null;
 }
 
 // ─── Provider auto-detect from key format ────────────────────────────────────
@@ -93,7 +97,11 @@ function resolveApiKey(opts: NonInteractiveOptions): string | null {
   return null;
 }
 
-export function resolveConfig(opts: NonInteractiveOptions): ResolvedConfig {
+export function resolveConfig(opts: NonInteractiveOptions, cwd: string = process.cwd()): ResolvedConfig {
+  // Framework detection (lookup, not a plugin system) — only fills in
+  // defaults; an explicit --base-url/env var always wins below.
+  const framework = detectFramework(cwd);
+
   // Resolve mode first — strict needs no AI key at all
   const modeValue = opts.mode || process.env.VERFIX_MODE || 'strict';
   const validModes = ['strict', 'assisted', 'exploratory'];
@@ -140,9 +148,11 @@ export function resolveConfig(opts: NonInteractiveOptions): ResolvedConfig {
     || process.env.VERFIX_AI_MODEL
     || getDefaultModel(provider);
 
-  // Resolve base URL
+  // Resolve base URL — explicit flag/env var always wins; detected framework
+  // fills in the default only when neither was supplied.
   const baseUrl = opts.baseUrl
     || process.env.VERFIX_BASE_URL
+    || framework?.defaultUrl
     || 'http://localhost:3000';
 
   return {
@@ -153,6 +163,7 @@ export function resolveConfig(opts: NonInteractiveOptions): ResolvedConfig {
     mode: modeValue,
     skipRuntime: opts.skipRuntime ?? false,
     skipAgentFiles: opts.skipAgentFiles ?? false,
+    framework,
   };
 }
 
@@ -168,7 +179,10 @@ export async function runNonInteractiveInit(opts: NonInteractiveOptions): Promis
   console.log('');
 
   // ── Step 1: Resolve and validate config ──
-  const config = resolveConfig(opts);
+  const config = resolveConfig(opts, cwd);
+  if (config.framework) {
+    console.log(chalk.gray(`  ℹ Detected ${config.framework.name} — defaulting base URL to ${config.framework.defaultUrl} and scaffolding a starter flow (${config.framework.scaffoldFlow.id})`));
+  }
 
   // ── Step 2: Dry run ──
   if (opts.dryRun) {
@@ -181,9 +195,12 @@ export async function runNonInteractiveInit(opts: NonInteractiveOptions): Promis
       verificationMode: config.mode,
       skipRuntime: config.skipRuntime,
       skipAgentFiles: config.skipAgentFiles,
+      framework: config.framework?.name ?? null,
       files: {
         '.verfix/.env': 'AI provider config (provider, key, model)',
-        'verfix.config.json': `{ baseUrl: "${config.baseUrl}", mode: "${config.mode}", flows: [] }`,
+        'verfix.config.json': config.framework
+          ? `{ baseUrl: "${config.baseUrl}", mode: "${config.mode}", flows: [{ id: "${config.framework.scaffoldFlow.id}", ... }] }`
+          : `{ baseUrl: "${config.baseUrl}", mode: "${config.mode}", flows: [] }`,
         'AGENTS.md': 'Verfix agent instructions with setup section',
         ...(!config.skipAgentFiles ? {
           '.cursorrules': 'Cursor agent rules (if platform detected)',
@@ -270,18 +287,24 @@ export async function runNonInteractiveInit(opts: NonInteractiveOptions): Promis
   }
 
   // ── Step 5: Write verfix.config.json ──
+  // Unknown framework ⇒ flows: [] (exactly today's behavior). Detected
+  // framework ⇒ scaffold a flow that passes against its default starter page.
+  const scaffoldedFlows = config.framework ? [config.framework.scaffoldFlow] : [];
   const configPath = path.join(cwd, DEFAULT_CONFIG);
   const configData: Record<string, unknown> = {
     baseUrl: config.baseUrl,
     mode: config.mode,
     ...(hasAI ? { ai: { provider: config.provider, model: config.model } } : {}),
-    flows: [],
+    flows: scaffoldedFlows,
   };
   fs.writeFileSync(configPath, JSON.stringify(configData, null, 2) + '\n', 'utf-8');
   console.log(chalk.green('  ✓ verfix.config.json created'));
+  if (config.framework) {
+    console.log(chalk.green(`  ✓ Scaffolded starter flow: ${config.framework.scaffoldFlow.id}`));
+  }
 
   // ── Step 6: Write .verfix/INSTRUCTIONS.md (full reference) + AGENTS.md stub ──
-  const flowSummaries: { id: string }[] = [];
+  const flowSummaries: { id: string }[] = scaffoldedFlows.map((f) => ({ id: f.id }));
   const verfixSection = generateAgentsSection(flowSummaries, config.mode, config.baseUrl);
 
   writeVerfixInstructions(cwd, verfixSection);
