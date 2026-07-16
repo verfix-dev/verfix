@@ -390,4 +390,46 @@ for (const failure_type of ['console_error', 'network_failure'] as FailureType[]
   console.log('PASS: stale_session outranks prior_console_errors; both present in findings[]');
 }
 
+// ─── inferFailureTypeFromCrash: step-crash → taxonomy classification ─────────
+import { inferFailureTypeFromCrash } from '../../src/assertions/analyzers';
+
+{
+  // Engine-prefixed messages from waitForTarget keep their explicit type.
+  assert.strictEqual(
+    inferFailureTypeFromCrash('selector_not_found: click target {"selector":"#nope"} did not match any element in the DOM within 5000ms'),
+    'selector_not_found',
+  );
+  assert.strictEqual(
+    inferFailureTypeFromCrash('selector_not_visible: click target {"selector":"#hidden"} matches 1 element(s) but none became visible within 5000ms'),
+    'selector_not_visible',
+  );
+
+  // Occluded click (issue #88): the element resolved but the click was blocked
+  // by an overlay. Playwright's call log contains BOTH "waiting for locator"
+  // and the actionability text — the actionability signal must win.
+  const occludedClick = [
+    'locator.click: Timeout 5000ms exceeded.',
+    'Call log:',
+    "  - waiting for locator('#checkout-button')",
+    '  -   locator resolved to <button id="checkout-button">Checkout</button>',
+    '  - attempting click action',
+    '  -   waiting for element to be visible, enabled and stable',
+    '  -   element is visible, enabled and stable',
+    '  -   <div class="modal-backdrop">…</div> intercepts pointer events',
+    '  - retrying click action',
+  ].join('\n');
+  assert.strictEqual(inferFailureTypeFromCrash(occludedClick), 'selector_not_visible');
+
+  // Older-engine raw locator wait with no resolution: still a selector miss.
+  assert.strictEqual(
+    inferFailureTypeFromCrash("Timeout 5000ms exceeded.\nCall log:\n  - waiting for locator('#gone')"),
+    'selector_not_found',
+  );
+
+  // Non-locator waits stay timeouts; everything else stays generic.
+  assert.strictEqual(inferFailureTypeFromCrash('page.waitForURL: Timeout 5000ms exceeded waiting for navigation'), 'timeout');
+  assert.strictEqual(inferFailureTypeFromCrash('boom'), 'assertion_failed');
+  console.log('PASS: inferFailureTypeFromCrash — occluded clicks classify as selector_not_visible, plain misses as selector_not_found');
+}
+
 console.log('\nAll analyzer tests passed.');

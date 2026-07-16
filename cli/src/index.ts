@@ -2373,6 +2373,14 @@ function buildFailures(result: any): Array<{ type: string; flow?: string; assert
 function inferFailureTypeFromError(error: string): string {
   if (error.startsWith('selector_not_found:')) return 'selector_not_found';
   if (error.startsWith('selector_not_visible:')) return 'selector_not_visible';
+  // Actionability timeout: Playwright's click/fill call log starts with the
+  // same "waiting for locator(...)" line whether or not the locator resolved,
+  // so check for resolution/actionability text first. "locator resolved to"
+  // means the selector matched an element — the click was blocked (overlay
+  // intercepting pointer events, unstable, off-viewport), not unmatched.
+  if (/intercepts pointer events|locator resolved to|element is not stable|element is outside of the viewport/i.test(error)) {
+    return 'selector_not_visible';
+  }
   // Older engine versions surface a step's locator wait as a raw Playwright
   // timeout — still a selector miss, not a timing problem.
   if (/waiting for locator\(/i.test(error)) return 'selector_not_found';
@@ -2399,7 +2407,7 @@ function renderFixHint(type: string): string {
     case 'selector_not_found':
       return 'Selector did not match any element. Fix the selector in verfix.config.json to match the app source (verfix probe -s "<css>" dry-runs a selector against the last run\'s DOM in ~1s) — do not edit app source to satisfy it.';
     case 'selector_not_visible':
-      return 'Selector matches an element that never became visible. Check conditional rendering/CSS state, or add a wait_for_selector step for the state that reveals it.';
+      return 'Selector matches an element that never became visible or clickable — hidden by CSS/conditional rendering, or covered by an overlay. The selector is correct; wait for or dismiss the blocking state instead of rewriting it.';
     case 'timeout':
       return 'Operation timed out. Increase timeout or wait for network/DOM to settle before retrying.';
     default:
