@@ -11,7 +11,6 @@ Run deterministic browser flows, assert UI state, and get structured failure rep
 [![npm downloads](https://img.shields.io/npm/dm/verfix.svg?style=flat-square)](https://www.npmjs.com/package/verfix)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg?style=flat-square)](./LICENSE.md)
 [![Docker Image](https://img.shields.io/badge/docker-verfix--server-blue?style=flat-square&logo=docker)](https://github.com/verfix-dev/verfix/packages)
-[![Docker Slim](https://img.shields.io/badge/docker-verfix--server--slim-green?style=flat-square&logo=docker)](https://github.com/verfix-dev/verfix/packages)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat-square)](./CONTRIBUTING.md)
 
 [Website](https://verfix.dev) · [Docs](https://verfix.dev/docs) · [npm Package](https://www.npmjs.com/package/verfix) · [Report a Bug](https://github.com/verfix-dev/verfix/issues/new?template=bug_report.md) · [Request a Feature](https://github.com/verfix-dev/verfix/issues/new?template=feature_request.md)
@@ -20,20 +19,52 @@ Run deterministic browser flows, assert UI state, and get structured failure rep
 
 ---
 
-## The Problem
+**Your coding agent says "fixed." Verfix checks.**
 
-AI coding agents can generate entire application flows in seconds — but **verifying that those flows actually work in a browser remains a human bottleneck.**
+AI coding agents verify their work by vibes — typecheck clean, tests green, "done!" — while the login button sits behind a modal they never saw. Verfix closes the loop: deterministic browser flows, typed failures, and structured JSON your agent can act on, all local.
 
-Developers still manually open browsers, click through flows, and debug regressions. AI agents lack the deterministic infrastructure to confidently verify browser behavior and catch regressions before they ship.
+```jsonc
+// npx verfix run --flow login --output json
+{
+  "passed": false,
+  "failures": [{
+    "type": "selector_not_found",          // one of 8 stable, documented types
+    "selector": "#submit-btn",
+    "fix_hint": "The selector '#submit-btn' matched nothing. Nearest interactive element: button[data-testid=\"login-submit\"] — update the flow selector or restore the element."
+  }],
+  "trace_path": ".verfix/runs/a1b2c3.zip", // full Playwright trace — verfix show
+  "timeline_url": null
+}
+```
 
-## The Solution
+The agent reads the JSON, fixes, re-runs. The loop terminates on verified browser state — not on the agent's optimism. [Read more →](https://verfix.dev/blog/loop-engineering-missing-half)
 
-**Verfix** is a browser execution runtime designed specifically for coding agents. It gives agents a local, observable verification environment where they can:
+## Does it actually close the loop?
 
-- Execute structured browser flows deterministically
-- Assert UI state with typed, stable contracts
-- Consume structured JSON results and failure classifications
-- Watch AI self-heal broken selectors in real time
+We measure it. The [loop-closure benchmark](benchmark/): 8 deliberately broken apps, the agent gets **only Verfix's JSON** as its failure signal — no human, no extra hints.
+
+| agent | closure rate | mean iterations |
+|---|---|---|
+| codex | **7/8 (88%)** | 2 |
+| cline | **6/8 (75%)** | 2 |
+| grok | **5/8 (63%)** | 2 |
+| null agent (does nothing) | 0/8 — enforced in CI | — |
+| oracle (known-good fix) | 8/8 — enforced in CI | 2 |
+
+Anti-cheat invariants mean deleting an assertion doesn't count as closing the loop — every failed case above was the agent getting caught fixing things the wrong way. Full per-case breakdown in [`benchmark/results/`](benchmark/results/); run it with your own agent:
+`node benchmark/run.js --agent "<any command that reads JSON on stdin>"`.
+
+## Why not just let the agent drive Playwright itself?
+
+You can — but an improvised check is the agent grading its own homework with a rubric it rewrites every iteration. Verfix inverts it:
+
+|  | agent drives a browser | Verfix |
+|---|---|---|
+| Check between iterations | different every time | byte-identical |
+| Failure output | prose / screenshots to interpret | 8 typed failure codes + `fix_hint` (a [versioned contract](docs/)) |
+| Cost per verification | LLM tokens, every time | zero tokens in strict mode |
+| Agent edits the measuring stick | silent | flagged (source-guard) |
+| Evidence | whatever it mentions | recorded Playwright trace, replay with `verfix show` |
 
 > **Verfix is not a generic AI agent or chatbot wrapper.** It is verification infrastructure. Reliability emerges from structured contracts, not unconstrained intelligence.
 
